@@ -1,6 +1,12 @@
+'use client';
+
 import Image from "next/image";
+import { useState } from "react";
+import PDFViewer from "./components/PDFViewer";
 
 export default function Home() {
+  const [isPDFOpen, setIsPDFOpen] = useState(false);
+
   return (
     <div className="relative flex items-center justify-center min-h-screen overflow-hidden">
       {/* Background image with blur */}
@@ -74,22 +80,27 @@ export default function Home() {
 
           {/* CV Button */}
           <div className="group relative flex flex-col items-center">
-            <a
-              href="/Roshan_Kern_CV.pdf"
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              onClick={() => setIsPDFOpen(true)}
               className="w-16 h-16 bg-white/10 backdrop-blur-sm hover:bg-white/20 rounded-full flex items-center justify-center transition-all duration-200 border border-white/20 hover:border-white/40"
             >
               <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
-            </a>
+            </button>
             <span className="absolute top-20 opacity-0 group-hover:opacity-100 transition-opacity duration-200 text-white text-sm bg-black/60 px-3 py-1 rounded whitespace-nowrap">
               CV
             </span>
           </div>
         </div>
       </main>
+
+      {/* PDF Viewer Modal */}
+      <PDFViewer
+        isOpen={isPDFOpen}
+        onClose={() => setIsPDFOpen(false)}
+        pdfUrl="/Roshan_Kern_CV.pdf"
+      />
     </div>
   );
 }
