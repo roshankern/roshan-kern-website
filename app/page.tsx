@@ -75,7 +75,7 @@ export default function Home() {
           {/* CV Button */}
           <div className="group relative flex flex-col items-center">
             <a
-              href="/cv.pdf"
+              href="/Roshan_Kern_CV.pdf"
               target="_blank"
               rel="noopener noreferrer"
               className="w-16 h-16 bg-white/10 backdrop-blur-sm hover:bg-white/20 rounded-full flex items-center justify-center transition-all duration-200 border border-white/20 hover:border-white/40"
