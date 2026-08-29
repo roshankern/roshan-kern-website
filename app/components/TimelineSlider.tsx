@@ -129,11 +129,15 @@ export default function TimelineSlider({
         </div>
 
         <p className="text-xs text-white/40 mt-4 leading-relaxed">
-          Projections from{" "}
-          <span className="text-white/60">timeline-research.md</span> — ten
-          parallel research passes, one per technology, scoring how the frontier,
-          regulation, and cost curve move each year. Every view above reads from
-          the selected year.
+          Data from{" "}
+          {/* The source markdown is itself a route, so the reader can open the
+              exact scoring rationale behind every year. */}
+          <a
+            href="/writing/pp/timeline-research.md"
+            className="text-white/60 underline decoration-white/25 underline-offset-2 transition-colors hover:text-white hover:decoration-white/60"
+          >
+            timeline-research.md
+          </a>
         </p>
       </div>
     </div>

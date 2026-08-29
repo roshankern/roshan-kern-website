@@ -1,5 +1,6 @@
 import type { MDXComponents } from "mdx/types";
 import MindStateFigure from "./app/components/MindStateFigure";
+import ProfilePlot from "./app/components/ProfilePlot";
 
 /**
  * Every markdown element gets its glass-theme styling here, once, so a post's
@@ -21,7 +22,7 @@ export function useMDXComponents(components: MDXComponents): MDXComponents {
     ),
     h2: ({ children }) => (
       <h2
-        className={`${PROSE} text-2xl sm:text-3xl font-semibold text-white mt-14 mb-4`}
+        className={`${PROSE} text-2xl sm:text-3xl font-semibold text-white mt-2 mb-4`}
       >
         {children}
       </h2>
@@ -113,6 +114,7 @@ export function useMDXComponents(components: MDXComponents): MDXComponents {
 
     // Figures, available in every post without an import.
     MindStateFigure,
+    ProfilePlot,
 
     ...components,
   };

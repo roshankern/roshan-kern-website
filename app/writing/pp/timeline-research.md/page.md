@@ -1,6 +1,6 @@
-# Programmable Mind State — Ten-Year Timeline (2026–2036)
+# Programming Personality Timeline
 
-Forecast data for every technology × dimension in the Programmable Mind State analysis, plus the research and reasoning behind each trajectory. `data.ts` holds the 2026 baseline as argued in the source document; this file adds the ten projected years that follow.
+Forecast data for every technology × dimension in the Programming Personality analysis, plus the research and reasoning behind each trajectory. `data.ts` holds the 2026 baseline as argued in the source document; this file adds the ten projected years that follow.
 
 Researched August 2026. Ten parallel agents, one per technology, each grounding its trajectory against four questions: how the research frontier is moving, how fast milestones are actually landing, where regulation is heading, and what drives the cost curve.
 
