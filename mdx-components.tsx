@@ -1,6 +1,7 @@
 import type { MDXComponents } from "mdx/types";
 import MindStateFigure from "./app/components/MindStateFigure";
 import ProfilePlot from "./app/components/ProfilePlot";
+import ApproachesFigure from "./app/components/ApproachesFigure";
 
 /**
  * Every markdown element gets its glass-theme styling here, once, so a post's
@@ -115,6 +116,7 @@ export function useMDXComponents(components: MDXComponents): MDXComponents {
     // Figures, available in every post without an import.
     MindStateFigure,
     ProfilePlot,
+    ApproachesFigure,
 
     ...components,
   };

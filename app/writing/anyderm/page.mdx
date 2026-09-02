@@ -56,44 +56,24 @@ This is why I had to wait up to 2 months to try a new intervention when only usi
 Systems already exist to get higher skin quality information.
 They trade off time, cost, and accuracy.
 
-<Chart Thing>
+<ApproachesFigure />
 
+Wide-field scanners resolve the whole face in one exposure, but spread their pixels across all of it, so a single follicle is never resolved.
+Robotic scanners get close enough to resolve one, but the ones that exist cost thousands of dollars and live in clinics.
+Smartphone imaging is the only tier you would actually use every week, and it is the tier with nothing holding the camera still.
 
 Nothing currently exists to get high quality, cheap longitudinal data for acne.
 This is the gap that AnyDerm is designed to fill.
 
-
 ## System Overview
 
-What does it take to photograph the same square millimeter of skin two weeks apart?
+### Design
 
+What does it take to photograph the same square millimeter of skin two weeks apart?
 You need the camera in the same place, pointed the same way, at the same distance, lit the same way.
 And you need to know which square millimeter you got.
-
 AnyDerm is a 3D printed robot arm that carries a phone and a small light around a face.
-
-| Part | Choice | Why |
-| --- | --- | --- |
-| Arm | SO-101, 6-DOF, ~$200 in printed parts and servos | Open, documented, cheap enough to be wrong about |
-| Camera | The user's iPhone | Camera, lens, and flash are $3,122 of OpenDerm's $8,500. This is the biggest cost lever in the category |
-| Optics | Achromatic macro lens, ~5 cm standoff, short non-contact shroud | Dermatoscope-like control without touching the face |
-| Light | RGB ring, cross-polarized channel, 405 nm UVA ring | Three modalities off one head |
-| Registration | Robot pose as a prior, refined optically per frame | See below |
-| Output | 3D face surface with a texture map per modality | Scan 30 lands on the same coordinates as scan 1 |
-
-**The arm is not precise, and that is fine.**
-Consumer servos will never hit sub-millimeter repeatability.
-Backlash on the SO-101 is around 0.43 degrees, which is about 1.9 mm of wander at a 25 cm reach.
-But precision does not come from the robot at prices I can afford, and it barely comes from the robot at prices I cannot.
-OpenDerm's $8,500 gantry, built from ballscrews and closed-loop steppers, still misses by a median of 3.5 mm on its encoders alone, and by as much as 14.3 mm.
-They recover from this optically, and so will I.
-
-So the arm has one job, which is to get the target in frame within about a centimeter.
-Everything after that closes in software.
-Each frame is matched against stored reference tiles from previous scans, and the pose is refined from the image itself rather than from where the robot thinks it is.
-The robot provides coverage. The optics provide precision.
-
-**Three modalities off one head.**
+It images in 3 different modailites off one head.
 
 | Mode | How | What it sees |
 | --- | --- | --- |
@@ -101,25 +81,30 @@ The robot provides coverage. The optics provide precision.
 | Cross-polarized | Polarizer on the LEDs, analyzer rotated 90 degrees at the lens | Erythema and inflammation, with the surface glare removed |
 | UVA fluorescence | 405 nm ring | Porphyrins produced by *C. acnes*, as a proxy for follicular activity |
 
-Cross-polarization is the one that matters most.
-Killing the specular reflection is what lets you see redness underneath the surface instead of the shine on top of it.
-Neither OpenDerm nor any other open system attempts the UVA channel, so how much it actually adds is an open question rather than a feature.
+A one minute coarse pass covers the whole face for global metrics and registration.
+Then, high-magnification scanning covers the regions worth following follicle by follicle.
 
-**The scan has to be shorter than the biology it measures.**
-Sebum regenerates and erythema drifts within an hour.
-Imaging an entire face at dermatoscope resolution would take 40 to 50 minutes, by which point the early frames and the late frames are no longer the same face.
-So the scan is split.
-A one minute coarse pass covers the whole face for global metrics and registration, and six fixed high-magnification anchor tiles cover the regions worth following follicle by follicle.
-The whole session is under five minutes, which is the real constraint, because a scan you skip is worth nothing.
+<Sitching figure>
+
+This system is designed to capture the most amount of detail while staying under 5 minutes.
+Don't want to make this to annoying for a user :D
+
+### Part List/BOM
+
+<table of parts with cols for Part, Price, Capability>
+
+<Give total price of hardware and total hardware capability estimate at the one-scan level and manipulation level, etc>
+
+### Data Processing
+
+<What features we can extract, how these are useful, creating inter and intra patient datasets>
+
 
 ## Estimated Performance
 
 Performance estimations are ultimately just that, an estimate.
 I intend to push the system as far as it can go in the steps outlined in Roadmap below.
 But, here is the napkin math for what this system should be able to achieve.
-
-
-## Design
 
 
 ## Roadmap
