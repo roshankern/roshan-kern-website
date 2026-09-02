@@ -12,6 +12,12 @@ export type Post = {
 
 export const POSTS: Post[] = [
   {
+    slug: "anyderm",
+    title: "AnyDerm Whitepaper",
+    date: "2026-09-01",
+    description: "",
+  },
+  {
     slug: "pp",
     title: "Programming Personality",
     date: "2026-08-28",
