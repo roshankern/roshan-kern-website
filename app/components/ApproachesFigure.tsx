@@ -11,8 +11,11 @@
  * purpose-built consumer device in it.
  */
 
-/** One head, reused across all three drawings so the scale reads consistently. */
-function Head({ x, y }: { x: number; y: number }) {
+/**
+ * One head, reused across all three drawings so the scale reads consistently.
+ * Exported because the other figures in this post draw the same face.
+ */
+export function Head({ x, y }: { x: number; y: number }) {
   return (
     <g transform={`translate(${x},${y})`} stroke="white" strokeOpacity="0.45" fill="none" strokeWidth="1.4">
       <ellipse cx="0" cy="0" rx="30" ry="38" />

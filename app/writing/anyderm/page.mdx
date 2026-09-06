@@ -62,7 +62,7 @@ Wide-field scanners resolve the whole face in one exposure, but spread their pix
 Robotic scanners get close enough to resolve one, but the ones that exist cost thousands of dollars and live in clinics.
 Smartphone imaging is the only tier you would actually use every week, and it is the tier with nothing holding the camera still.
 
-Nothing currently exists to get high quality, cheap longitudinal data for acne.
+Nothing currently exists to get high quality, cheap, longitudinal data for acne.
 This is the gap that AnyDerm is designed to fill.
 
 ## System Overview
@@ -84,34 +84,122 @@ It images in 3 different modailites off one head.
 A one minute coarse pass covers the whole face for global metrics and registration.
 Then, high-magnification scanning covers the regions worth following follicle by follicle.
 
-<Sitching figure>
+<StitchFigure />
 
 This system is designed to capture the most amount of detail while staying under 5 minutes.
 Don't want to make this to annoying for a user :D
 
 ### Part List/BOM
 
-<table of parts with cols for Part, Price, Capability>
-
-<Give total price of hardware and total hardware capability estimate at the one-scan level and manipulation level, etc>
+| Part | Price | Capability |
+| --- | --- | --- |
+| SO-101 follower arm kit — 6 STS3215 servos, driver board, wiring | $175 | Six degrees of freedom over a roughly 40 cm envelope, enough to reach every station on a face from a chin rest |
+| Printed structure, phone cradle, and shroud — 350–700 g PLA+ | $20 | Rigid links, plus a short matte shroud that sits near the face without touching it and cuts most of the room light |
+| Achromatic close-up lens | $45 | Holds focus at a 5 cm standoff on the main camera, instead of relying on the ultrawide's macro mode |
+| High-CRI white LED ring and constant-current driver | $30 | RGB channel bright enough to overpower ambient light across a centimeter-scale patch |
+| 405 nm UVA LED ring | $15 | Porphyrin fluorescence, the weakest signal on the head and the one that needs the shroud most |
+| Linear polarizing film, illumination side and analyzer | $35 | The cross-polarized channel |
+| Head fixture — chin rest and forehead bar | $10 | Repeatable head pose, which is the second largest error term in the whole system |
+| ArUco target and white reference patch on cardstock | $5 | Geometric and photometric ground truth in every single frame |
+| 12 V supply, cabling, fasteners | $20 | — |
+| iPhone | $0 | Sensor, optics, storage, and all of the onboard compute |
 
 ### Data Processing
 
-<What features we can extract, how these are useful, creating inter and intra patient datasets>
+We can extract the following dermatology features from each scan.
 
+| Feature | Extracted from | Why it matters for acne |
+| --- | --- | --- |
+| Inflammatory lesion count and area | RGB and cross-polarized, per map region | The endpoint essentially every acne trial is scored on |
+| Perilesional erythema | Cross-polarized redness in a ring around each lesion | Inflammation moves well before lesion counts do |
+| Follicular plugging fraction | Ostium area and optical density, per follicle | Every follicle becomes its own before-and-after, instead of a number in a total |
+| Porphyrin density | 405 nm fluorescence, per follicle | A proxy for *C. acnes* activity, and the fastest moving signal on the head |
+| Sebum and gloss | Unpolarized minus cross-polarized | Surface oil, without paying for a second polarizer channel |
+| Post-inflammatory marks | Cross-polarized, matched to a lesion that has since resolved | The part of "clear skin" that outlasts the lesion by months |
+
+After multiple scans from an acne patient, we can create an intra-patient and inter-patient dataset to determine how to best help everyone.
+
+### Summary
+**Total Cost:** $355\
+**Manipulation:** six degrees of freedom, a ~40 cm reach envelope, and a 5 cm working distance, with about 0.43° of backlash in the joints.\
+**Imaging:** three imaging modalities, a whole-face coarse pass at around 100 µm per pixel in about a minute, and targeted high-magnification tiles at 5–8 µm per pixel.
 
 ## Estimated Performance
 
 Performance estimations are ultimately just that, an estimate.
-I intend to push the system as far as it can go in the steps outlined in Roadmap below.
+I intend to push the system as far as it can go.
 But, here is the napkin math for what this system should be able to achieve.
 
+Inflammatory lesions typically present with 30-80 leisons over the course of a clinical trial.
+This means we need to observe ~28 lesions changing to be "significant", which takes months.
+
+With thousands of follicles observed, we can measure a significant change with only 1-5% of these follicles changing.
+Because follicles also develop faster than lesions, our total measurement time goes to weeks.
+
+How fast we can measure changes is still limited by biology though.
+
+| Signal | Channel | Moves in |
+| --- | --- | --- |
+| Porphyrin fluorescence | 405 nm | 3–7 days |
+| Perilesional erythema | Cross-polarized | 1–2 weeks |
+| Follicular plugging fraction | High-magnification RGB and cross-pol | ~3 weeks |
+| Inflammatory lesion count | RGB | 8–12 weeks |
+| Texture and scarring | High-magnification, all channels | 24+ weeks |
+
+A realistic estimate for how fast we can notice skin health changing is 3 weeks.
+Note that for many acne treatments, skin can actually get worse before it gets better which will further delay signifcant results.
 
 ## Roadmap
+
+0. 
+
+1. RGB 3D scan of a finger. Phone mounted on the arm, scripted sweep around a fixture-held finger, frames reconstructed into a 3D surface. Every hard part of the full system is here in miniature — mount rigidity, sweep path, close standoff, tile-to-surface registration — on a target that holds still and isn't attached to my face.
+
+2. RGB 3D scan of a face. Same pipeline, harder surface: curvature, occlusion around the nose and eyes, the arm's reach envelope, and a subject that moves and blinks. Adds the head fixture and the under-5-minute scan budget.
+
+3. Cross-polarized and UV illumination, back on the finger. Build the optical head — RGB ring with fixed cross-polarization, UVA ring, shroud. Return to the easy target, because new illumination breaks registration in new ways: killing specular highlights changes which features the matcher can see at all.
+
+4. All lighting on the face. Everything together — multimodal sweep, every channel registered to one canonical face surface. This is V1.
+
+5. Longitudinal collection. Weekly scans from the same fixture. The output stops being an image and starts being a time series.
 
 
 ## Risks
 
+**Autofocus wrecks the scale.**
+This is the one that worries me most.
+OpenDerm's own documentation states that autofocus changes magnification about 1% per frame at macro distance, because focus position *is* effective focal length, and their operator checklist locks manual focus and turns image stabilization off.
+A phone does neither by default.
+1% of scale error is larger than most of the effects in the table above, so if iOS focus lock does not genuinely freeze the lens element, every area measurement is fiction.
+The reference patch in frame gives a per-frame scale check, which turns this from silent corruption into a rejected frame.
+Sensor-shift stabilization is the harder half — it cannot be disabled through the public API for stills, and it moves the principal point between frames.
+If both prove unfixable, a fixed-focus dedicated camera comes back onto the bill of materials and takes the cost argument with it.
+
+**Skin moves.**
+Deformation sits at the top of the error budget and there is no fix for it, only mitigation.
+Expression, hydration, time of day, and what side you slept on all shift a follicle relative to its neighbors without anything biological happening.
+Local registration rather than global, and measuring in each scan's own unwarped frame, keeps this from turning into fake change — but it puts a floor under *f*, and I do not know where that floor is.
+
+**Motion blur at the high-magnification tier.**
+At 5 µm per pixel, 200 µm of movement during an exposure is 40 pixels of smear and the follicle is gone.
+Sweeping continuously is fine for the coarse pass and probably not fine here.
+Stop-and-shoot fixes it and costs scan time, and scan time is the compliance constraint that the whole protocol is built around.
+
+**The UVA channel may not survive daylight.**
+Porphyrin fluorescence is the weakest signal on the head, and going non-contact gives up the exact thing dermatoscopes touch skin for.
+The shroud has to be small enough to clear a nose and still block a room.
+If it cannot be both, the fastest-moving signal in the whole system only works in a dark room, which is a real constraint on a device meant to live on a desk.
+
+**The registration might not close.**
+Nobody has published a repeatability statistic for this class of system — not OpenDerm, not Lumeria, not anyone.
+The approach I am building on has never been independently validated, and I would be starting from a pose estimate five to ten times worse than the gantry that has not validated it.
+The narrow field of view makes it harder: at 110 mm standoff an 8° field already makes depth and rotation nearly degenerate, and I have not computed what my field is at 50 mm.
+
+**The biology might not cooperate.**
+The three-week claim rests on follicular plugging leading visible inflammation reliably, and optics cannot see a closed microcomedone through scattering.
+What I would actually measure is a composite proxy — ostium area, optical density, perifollicular erythema, porphyrin signal — not the plug itself.
+If that proxy does not track the thing it stands in for, the timeline collapses back to conventional lesion counting and the speed argument goes with it.
+This is the risk I can do the least about from the engineering side, and the one most worth checking early.
 
 ## Conclusion
 
