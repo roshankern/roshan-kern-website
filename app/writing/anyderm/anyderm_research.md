@@ -687,6 +687,200 @@ for §9's "oncologic surveillance is a trap."
 | Hardware licence file matching the CERN-OHL-P claim | Not found in repo |
 
 
+### 8.3 DermLite DL1 + iPhone 17 1x — DL1 scale derivation
+
+Researched 2026-09-06. This is the receipt for the acne-progression figure: a **4.5 mm**
+crop of skin at a stated **~5 µm/px** and a live scale bar computed from the camera.
+5 µm/px remains the honest resolving limit for the *instrument*, whatever the viewer
+zooms to. The `OPTICS` block in `lesion.ts` points here. Everything in this subsection
+is **[WEB]** unless tagged otherwise.
+
+**What the figure is, after revision (2026-09-06).** An animation, not a chart. One
+inflammatory lesion on a patch of cheek skin, rendered in RGB as a DermLite DL1 on an
+iPhone 17 would see it, running its 21-day course. The reader can scrub the day, play
+and pause, orbit around the lesion and zoom in and out (no pan), and a scale bar in the
+corner recomputes as they do. Framing is tight: the lesion at its peak fills roughly
+70% of the width, with about 30% of the frame as surrounding skin, and zoom-out is
+capped so the instrument's dark field edge never enters the frame. Nothing on the
+figure comments on diagnosis: no metric curves, no noise floor, no stage labels, no
+resolution readout. Those belong in the article's tables, not on the animation.
+
+#### What DermLite publishes for the DL1
+
+Fetched [dermlite.com/products/dl1](https://dermlite.com/products/dl1) — the
+`/products/dermlite-dl1` slug I had in my notes now returns 404. The page says, verbatim:
+**"full-size 15 mm lens that's optimized for mobile devices"**, "high-powered LED
+lighting", "Cross-polarized and non-polarized modes", **"Glass faceplate with 10 mm
+scale"**, "Recharges from any Mac or PC, or via your Apple charger", "Clips to your shirt
+or your iPhone", **$525.00**. That is the entire optical spec.
+
+> **Correction to my prior note.** The page does **not** say "10× magnification". I
+> pulled the full page text and searched it for `10x`, `10×` and `magnif` — nothing.
+> The "10×" in my notes, and in the `lesion.ts` doc comment, is the dermoscopy
+> convention from §4 (**[CGPT §9]**), not a DermLite claim. The
+> [DL1 basic page](https://dermlite.com/products/dermlite-dl1-basic-smartphone-skin-magnifier)
+> is thinner still: "polarized spacer and glass faceplate", "universal adapter that's
+> compatible with virtually any smartphone or tablet", **$474.00**, nothing optical at all.
+
+Corroboration from the reseller pages that would load. The Directions for Use hosted at
+[dermatoscopes.com](https://dermatoscopes.com/pages/dermlite-dl1-directions-for-use) add
+"three-element lens", "four bright white LEDs", "10mm reticle", "3.7V 200 mAh
+lithium-ion battery", "Up to 1 hour of continuous operation". The
+[dermatoscopes.com product page](https://dermatoscopes.com/products/dermlite-dl1) adds
+"Only weighs 1.9 ounces (54 grams)" and that it works "with or without skin contact".
+[Praxisdienst](https://www.praxisdienst.com/en/Diagnostics/Specialised+Diagnostics/Dermatoscopes/DermLite+DL1.html)
+lists "15 mm objective", "4 white LEDS", "Li-ion battery: 3.7 V, 180mAh", "Glass
+frontplate with scale, 10 mm crosshairs", €399.16 net. (200 vs 180 mAh — the two
+resellers disagree; irrelevant here, but symptomatic of how loosely this device is
+specified.) The DL1 basic manual on ManualsLib returned 403, and DermLite's own
+"Compare our Dermatoscopes" page returned an access-denied stub, so I could not check
+whether the comparison table carries a field-of-view column.
+
+**Not stated on any page I could reach: field of view, working distance, magnification,
+px/mm, or which phone camera the optic is designed for.** This is the Lumeria finding
+from §8.1 again, for the same structural reason: a clip-on sits in front of whichever
+phone lens the customer owns, so the manufacturer cannot honestly print a px/mm. The
+10 mm faceplate scale is the tell — DermLite ships a ruler *in the image* precisely
+because the scale is otherwise undefined.
+
+#### What Apple publishes for the iPhone 17 1x
+
+[Apple's iPhone 17 tech specs](https://www.apple.com/iphone-17/specs/), verbatim:
+**"48MP Fusion Main: 26 mm, ƒ/1.6 aperture, sensor-shift optical image stabilization,
+100% Focus Pixels"** and "support for super-high-resolution photos (24MP and 48MP)". No
+sensor size, no pixel pitch, no pixel dimensions.
+
+The readout widths come from elsewhere. Apple's own support-community thread on why
+square photos are only 4284 px
+([discussions.apple.com/thread/255983085](https://discussions.apple.com/thread/255983085))
+gives an iPhone 16 Pro as **5712 × 4284** in standard 24 MP mode and **8064 × 6048** in
+48 MP mode. [iDownloadBlog's 48 MP tutorial](https://www.idownloadblog.com/2023/10/09/iphone-camera-48mp-heiff-jpeg-pro-default-format-tutorial/)
+gives all three tiers — **3024 × 4032 (12 MP), 4284 × 5712 (24 MP), 6048 × 8064
+(48 MP)** — for every 48 MP-sensor iPhone from the 14 Pro onward. These are the standard
+Quad-Bayer tiers (full readout, then 2× and 4× area bins) and the iPhone 17 keeps the
+48 MP Fusion main camera, so I am **assuming the same three widths carry over**. I have
+not read a 17's EXIF myself; verify row added to §12.
+
+Pixel pitch is third-party only. [GSMArena's iPhone 17 spec sheet](https://www.gsmarena.com/apple_iphone_17-14050.php)
+lists the main camera as **"48 MP, f/1.6, 26mm (wide), 1/1.56", 1.0µm, dual pixel PDAF,
+sensor-shift OIS"**. [DPReview on the 17 Pro](https://www.dpreview.com/articles/0737448510/iphone-17-pro-cameras-what-s-new-what-s-unchanged/)
+gives the Pro's main sensor as "48MP sensor Type 1/1.28 (71.5mm²)" with no pitch.
+Cross-check: 8064 px × 1.0 µm = 8.1 mm wide, 10.1 mm diagonal, which *is* a 1/1.56-type
+sensor, so GSMArena's line is at least self-consistent. For the Pro,
+71.5 mm² ÷ (8064 × 6048) gives **~1.21 µm** per photosite — so the ~1.22 µm /
+2.44 µm-binned figure floating around my notes is the **Pro's** pitch, not the base 17's.
+Neither number is on an Apple page; both are verify-later.
+
+> Sensor pitch does not enter the skin-scale derivation at all — only readout width and
+> field do. I keep it because the *binned* pitch (2.0 µm on the base 17, 2.44 µm on the
+> Pro, at 12 MP) is what sets per-pixel SNR in the chroma channels, which is the §4
+> Quad-Bayer-chroma caveat in another guise.
+
+#### The derivation
+
+Assumption, stated once: **the DL1's 15 mm optic fills the long side of the 1x frame
+with ~15 mm of skin.** DermLite does not say this. It is the "15 mm lens with a 10 mm
+scale on the faceplate" reading — the field cannot be wider than the optic, and a 10 mm
+scale would be pointless if the field were much narrower than 10 mm. If the 15 mm instead
+spans the *short* side, or the tube vignettes inside the frame, every number below gets
+coarser by up to 4/3. (§4's "roughly a 32 mm field of view" for a DermLite-class scope is
+**[CGPT]** and cannot be the DL1 — it has a 15 mm lens. It may describe the larger DL4 /
+DL5 family; I have not checked those pages.)
+
+| Readout | Width (px) | px/mm over 15 mm | µm per sensor pixel |
+| --- | --- | --- | --- |
+| 12 MP | 4032 | **269** | **3.7** |
+| 24 MP | 5712 | 381 | 2.6 |
+| 48 MP | 8064 | 538 | 1.9 |
+| 12 MP, 15 mm on the *short* side | 3024 | 202 | 5.0 |
+
+Then the honesty step. Those are **pixel pitches projected onto skin, not optical
+resolution.** Between the sensor and the skin sit: a three-element clip-on optic with no
+published MTF; the phone's own 26 mm ƒ/1.6 lens working far outside its design
+conjugate; autofocus and sensor-shift IS that OpenDerm measured shifting magnification
+by ~1 %/frame at macro (§8.2), which iOS focus-lock may or may not freeze (§12);
+Quad-Bayer demosaicing that resolves luma better than chroma (§4); and the 12 MP tier's
+2×2 bin, which is what the camera hands you unless you ask for 24/48 MP. Nyquist on a
+3.7 µm pitch is a 7.4 µm line pair *at best*, and a clip-on-plus-phone stack sits well
+below its Nyquist. The useful number is coarser than the pitch by roughly a factor of
+two — which lands on the **5–8 µm/px** targeted-dermoscopy tier already in §4. So:
+**5 µm/px is the figure's "resolving limit"**, the finest scale at which I am willing to
+claim a DL1 on a phone is showing the instrument rather than the model. It is the
+optimistic end of the tier, and it is also, not by accident, the base-iPhone 12 MP
+short-side number rather than a 48 MP fantasy.
+
+Where that sits against the reference points elsewhere in these notes:
+
+| Setup | px/mm | µm/px | Status |
+| --- | --- | --- | --- |
+| DL1 + iPhone 17 1x, 12 MP, 15 mm field | ~269 (pitch) | 3.7 (pitch) → **5** (honest) | assumed field, §8.3 |
+| OpenDerm, EOS R7 + RF 100 mm macro | **78** | **13** | verified, §8.2 |
+| iToBoS | ~50 | **20** | claimed, §7 |
+| iPhone ultrawide macro, no clip-on | 250 nominal | 4 | unverified, §4 |
+
+> The robot is not what buys resolution here. A $525 clip-on on a phone already
+> out-resolves an $8,500 gantry with a Canon on it by 2–3× on paper. What the robot buys
+> is that the 5 µm/px is *at the same square millimetre every time*. That is the §1 thesis
+> restated in optics.
+
+#### The figure's geometry
+
+Stated so a reviewer can check it without opening the code:
+
+- Home view is a **4.5 × 3.4 mm** crop (4:3, matching the sensor) at **5 µm/px** →
+  a **900 × 675 px** frame.
+- The **1 mm** bar is 200 px — **two ninths** of the frame width.
+- A **3 mm** papule at peak (day 11 in `lesion.ts`) is 600 px — **two thirds of the
+  frame**, leaving about a third as surrounding skin.
+- Follicular ostia at **60–120 µm** are **12–24 px**. A **40 µm** vellus hair (the §4
+  threshold) is **~8 px**. The 150 µm resting ostium the lesion starts from (day 0) is 30 px.
+- At the 1.5 mm zoom floor the same canvas is showing ~1.7 µm per screen pixel —
+  three times past the instrument's limit; past 5 µm/px the viewer is magnifying the
+  model, not the DL1.
+
+The interactive figure computes the scale bar live from the camera (field width in mm
+÷ canvas width in px), not from a lookup, so zoom and tilt stay honest. 5 µm/px remains
+the honest resolving limit for the instrument itself. Zoom bounds are 1.5–7 mm
+across the canvas; the 7 mm ceiling is what keeps the DL1's dark field edge out of
+frame at the 50° tilt limit, and it is still well inside the 10 mm faceplate scale.
+
+#### Lesion arc used by the figure — sizes and timings
+
+Secondary; two searches' worth, so treat as a start.
+
+- **Sizes.** [Merck Manual Professional, Acne Vulgaris](https://www.merckmanuals.com/professional/dermatologic-disorders/acne-and-related-disorders/acne-vulgaris):
+  "Whiteheads (closed comedones) are flesh-colored or whitish palpable lesions **1 to
+  3 mm** in diameter"; "Papules and pustules are erythematous lesions **2 to 5 mm** in
+  diameter. Papules are relatively deep. Pustules are more superficial." The
+  "papule < 5 mm, nodule ≥ 5 mm" cut turned up in a trial-protocol snippet and a
+  [Consultant360 primary-care framework](https://www.consultant360.com/articles/primary-care-framework-classifying-and-managing-acne-vulgaris-focus-inflammatory-and-post)
+  that I did not fetch — **snippet only, unverified**. The figure's closed comedo at
+  **0.5–1 mm** sits *below* Merck's 1–3 mm, deliberately: it is the barely-visible end of
+  the range so the timeline has a subclinical week. The **1–3 mm papule peaking at 3 mm**
+  is inside Merck's 2–5 mm.
+- **Ostia.** [Flament et al. 2015, *Clin Cosmet Investig Dermatol* 8:85 (PMC4337418)](https://pmc.ncbi.nlm.nih.gov/articles/PMC4337418/):
+  pilosebaceous and sweat-duct ostia are "**40–80 μm** and approximately 5–10 μm in
+  diameter, respectively", at "200–300/cm²", and "invisible to the naked eye"; what
+  laymen call pores are counted with a **250 µm** detection threshold at ~10–90/cm² on
+  cheeks. The figure's 60–120 µm ostia are at the large end of Flament's follicular range
+  and short of a "pore"; the 150 µm lesion follicle is a sebaceous follicle, the larger
+  kind. Flament's 40–80 is itself cited to two references I have not read.
+- **Timing.** [Do et al. 2008, *J Am Acad Dermatol* 58:603, PMID 18249468](https://pubmed.ncbi.nlm.nih.gov/18249468/)
+  tracked lesions in **25 untreated subjects** photographed **every 2 weeks for
+  12 weeks**: 54 % of inflammatory lesions were preceded by comedones, 28 % by
+  normal-appearing skin, and the limitations state that "lesions could have appeared and
+  resolved within the 2-week intervals" — the paper's own way of saying a single
+  papule's arc fits inside a fortnight. The tighter figures in search snippets (~13 days
+  from onset of inflammation to resolution; papules lasting 3–10 days) trace to a JID
+  abstract that returned 403 and to skincare-brand pages — **unverified, do not cite**.
+  The figure's day 6 → day 17 papule-to-flat course (~11 days) is consistent with all of
+  it, and is a plausible instance, not a measurement — which is the article's point.
+
+> Do et al. is also the best argument I have for the biological-latency limiter in §6:
+> a fortnightly cadence *loses whole lesions*. Nobody has a per-lesion daily time series
+> at 5 µm/px. That is the dataset.
+
+
 ---
 
 ## 9. Commercial and regulatory framing
@@ -774,3 +968,7 @@ fastest way to lose the reader.
 | OpenDerm camera+lens+flash share of BOM | $3,122.75 of $8,500 | 8.2 |
 | 365 nm vs 405 nm porphyrin excitation | Soret band ~405; Lumeria ships 365. **Decision unresolved** | 8.1 |
 | Published ICC anywhere in open robotic skin imaging | **Zero.** Nobody has one | 8.1, 8.2 |
+| **DL1 field of view / working distance** | Not published anywhere reachable. Derivation assumes 15 mm across the long side; §4's "~32 mm" **[CGPT]** cannot be the DL1. Measure on a physical unit (faceplate scale in frame), or ask DermLite support, +1-949-481-6384 | 4, 8.3 |
+| **Does the DL1 fill the 1x frame, or vignette?** | Unknown. Decides whether 15 mm spans the long side (3.7 µm/px), the short side (5.0), or less. One photo of the 10 mm scale answers it | 8.3 |
+| **iPhone 17 1x pixel pitch and readout widths** | GSMArena: 1.0 µm, 1/1.56" (base 17); ~1.21 µm inferred from DPReview's 71.5 mm² (17 Pro). 4032/5712/8064 widths assumed from 15/16-series files. Read EXIF from a 17 | 8.3 |
+| ~~DL1 "10× magnification"~~ | **CORRECTED** not on DermLite's page; dermoscopy convention only | 8.3 |
