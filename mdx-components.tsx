@@ -3,7 +3,8 @@ import MindStateFigure from "./app/components/MindStateFigure";
 import ProfilePlot from "./app/components/ProfilePlot";
 import ApproachesFigure from "./app/components/ApproachesFigure";
 import StitchFigure from "./app/components/StitchFigure";
-import AcneProgression from "./app/components/AcneProgression";
+import FableAcneProgression from "./app/components/fable-skin/FableAcneProgression";
+import RobotScanFigure from "./app/components/robot-scan/RobotScanFigure";
 
 /**
  * Every markdown element gets its glass-theme styling here, once, so a post's
@@ -120,7 +121,8 @@ export function useMDXComponents(components: MDXComponents): MDXComponents {
     ProfilePlot,
     ApproachesFigure,
     StitchFigure,
-    AcneProgression,
+    FableAcneProgression,
+    RobotScanFigure,
 
     ...components,
   };
