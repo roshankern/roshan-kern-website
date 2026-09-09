@@ -1,36 +1,9 @@
-import { ARM, type ArmJoints } from "./contracts";
+import { ARM, type ArmJoints, type ScanSample } from "./contracts";
 import { scanSampleAt } from "./scanPath";
-import { solveArm } from "./rig";
+import { solveArm } from "./kinematics";
 
-/**
- * The arm's motion, precomputed once as a joint-space trajectory rather than
- * solved fresh every frame.
- *
- * This used to carry a lot more machinery than it does now, and the reason is
- * worth recording. The old solver returned FOUR closed-form poses per sample
- * and this file had to walk the loop twice choosing, at each step, whichever
- * of the four sat nearest the pose before it — otherwise the winner changed
- * mid-sweep and the arm snapped through half a turn. rig.ts now returns one
- * pose, from one roll branch and one elbow branch, and gives away a few
- * degrees of aim rather than changing configuration. So the continuity search,
- * and the whole-trajectory turn-shifting that unwrapping used to make
- * necessary, are gone. What is left is the smoothing and the pacing, which a
- * per-frame solve still cannot do:
- *
- *   1. solve every sample, and record which ones the arm could actually hold;
- *   2. unwrap each joint so a wrap never reads as a jump — a formality now
- *      that the solver returns a single continuous branch, kept as a backstop;
- *   3. bridge any unreachable runs by interpolating across them, so the arm
- *      passes through the gap on its way rather than lurching at its edge;
- *   4. smooth the whole loop, which rounds off the corners the path takes at
- *      sharp features;
- *   5. resample at constant joint-space speed, so the phone moves at one
- *      steady rate all the way round instead of racing the tight bits.
- *
- * The cost is that the lens no longer sits at exactly its working distance
- * every instant — smoothing pulls it a few millimetres off. That is invisible.
- * A wrist snapping through ninety degrees is not.
- */
+/** Precompute the complete loop: solve, bridge unreachable spans, smooth,
+ * resample to constant joint-space speed, and clamp interpolated servo limits. */
 
 /** Samples around the loop. Enough that smoothing has something to work with. */
 const SAMPLES = 720;
@@ -170,9 +143,9 @@ function clampToLimits(table: Record<Key, Float64Array>): number {
   return worst;
 }
 
-let cached: Table | null = null;
+const cached = new Map<number, Table>();
 
-function build(): Table {
+function build(forwardOffset: number, sampler = scanSampleAt, smoothing = SMOOTH_PASSES): Table {
   const raw: Record<Key, Float64Array> = {
     pan: new Float64Array(SAMPLES),
     lift: new Float64Array(SAMPLES),
@@ -188,7 +161,10 @@ function build(): Table {
   // and the start of the loop already agrees with its end.
   let reached = 0;
   for (let i = 0; i < SAMPLES; i++) {
-    const pick = solveArm(scanSampleAt(i / SAMPLES));
+    const source = sampler(i / SAMPLES);
+    const sample = { skin: { ...source.skin }, normal: { ...source.normal } };
+    sample.skin.z += forwardOffset;
+    const pick = solveArm(sample);
     raw.pan[i] = pick.pan;
     raw.lift[i] = pick.lift;
     raw.elbow[i] = pick.elbow;
@@ -208,7 +184,7 @@ function build(): Table {
       raw[k][i] = unwrap(raw[k][i], raw[k][prev]);
     }
     bridgeGaps(raw[k], good);
-    for (let pass = 0; pass < SMOOTH_PASSES; pass++) smoothPass(raw[k]);
+    for (let pass = 0; pass < smoothing; pass++) smoothPass(raw[k]);
   }
 
   resampleByArcLength(raw);
@@ -223,9 +199,9 @@ function build(): Table {
   return { ...raw, reachedFraction: reached / SAMPLES };
 }
 
-function table(): Table {
-  if (cached === null) cached = build();
-  return cached;
+function table(forwardOffset = 0): Table {
+  if (!cached.has(forwardOffset)) cached.set(forwardOffset, build(forwardOffset));
+  return cached.get(forwardOffset)!;
 }
 
 /** Catmull-Rom through four samples of one joint. */
@@ -251,19 +227,30 @@ function spline(v: Float64Array, i: number, u: number): number {
  * and safe to display. Whether the underlying solve was exact is the table's
  * business, and reachedFraction() reports it.
  */
-export function jointsAt(t: number): ArmJoints {
-  const tb = table();
+export function jointsAt(t: number, forwardOffset = 0): ArmJoints {
+  return interpolate(table(forwardOffset), t);
+}
+
+function interpolate(tb: Table, t: number): ArmJoints {
   const phase = (t - Math.floor(t)) * SAMPLES;
   const i = Math.floor(phase);
   const u = phase - i;
+  // Cubic interpolation can overshoot an in-limit table near a servo stop.
+  const joint = (key: Key) => Math.max(LIMITS[key][0], Math.min(LIMITS[key][1], spline(tb[key], i, u)));
   return {
-    pan: spline(tb.pan, i, u),
-    lift: spline(tb.lift, i, u),
-    elbow: spline(tb.elbow, i, u),
-    flex: spline(tb.flex, i, u),
-    roll: spline(tb.roll, i, u),
+    pan: joint("pan"),
+    lift: joint("lift"),
+    elbow: joint("elbow"),
+    flex: joint("flex"),
+    roll: joint("roll"),
     reachable: true,
   };
+}
+
+/** Build once from an actual measured surface; all frame reads are interpolation. */
+export function precomputeTrajectory(sampler: (t: number) => ScanSample, forwardOffset = 0) {
+  const tb = build(forwardOffset, sampler, 32);
+  return { at: (t: number) => interpolate(tb, t), reachedFraction: tb.reachedFraction };
 }
 
 /** How much of the loop the solver reached exactly, for the verification script. */

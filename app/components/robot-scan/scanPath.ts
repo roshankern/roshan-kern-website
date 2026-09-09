@@ -1,26 +1,7 @@
 import { HEAD, type ScanSample, type Vec3 } from "./contracts";
 
-/**
- * The coarse pass: where the phone goes, and which way it points.
- *
- * The phone does **not** track the sculpted face. It tracks a smooth oval
- * fitted around it — an ellipsoid a few millimetres proud of the skin
- * everywhere, sized so its front clears the tip of the nose.
- *
- * Following the real surface is what a real scanner would do, and it looked
- * wrong here. The sculpted head carries a brow, a nose and lips, and its
- * normal turns hard across each of them, so an arm asked to stay square to
- * the skin whips through those features and unwinds afterwards. Worse, the
- * poses it demands fall outside the arm's workspace often enough that the
- * motion tears. A convex oval has none of that: its normal turns slowly and
- * evenly everywhere, so the arm glides.
- *
- * The cost is that the lens is no longer exactly its working distance off
- * every point — it is right over the nose and a few millimetres further out
- * over the eye sockets and the cheeks. At this scale that is invisible, and
- * the smooth sweep it buys is the difference between the figure reading as a
- * machine and reading as a glitch.
- */
+/** Serpentine raster template and loading fallback. faceTrajectory replaces
+ * this oval's depth with measurements from the loaded face before solving. */
 
 /**
  * The tracked oval: semi-axes, and where its centre sits relative to

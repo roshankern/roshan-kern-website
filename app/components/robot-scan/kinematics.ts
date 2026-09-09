@@ -1,3 +1,4 @@
+// Planar SO-101 inverse and forward kinematics; carrier yaw is applied separately.
 import {
   ARM,
   MOUNT,
@@ -7,108 +8,8 @@ import {
   type Vec3,
 } from "./contracts";
 
-/**
- * Inverse kinematics for the five-joint chain in the ARM comment, plus an
- * independent forward pass to check it against.
- *
- * ------------------------------------------------------------------ history
- *
- * The original solver aimed the camera exactly down the surface normal. It was
- * exact — round-trip error 1e-12 — and it produced an unusable animation. With
- * the camera mounted across the wrist-roll axis, the roll servo had to chase
- * the aim as the arm panned across the face, and over one loop the roll it
- * asked for wound through about 350 degrees against 320 degrees of travel. It
- * jammed on the stop and the phone swung away into empty space beside the head.
- *
- * MOUNT.axisTilt is now zero, which is what actually fixes that: the camera
- * looks straight down the last link, so the roll cannot affect the aim at all
- * and has nothing to chase or wind. The aim is the arm's own reaching
- * direction.
- *
- * ------------------------------------------------------------------ the geometry
- *
- * Every joint origin of this arm lies in ONE vertical plane through the base
- * column — that is what pan means. With the camera on the link axis, the camera
- * axis lies in that plane too, and so does the point the camera is looking from.
- * So the aim has two degrees of freedom, not three: it can be anywhere in the
- * pan plane and nowhere out of it.
- *
- * The skin normals are not in that plane. Measured over the loop, they lean out
- * of it by up to 54 degrees at the outer cheek stations. Nothing the arm can do
- * about that, so the question is only what to give away.
- *
- * ------------------------------------------------------------------ what gives
- *
- * Give away SQUARENESS to the surface, and keep the camera pointing at the skin
- * and standing off it by the working distance. That is one line of geometry and
- * it is the whole design:
- *
- *     tracked point  T = skin - MOUNT.standoff * axis
- *
- * rather than the obvious `skin + standoff * normal`. Both put the phone
- * MOUNT.standoff from the skin point. The difference is where it stands: the
- * obvious one pins the phone on the normal ray and then has to point it
- * somewhere it cannot, so the camera ends up looking tens of degrees past the
- * face — which is exactly the phone-in-empty-space the figure was showing. This
- * one slides the phone round to sit on the axis the arm can actually aim, so
- * the camera looks straight AT the skin point from the right distance, and what
- * is lost is only that it views the cheek at a slant instead of square on.
- *
- * A scanner that images a cheek obliquely is a scanner working. A scanner
- * pointing beside the head is a bug, and that is the trade.
- *
- * The aim direction itself is the projection of -normal into the pan plane, so
- * the slant is the smallest one available at each station: square on the
- * midline, worst at the outer cheeks.
- *
- * ------------------------------------------------------------------ the solve
- *
- * One small fixed point, then closed form:
- *
- *   pan    The tracked point has to lie in the pan plane, and where it lies
- *          depends on the aim, which depends on the plane. Circular, so iterate
- *          — but the phone only moves MOUNT.standoff as the aim swings, against
- *          a quarter-metre reach, so the map contracts hard and settles in a
- *          handful of steps rather than dozens.
- *   alpha  The total pitch, lift + elbow + flex, which IS the aim: the link and
- *          the camera axis are the same line now. So alpha is just the in-plane
- *          angle of the projected normal.
- *   W, F   Both lie on the ray back from the skin point along the aim, because
- *          the whole tool hangs on the axis: rollOriginFor puts the wrist-roll
- *          origin MOUNT.lensAlongLink behind the tracked point, and the
- *          wrist-flex pivot is ARM.L3 behind that.
- *   lift,  Ordinary two-link IK in the pan plane, elbow-UP only. Not a
- *   elbow  preference: elbow-down needs the elbow joint positive and its stop is
- *          at +0.293 rad, so it is only legal on a nearly straight arm. One
- *          branch everywhere is also what stops the arm changing configuration
- *          mid-sweep, which is what tore the old solver's motion.
- *   flex   Whatever pitch the first two joints did not supply. It is the
- *          tightest joint on the arm at +/-95 degrees, and where it runs out
- *          the solver walks alpha in from the ideal rather than clamping — see
- *          below, that costs aim and costs neither distance nor configuration.
- *   roll   Zero. It spins the phone about its own camera axis and changes
- *          nothing else, so there is nothing to solve and nothing to wind.
- *
- * This file assumes MOUNT.axisTilt is zero — that the camera axis IS the link.
- * If it is ever set otherwise the camera leans off the link by that angle and
- * this solver does not know, so the tilt shows up one-for-one as extra aim
- * error, and the roll joint would need to be given the job back.
- *
- * Notation throughout, all in world space:
- *   a      = -normal, where the camera would look if the arm could
- *   f      = (-sin pan, 0, -cos pan), the pan plane's horizontal forward
- *   u      = (0, 1, 0)
- *   d      = cos(alpha) f + sin(alpha) u, the last link, the roll axis, AND the
- *            camera axis, all the same line
- *   S      = the shoulder-lift pivot, world (0, ARM.shoulderY, ARM.baseZ)
- *   T      = the tracked point: the phone's centre
- *   W      = the wrist-roll frame origin
- *   F      = the wrist-flex pivot, W - ARM.L3 d
- *
- * Every dimension and every joint limit is read out of ARM and MOUNT at call
- * time. Nothing here caches a millimetre or a radian from contracts.ts, so the
- * contract can be retuned without touching this file.
- */
+/** Planar SO-101 inverse and forward kinematics. The arm positions the carrier;
+ * faceTrajectory adds its independent inward yaw. All lengths are millimetres. */
 
 /** The pan fixed point, in radians. Well inside what the animation can show. */
 const PAN_SETTLED = 1e-12;
@@ -372,26 +273,9 @@ function rotZ(v: Vec3, a: number): Vec3 {
   return { x: v.x * c - v.y * s, y: v.x * s + v.y * c, z: v.z };
 }
 
-/**
- * Forward kinematics: where the tracked point actually ends up, and where the
- * camera actually looks, for a set of joint angles.
- *
- * `lens` is the phone's CENTRE, not the lens glass — the point the bracket holds
- * and the point solveArm positions. The scanning camera is an island in the
- * corner of the phone's back, about 58 mm along the phone's long axis and 8.5 mm
- * along its short one from that centre, so the glass looks at a patch of skin
- * that far to one side. The name is kept because everything downstream reads it,
- * and buildTool puts the shroud and the ring light on the real island rather
- * than on the axis.
- *
- * This walks the scene graph the way three.js would — start in the wrist-roll
- * group's own frame, then repeatedly add the group's offset in its parent and
- * apply the parent's rotation, up to the world. It deliberately shares nothing
- * with solveArm: no pan plane, no alpha, no rollOriginFor. That is the whole
- * point, since the two are only worth anything as a check on each other.
- */
+/** Forward kinematics of the phone centre and neutral carrier axis. */
 export function lensPose(joints: ArmJoints): { lens: Vec3; axis: Vec3; rollOrigin: Vec3 } {
-  // The tool as buildTool leaves it. The holder sits lensFromAxis across the
+  // The tool as buildRig leaves it. The holder sits lensFromAxis across the
   // link and lensAlongLink down it, canted by axisTilt about its OWN origin —
   // which is why the tracked point does not move when the cant changes, and why
   // these two lines are the plain offsets rather than a rotated pair.
@@ -402,7 +286,7 @@ export function lensPose(joints: ArmJoints): { lens: Vec3; axis: Vec3; rollOrigi
   let origin: Vec3 = { x: 0, y: 0, z: 0 };
 
   // The bracket's clocking sits between the tool's own layout and the roll
-  // servo, exactly as buildTool applies it, so it turns first.
+  // servo, exactly as buildRig applies it, so it turns first.
   lens = rotZ(lens, MOUNT.bracketRoll);
   axis = rotZ(axis, MOUNT.bracketRoll);
 
