@@ -13,6 +13,11 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  // Open Graph and Twitter images are declared as site-relative paths (see
+  // app/anyderm/page.tsx), and Next needs an absolute origin to expand them
+  // against. Without this it falls back to http://localhost:3000 at build time
+  // and every share card ships pointing at a machine nobody else can reach.
+  metadataBase: new URL("https://roshankern.com"),
   title: "Roshan Kern",
   description: "Roshan Kern's personal website",
 };
