@@ -10,9 +10,13 @@
 // streams go through meshoptimizer's vertex and index codecs. That comes to
 // about 17 MB, decoded in the browser by the meshopt decoder that ships with
 // three. See app/anyhealth/atlas/scene.tsx for the reader.
+//
+// Before encoding, the penis is lengthened; see
+// scripts/anyhealth-penis.mjs.
 import fs from "node:fs";
 import path from "node:path";
 import { MeshoptEncoder } from "meshoptimizer";
+import { boundsOf, deformPart, isPenis } from "./anyhealth-penis.mjs";
 
 const source = path.resolve(process.argv[2] ?? "../human-atlas", "public/models");
 const target = path.resolve("public/anyhealth/models");
@@ -32,10 +36,14 @@ const chunks = atlas.chunks.map((chunk, ci) => {
 	for (const part of atlas.parts) {
 		if (part.chunk !== ci) continue;
 		const at = (byte) => raw.byteOffset + byte;
-		const positions = new Float32Array(raw.buffer, at(part.positions), part.vertexCount * 3);
-		const normals = new Int16Array(raw.buffer, at(part.normals), part.vertexCount * 3);
-		// Copied, because reorderMesh rewrites the index buffer in place.
+		// Copied, because deformPart edits positions and normals, and reorderMesh rewrites the index buffer in place.
+		const positions = new Float32Array(raw.buffer.slice(at(part.positions), at(part.positions) + part.vertexCount * 12));
+		const normals = new Int16Array(raw.buffer.slice(at(part.normals), at(part.normals) + part.vertexCount * 6));
 		const indices = new Uint32Array(raw.buffer.slice(at(part.indices), at(part.indices) + part.indexCount * 4));
+		if (isPenis(part)) {
+			deformPart(positions, normals);
+			part.bounds = boundsOf(positions);
+		}
 		const [remap, vertexCount] = MeshoptEncoder.reorderMesh(indices, true, true);
 
 		const [lo, hi] = part.bounds;
