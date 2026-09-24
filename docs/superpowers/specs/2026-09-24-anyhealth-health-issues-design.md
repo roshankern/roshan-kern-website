@@ -152,3 +152,33 @@ Class names shared across units: `.timeline-panel`, `.body-stats`, `.issue-panel
 - Camera fly-to on select.
 - Search.
 - Filtering issues by the Systems toggles.
+
+## Changes after review (2026-09-24)
+
+These decisions from review replace the sections above.
+
+- **Timeline:**
+  - The timeline starts at birth.
+  - A reset button sits at the far right.
+  - Issue marks are plain dots, faded after the current date.
+  - Pills, per-issue time windows, and a wall-clock linger were tried and then removed.
+- **Body dots:**
+  - All issue dots show at every date.
+  - Each dot is borderless and coloured by the system of the tissue it sits on.
+  - A dot hides when its system is toggled off.
+  - Dots scale with zoom: 2.5px at the default fit, clamped to 1.5–5px.
+- **Colours:**
+  - System UI colours (legend, dots, ticks) follow a seaborn-style "hls" palette: 15 evenly spaced hues at lightness .6 and saturation .65.
+  - The 3D meshes keep their original anatomical colours (`mesh` in `SYSTEMS`).
+- **Anchors:** croup issues sit on the top of the trachea, and the microlaryngoscopy on the epiglottis. BodyParts3D files airway cartilage under skeletal.
+- **Layout:**
+  - The body, title, stats, timeline and footer hints are all centred between the Systems panel and the issue panel's footprint.
+  - Age, height and weight are one small ink line.
+- **Removed:**
+  - Part selection and its highlight.
+  - Isolate mode.
+  - The anatomy detail sheet and its CSS.
+  - The anatomy explanations.
+  - The agent tools.
+
+  Double-click still flies to the part under the pointer.

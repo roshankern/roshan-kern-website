@@ -1,0 +1,920 @@
+[
+	{
+		"id": "infant-left-exotropia",
+		"date": "2003-07-07",
+		"endDate": "2004-03-22",
+		"title": "Infant left exotropia",
+		"summary": "A slight asymmetry of the corneal light reflex was flagged at his 2-week check, then measured as a mild outward drift (1-2 mm) of the LEFT eye at his 1- and 2-month well-child visits. The pediatrician consulted ophthalmology, who advised watchful waiting; by his 9-month visit the light reflex was symmetric and normal, with no treatment needed.",
+		"category": "vision",
+		"source": "Village Pediatrics"
+	},
+	{
+		"id": "neonatal-acne-cradle-cap",
+		"date": "2003-07-21",
+		"title": "Neonatal acne & cradle cap",
+		"summary": "As a newborn Roshan had transient neonatal acne on the face, noted at his 1-month visit (7/21/03), and cradle cap (seborrheic dermatitis) of the scalp noted at his 2- and 4-month visits; both were managed with reassurance and scalp care.",
+		"category": "skin",
+		"source": "Village Pediatrics"
+	},
+	{
+		"id": "infant-laryngomalacia-2003",
+		"date": "2003-08-18",
+		"title": "Infant laryngomalacia",
+		"summary": "As a ~2-month-old he had mild laryngomalacia — inspiratory stridor with vigorous feeding that eased at rest — a soft, floppy infant larynx that was watched and outgrown. It predates and is distinct from his later recurrent croup.",
+		"category": "respiratory",
+		"source": "Village Pediatrics"
+	},
+	{
+		"id": "infant-croup-neck-xray-2003",
+		"date": "2003-09-08",
+		"title": "First croup — infant neck X-ray",
+		"summary": "At under 3 months old he developed croup with stridor and retractions; a soft-tissue neck X-ray (InVision) showed subglottic airway narrowing with a 'stippling' appearance consistent with croup, and he was treated with dexamethasone. It was the earliest documented episode of what became a recurrent childhood croup pattern.",
+		"category": "respiratory",
+		"source": "Village Pediatrics"
+	},
+	{
+		"id": "childhood-atopic-dyshidrotic-eczema",
+		"date": "2003-10-23",
+		"title": "Eczema (atopic / dyshidrotic)",
+		"summary": "Eczema began in infancy — his allergist's history puts onset at about 1 month, on the chin and ears — and at 4 months he had scaly, nummular patches on his back, thigh and elbow creases. By age 1 his allergist called it severe atopic dermatitis, treated with Protopic/Elidel, topical steroids and wet wraps. It became mild through later childhood; in 2022 his allergist characterized it as dyshidrotic eczema, controlled with fluocinonide. It is part of his atopic triad with asthma and food allergy.",
+		"category": "skin",
+		"source": "Village Pediatrics"
+	},
+	{
+		"id": "peanut-tree-nut-food-allergy",
+		"date": "2003-12-22",
+		"title": "Peanut & tree-nut food allergy",
+		"summary": "IgE-mediated food allergy first detected at 6 months (peanut) and confirmed to tree nuts by RAST in 2004; peanut peaked at class 5 in infancy and remained class IV (21.2 kU/L) as of 2016. Reactions are hives and vomiting; peanut has never been safe to challenge.",
+		"category": "allergy",
+		"source": "Village Pediatrics",
+		"chart": {
+			"title": "Specific IgE — Childhood Allergy Profile (age 6 mo)",
+			"unit": "kU/L",
+			"note": "Total IgE 13 kU/L — normal (ref 0–17). At 6 months only peanut was detectable; egg, milk, wheat and soy were all below detection. His food allergies were acquired, not congenital.",
+			"items": [
+				{
+					"label": "Peanut",
+					"value": 1.2,
+					"display": "1.2",
+					"class": 2
+				},
+				{
+					"label": "Egg white",
+					"value": 0.34,
+					"display": "<0.35",
+					"class": 0
+				},
+				{
+					"label": "Milk",
+					"value": 0.34,
+					"display": "<0.35",
+					"class": 0
+				},
+				{
+					"label": "Wheat",
+					"value": 0.34,
+					"display": "<0.35",
+					"class": 0
+				},
+				{
+					"label": "Soy",
+					"value": 0.34,
+					"display": "<0.35",
+					"class": 0
+				},
+				{
+					"label": "Cat dander",
+					"value": 0.34,
+					"display": "<0.35",
+					"class": 0
+				},
+				{
+					"label": "Dust mite",
+					"value": 0.34,
+					"display": "<0.35",
+					"class": 0
+				}
+			]
+		}
+	},
+	{
+		"id": "recurrent-croup-childhood",
+		"date": "2004-01-15",
+		"endDate": "2016-12-15",
+		"title": "Recurrent childhood croup",
+		"summary": "After his first croup at 2½ months, croup kept coming back through childhood. There were documented episodes in Jan and Aug 2004, June 2006 and Feb 2013, and it settled into about 3 episodes each winter, typically between 10pm and 2am and relieved by cold night air. That persisted well past the age croup usually stops. Episodes were handled at home or in the office with dexamethasone/Orapred bursts and nebulizers. The severe Nov 2016 episode, the first to need racemic epinephrine and a PICU stay, finally prompted an airway workup.",
+		"category": "respiratory",
+		"source": "Village Pediatrics"
+	},
+	{
+		"id": "allergy-workup-tree-nuts-egg-2004",
+		"date": "2004-07-01",
+		"title": "Allergy workup — tree nuts & egg confirmed",
+		"summary": "At about age 1, the allergy clinic at The Children's Hospital found skin-test reactions to brazil nut, cashew, hazelnut (2+), almond and pecan (1+). A CAP-RAST drawn the same day confirmed IgE-mediated allergy to peanut (50.9, class 5), egg (15.7), brazil nut (11.9), cashew (11.7) and almond (4.48), with a markedly elevated total IgE of 524. An open soy challenge the same day was passed (he drank more than 4 oz of soymilk). This established the multi-food allergy and severe eczema picture managed through childhood.",
+		"category": "allergy",
+		"source": "Children's Hospital Colorado",
+		"chart": {
+			"title": "CAP-RAST specific IgE (age ~1)",
+			"unit": "kU/L",
+			"note": "Total IgE 524 IU/mL — HIGH (ref 0–49). In about seven months peanut climbed from 1.2 (class 2) to 50.9 (class 5), and egg plus tree nuts were now strongly positive. Only pecan stayed below detection.",
+			"items": [
+				{
+					"label": "Peanut",
+					"value": 50.9,
+					"display": "50.9",
+					"class": 5
+				},
+				{
+					"label": "Whole egg",
+					"value": 15.7,
+					"display": "15.7",
+					"class": 3
+				},
+				{
+					"label": "Brazil nut",
+					"value": 11.9,
+					"display": "11.9",
+					"class": 3
+				},
+				{
+					"label": "Cashew",
+					"value": 11.7,
+					"display": "11.7",
+					"class": 3
+				},
+				{
+					"label": "Almond",
+					"value": 4.48,
+					"display": "4.48",
+					"class": 3
+				},
+				{
+					"label": "Pecan",
+					"value": 0.34,
+					"display": "<0.35",
+					"class": 0
+				}
+			]
+		}
+	},
+	{
+		"id": "microcytosis-suspected-thalassemia-2004",
+		"date": "2004-07-01",
+		"title": "Infant microcytosis — thalassemia suspected",
+		"summary": "His first CBC, at age 1, already showed tiny, pale red cells: MCV 55.5, MCH 17.8, RDW 17.8, an elevated red-cell count and marked hypochromia. Because his mother has thalassemia, his allergist wrote that 'he likely does as well.' The same pattern was seen again on his 2016 PICU CBC (MCV 57.3, RBC 6.46), almost 20 years before beta-thalassemia minor was formally confirmed in 2024.",
+		"category": "blood",
+		"source": "Children's Hospital Colorado",
+		"labs": [
+			{
+				"name": "RBC",
+				"value": 5.71,
+				"unit": "x10^6/uL",
+				"refText": "3.8-5.4",
+				"flag": "high"
+			},
+			{
+				"name": "Hemoglobin",
+				"value": 10.2,
+				"unit": "g/dL",
+				"refText": "9.5-14.0",
+				"flag": "normal"
+			},
+			{
+				"name": "Hematocrit",
+				"value": 31.7,
+				"unit": "%",
+				"refText": "30-41",
+				"flag": "normal"
+			},
+			{
+				"name": "MCV",
+				"value": 55.5,
+				"unit": "fL",
+				"refText": "70-90",
+				"flag": "low"
+			},
+			{
+				"name": "MCH",
+				"value": 17.8,
+				"unit": "pg",
+				"refText": "27-31",
+				"flag": "low"
+			},
+			{
+				"name": "MCHC",
+				"value": 32.1,
+				"unit": "g/dL",
+				"refText": "32-36",
+				"flag": "normal"
+			},
+			{
+				"name": "RDW",
+				"value": 17.8,
+				"unit": "%",
+				"refText": "11.5-15.0",
+				"flag": "high"
+			}
+		]
+	},
+	{
+		"id": "egg-anaphylaxis-daycare",
+		"date": "2005-05-02",
+		"title": "Egg anaphylaxis at daycare",
+		"summary": "Documented 5/2/05 (just before age 2): he was accidentally fed egg (a waffle) at daycare. He was given an EpiPen Jr, EMS gave a second dose, and he was transported by ambulance. Allergist notes record difficulty breathing, hives and a bluish color to his skin. Egg was then strictly avoided; by 2016 he tolerated baked egg and egg IgE had fallen to class I-II, though egg was never formally cleared by challenge.",
+		"category": "allergy",
+		"source": "Village Pediatrics"
+	},
+	{
+		"id": "left-humerus-fracture-2009",
+		"date": "2009-09-02",
+		"endDate": "2009-10-15",
+		"title": "Left proximal humerus fracture",
+		"summary": "At age 6 he fell off his bike and landed on an outstretched left arm, sustaining a transverse fracture of the proximal third of the left humeral shaft. Treated non-operatively with a hanging arm cast (forearm cuff) and serial X-rays; the cast came off 9/25/2009 and films on 10/15/2009 showed a healing fracture in stable alignment.",
+		"category": "bones",
+		"source": "Children's Hospital Colorado",
+		"figure": "/anyhealth/figures/left-humerus-fracture-2009.jpg"
+	},
+	{
+		"id": "healing-humerus-callus-2009",
+		"date": "2009-09-25",
+		"title": "Healing humerus with new callus",
+		"summary": "Follow-up left humerus films showed a healing transverse proximal fracture with new callus formation and stable angulation, confirming the bone was knitting without needing surgery.",
+		"category": "bones",
+		"source": "Children's Hospital Colorado",
+		"figure": "/anyhealth/figures/healing-humerus-callus-2009.jpg"
+	},
+	{
+		"id": "encopresis-constipation-childhood",
+		"date": "2010-01-19",
+		"endDate": "2012-06-22",
+		"title": "Encopresis / chronic constipation",
+		"summary": "Functional constipation with encopresis (stool withholding and daytime soiling) began around November 2009 and was diagnosed at age 6 in January 2010. He was treated with 45 minutes of counseling, behavior modification, Miralax and fiber. It improved by mid-2010, relapsed when Miralax was stopped in late 2010, and was treated again with a clean-out and a months-long Miralax course. It was still listed as a concern at his 9-year visit (June 2012), and later notes mention only occasional Miralax.",
+		"category": "digestive",
+		"source": "Village Pediatrics"
+	},
+	{
+		"id": "chin-laceration-er-2010",
+		"date": "2010-04-12",
+		"title": "Chin laceration — ER visit",
+		"summary": "At age 6 he cut his chin and was taken to an emergency room (facility not recorded), where the wound was sutured. At a Village Pediatrics follow-up call on 4/12/10 he was doing well, with no pain or fever. The exact ER date and number of sutures are not documented.",
+		"category": "skin",
+		"source": "Village Pediatrics"
+	},
+	{
+		"id": "forehead-laceration-2011",
+		"date": "2011-03-13",
+		"title": "Forehead laceration repair",
+		"summary": "At age 7 he was struck in the forehead by a falling tree branch, opening a mid-forehead laceration. The Children's Hospital Colorado ED irrigated it with ~500 mL saline and closed it with three 5-0 nylon sutures under topical (LET) anesthesia; discharged the same day, sutures out 3/17/11.",
+		"category": "skin",
+		"source": "Children's Hospital Colorado"
+	},
+	{
+		"id": "right-shin-laceration-2014",
+		"date": "2014-01-24",
+		"title": "Right shin laceration — 11 sutures",
+		"summary": "At age 10 he cut his right shin on a playground platform, leaving an 8 cm deep linear laceration with fat exposed. Village Pediatrics closed it in layers under lidocaine, using 4 absorbable 4-0 chromic gut and 7 6-0 prolene sutures (11 in total). It healed well, and the 7 surface stitches were removed a week later on 1/31/14.",
+		"category": "skin",
+		"source": "Village Pediatrics"
+	},
+	{
+		"id": "first-cavity-filling-tooth-3",
+		"date": "2016-06-21",
+		"title": "First recorded filling — tooth #3",
+		"summary": "The first restoration in the surviving dental records: a two-surface (occlusal-lingual) composite filling on tooth #3, the upper right first molar, at Cherry Hills Dental Associates. Earlier childhood fillings at a previous dentist are mentioned in pediatric notes, but those records were not recoverable.",
+		"category": "dental",
+		"source": "Cherry Hills Dental Associates"
+	},
+	{
+		"id": "allergic-rhinitis-oral-allergy-syndrome-2016",
+		"date": "2016-07-11",
+		"title": "Allergic rhinitis & oral allergy syndrome diagnosed",
+		"summary": "At his first visit to the Children's Hospital Colorado allergy clinic (age 13), he was diagnosed with allergic rhinitis (cats, dust, pollens; swollen red nasal turbinates) and oral allergy syndrome: cantaloupe, watermelon, banana, kiwi and avocado made his mouth and ears itch. The melon reaction had first appeared as a +3 cantaloupe skin test in 2009. He was started on nasal washes, Flonase and Zyrtec and was re-issued an EpiPen 0.3 mg with a food-allergy action plan.",
+		"category": "allergy",
+		"source": "Children's Hospital Colorado"
+	},
+	{
+		"id": "sky-ridge-er-airway-2016",
+		"date": "2016-11-02",
+		"title": "ER airway distress (Sky Ridge)",
+		"summary": "Home from school with laryngitis, he suddenly couldn't breathe and home albuterol didn't help. His father took him to a fire station, where paramedics found stridor, wheezing and blue lips and gave IM epinephrine and IV Solu-Medrol. The Sky Ridge pediatric ED diagnosed croup (acute obstructive laryngitis), gave two racemic-epinephrine nebs and IV Unasyn, and sent him by ambulance to the Children's Hospital Colorado PICU.",
+		"category": "respiratory",
+		"source": "Sky Ridge Medical Center"
+	},
+	{
+		"id": "chco-picu-subglottitis-2016",
+		"date": "2016-11-02",
+		"endDate": "2016-11-04",
+		"title": "PICU admission — atypical croup / subglottitis",
+		"summary": "At age 13 he was admitted to the Children's Hospital Colorado PICU with aphonia and stridor from severe upper-airway obstruction (bacterial subglottitis / atypical croup). ENT saw global inflammation and frayed vocal folds; treated with decadron, racemic epinephrine and IV Unasyn/Augmentin and recovered without intubation.",
+		"category": "respiratory",
+		"source": "Children's Hospital Colorado",
+		"figure": "/anyhealth/figures/chco-picu-subglottitis-2016.jpg"
+	},
+	{
+		"id": "microlaryngoscopy-bronchoscopy-2016",
+		"date": "2016-12-15",
+		"title": "Microlaryngoscopy & bronchoscopy",
+		"summary": "Six weeks after the PICU stay he underwent an operative microlaryngoscopy and bronchoscopy to size the airway and rule out an underlying cause of recurrent croup. Findings were reassuring: no subglottic stenosis, no laryngeal cleft, no tracheomalacia, normal mainstem bronchi.",
+		"category": "respiratory",
+		"source": "Children's Hospital Colorado"
+	},
+	{
+		"id": "allergy-ige-panel-2016",
+		"date": "2016-12-21",
+		"title": "Allergy blood panel — mold, cat & pollen sensitization",
+		"summary": "A comprehensive specific-IgE panel after the PICU stay (Children's Allergy) showed his main airborne triggers are molds (Alternaria 25.7 and Cladosporium 19.7, class IV) and cat (11.9, class III), with smaller positives to grass, tree and weed pollens, dog, dust mite and cockroach. Peanut was still class IV (21.2), and all tree nuts were class I-III. Egg had fallen to class I-II (0.57-0.74), low enough to plan an egg challenge. Total IgE was 489.",
+		"category": "allergy",
+		"source": "Children's Hospital Colorado",
+		"chart": {
+			"title": "Specific IgE — Children's Allergy panel (age 13)",
+			"unit": "kU/L",
+			"note": "Total IgE 489 kU/L — HIGH (ref 0–87). Airborne triggers led by molds and cat; peanut still class IV; egg down to class I–II.",
+			"items": [
+				{
+					"label": "Alternaria (mold)",
+					"value": 25.7,
+					"display": "25.7",
+					"class": 4
+				},
+				{
+					"label": "Peanut",
+					"value": 21.2,
+					"display": "21.2",
+					"class": 4
+				},
+				{
+					"label": "Cladosporium (mold)",
+					"value": 19.7,
+					"display": "19.7",
+					"class": 4
+				},
+				{
+					"label": "Cat dander",
+					"value": 11.9,
+					"display": "11.9",
+					"class": 3
+				},
+				{
+					"label": "Timothy grass",
+					"value": 3.79,
+					"display": "3.79",
+					"class": 3
+				},
+				{
+					"label": "Walnut",
+					"value": 3.74,
+					"display": "3.74",
+					"class": 3
+				},
+				{
+					"label": "Cedar/Juniper",
+					"value": 3.4,
+					"display": "3.40",
+					"class": 2
+				},
+				{
+					"label": "Ragweed",
+					"value": 2.69,
+					"display": "2.69",
+					"class": 2
+				},
+				{
+					"label": "Dog dander",
+					"value": 1.45,
+					"display": "1.45",
+					"class": 2
+				},
+				{
+					"label": "Egg (ovomucoid)",
+					"value": 0.74,
+					"display": "0.74",
+					"class": 2
+				},
+				{
+					"label": "Egg white",
+					"value": 0.57,
+					"display": "0.57",
+					"class": 1
+				}
+			]
+		}
+	},
+	{
+		"id": "asthma-diagnosis-chronic",
+		"date": "2016-12-22",
+		"title": "Asthma — first pulmonology evaluation",
+		"summary": "Wheezing with croup was noted as reactive airway disease from infancy (Jan 2004), but asthma was first formally evaluated at age 13 by Children's Hospital Colorado pulmonology, six weeks after the PICU stay. Spirometry was normal (FEV1 92% of predicted, FeNO 24 ppb), so it was recorded as a 'questionable' mild intermittent asthma and kept on Flovent with albuterol as needed. Spirometry confirmed obstructive asthma in 2022, and UH Cleveland pulmonology classified it as mild-persistent, Th2-predominant asthma in 2024.",
+		"category": "respiratory",
+		"source": "Children's Hospital Colorado",
+		"figure": "/anyhealth/figures/asthma-diagnosis-chronic.jpg"
+	},
+	{
+		"id": "verruca-vulgaris-2018",
+		"date": "2018-08-24",
+		"title": "Verruca vulgaris (warts)",
+		"summary": "Common warts (verruca vulgaris) treated with cryosurgery plus topical cantharidin (washed off after ~6 hours) at age 15; noted to recur and require retreatment. A distinct dermatologic issue separate from his later acne and eczema.",
+		"category": "skin",
+		"source": "Village Pediatrics"
+	},
+	{
+		"id": "bilateral-myopia",
+		"date": "2018-12-15",
+		"title": "Bilateral myopia",
+		"summary": "Nearsightedness was first flagged at his 2017 pediatric vision screen (20/25-20/30 uncorrected) and formally coded as myopia, bilateral (H52.13) in December 2018, at age 15. It is corrected with a mild prescription (around -0.75 to -1.25 D in each eye) that has stayed stable through 2025. He wears glasses and Biofinity contact lenses, and his eye health is otherwise normal.",
+		"category": "vision",
+		"source": "Pearle Vision"
+	},
+	{
+		"id": "fillings-teeth-30-31-composite",
+		"date": "2019-06-28",
+		"title": "Fillings teeth #30 & #31",
+		"summary": "Same-day composite fillings on the two lower-right molars: tooth #30 (occlusal) and tooth #31 (buccal) at Cherry Hills Dental Associates.",
+		"category": "dental",
+		"source": "Cherry Hills Dental Associates"
+	},
+	{
+		"id": "covid-19-infection-2020",
+		"date": "2020-08-28",
+		"title": "COVID-19 infection",
+		"summary": "His first SARS-CoV-2 infection came at age 17: a telehealth visit for a productive cough, wheeze and chest tightness led to a PCR test that came back positive. He was managed at home with albuterol and isolated under county orders until 9/4/2020, and recovered without hospitalization. Later charts carry 'History of COVID-19, 08/28/2020.'",
+		"category": "respiratory",
+		"source": "Village Pediatrics"
+	},
+	{
+		"id": "acne-diagnosis-topical-treatment",
+		"date": "2021-08-25",
+		"title": "Comedonal & inflammatory acne diagnosed",
+		"summary": "Facial comedonal and inflammatory acne with scarring and post-inflammatory hyperpigmentation diagnosed at Advanced Dermatology; first treated with topical Epiduo Forte and oral Seysara before escalating to isotretinoin.",
+		"category": "skin",
+		"source": "Advanced Dermatology"
+	},
+	{
+		"id": "isotretinoin-accutane-course",
+		"date": "2022-01-03",
+		"endDate": "2022-06-28",
+		"title": "Isotretinoin (Accutane) course",
+		"summary": "A 5-month oral isotretinoin course (40 mg then 80 mg/day, cumulative ~153 mg/kg) for severe acne with scarring that had failed topicals and antibiotics; tolerated with dryness, nosebleeds and mild joint pain, and stopped on June 28, 2022 with no new lesions.",
+		"category": "skin",
+		"source": "Advanced Dermatology",
+		"figure": "/anyhealth/figures/isotretinoin-accutane-course.jpg"
+	},
+	{
+		"id": "allergic-rhinitis-immunotherapy-eval",
+		"date": "2022-08-01",
+		"title": "Adult allergy re-eval & immunotherapy",
+		"summary": "Adult allergy re-evaluation at Colorado Asthma & Allergy Center for perennial allergic rhinitis, formally diagnosed at Children's Hospital Colorado in 2016. Skin testing showed marked reactivity to nearly all trees, grasses and weeds, cat and dog dander, and every tree nut. Flonase and cetirizine were recommended, the EpiPen 0.3 mg was renewed, and allergy-shot extracts (30 planned doses) were prepared to start over winter break — though a December 2023 note still lists immunotherapy as only being considered.",
+		"category": "allergy",
+		"source": "Colorado Asthma & Allergy Center"
+	},
+	{
+		"id": "spirometry-asthma-confirmed-2022",
+		"date": "2022-08-01",
+		"title": "Spirometry confirms obstructive asthma",
+		"summary": "A pulmonary function test at Colorado Asthma & Allergy Center showed mild airflow obstruction (FEV1/VC below the lower limit of normal) with a significant bronchodilator response (>15% FEV1 improvement) and reduced FEF25-75, objectively confirming asthma.",
+		"category": "respiratory",
+		"source": "Colorado Asthma & Allergy Center",
+		"figure": "/anyhealth/figures/spirometry-asthma-confirmed-2022.jpg"
+	},
+	{
+		"id": "wisdom-teeth-extraction",
+		"date": "2023-12-26",
+		"title": "Wisdom teeth extraction",
+		"summary": "All four third molars (#1, #16, #17, #32) — erupted/malpositioned, with #1 partially impacted — surgically removed under IV sedation by an oral surgeon; consultation was 8/21/2023 and surgery 12/26/2023, without complication.",
+		"category": "dental",
+		"source": "Advanced Oral & Maxillofacial Surgery",
+		"figure": "/anyhealth/figures/wisdom-teeth-extraction.jpg"
+	},
+	{
+		"id": "first-abnormal-cbc-2023",
+		"date": "2023-12-29",
+		"title": "Adult CBC flags microcytosis",
+		"summary": "A routine fasting CBC (LabCorp, ordered by his adult PCP at Willard Family Practice) flagged marked microcytosis (MCV 64), a high RDW of 18.9 and an elevated red-cell count with normal hemoglobin. This finding launched the hematology workup. It was not the first such result: the same microcytic picture (MCV 55.5) had been found at age 1 in 2004 but was never followed up.",
+		"category": "blood",
+		"source": "LabCorp",
+		"labs": [
+			{
+				"name": "RBC",
+				"value": 7.6,
+				"unit": "x10E6/uL",
+				"refText": "4.14-5.80",
+				"flag": "high"
+			},
+			{
+				"name": "Hemoglobin",
+				"value": 13.7,
+				"unit": "g/dL",
+				"refText": "13.0-17.7",
+				"flag": "normal"
+			},
+			{
+				"name": "Hematocrit",
+				"value": 48.5,
+				"unit": "%",
+				"refText": "37.5-51.0",
+				"flag": "normal"
+			},
+			{
+				"name": "MCV",
+				"value": 64,
+				"unit": "fL",
+				"refText": "79-97",
+				"flag": "low"
+			},
+			{
+				"name": "MCH",
+				"value": 18,
+				"unit": "pg",
+				"refText": "26.6-33.0",
+				"flag": "low"
+			},
+			{
+				"name": "MCHC",
+				"value": 28.2,
+				"unit": "g/dL",
+				"refText": "31.5-35.7",
+				"flag": "low"
+			},
+			{
+				"name": "RDW",
+				"value": 18.9,
+				"unit": "%",
+				"refText": "11.6-15.4",
+				"flag": "high"
+			}
+		]
+	},
+	{
+		"id": "hematology-eval-2024",
+		"date": "2024-04-25",
+		"title": "Hematology evaluation of abnormal CBC",
+		"summary": "Seen at UH Seidman Cancer Center hematology for the abnormal CBC. Exam was benign with no splenomegaly; picture judged suspicious for thalassemia trait, and a full workup (thal trait, iron studies, hemolysis, slide review) was ordered.",
+		"category": "blood",
+		"source": "University Hospitals Cleveland"
+	},
+	{
+		"id": "beta-thalassemia-minor-confirmed-2024",
+		"date": "2024-05-20",
+		"title": "Beta-thalassemia minor confirmed",
+		"summary": "A telehealth hematology follow-up confirmed beta-thalassemia minor. Hemoglobin electrophoresis showed a raised HbA2 of 4.9%, which the pathologist read as \"consistent with beta-thalassemia minor.\" Iron stores were normal (ferritin 67), and the smear showed target cells with no schistocytes or spherocytes. It is a benign inherited trait that explains his small, numerous red cells, and no further workup was needed. A mildly raised AST (41) was flagged for his PCP to recheck.",
+		"category": "blood",
+		"source": "University Hospitals Cleveland",
+		"labs": [
+			{
+				"name": "RBC",
+				"value": 7.45,
+				"unit": "x10*6/uL",
+				"refText": "4.50-5.90",
+				"flag": "high"
+			},
+			{
+				"name": "Hemoglobin",
+				"value": 13.6,
+				"unit": "g/dL",
+				"refText": "13.5-17.5",
+				"flag": "normal"
+			},
+			{
+				"name": "Hematocrit",
+				"value": 44,
+				"unit": "%",
+				"refText": "41.0-52.0",
+				"flag": "normal"
+			},
+			{
+				"name": "MCV",
+				"value": 59,
+				"unit": "fL",
+				"refText": "80-100",
+				"flag": "low"
+			},
+			{
+				"name": "MCH",
+				"value": 18.3,
+				"unit": "pg",
+				"refText": "26.0-34.0",
+				"flag": "low"
+			},
+			{
+				"name": "MCHC",
+				"value": 30.9,
+				"unit": "g/dL",
+				"refText": "32.0-36.0",
+				"flag": "low"
+			},
+			{
+				"name": "RDW",
+				"value": 19,
+				"unit": "%",
+				"refText": "11.5-14.5",
+				"flag": "high"
+			},
+			{
+				"name": "Iron",
+				"value": 187,
+				"unit": "ug/dL",
+				"refText": "35-150",
+				"flag": "high"
+			},
+			{
+				"name": "TIBC",
+				"value": 419,
+				"unit": "ug/dL",
+				"refText": "240-445",
+				"flag": "normal"
+			},
+			{
+				"name": "Transferrin saturation",
+				"value": 45,
+				"unit": "%",
+				"refText": "25-45",
+				"flag": "normal"
+			},
+			{
+				"name": "Ferritin",
+				"value": 67,
+				"unit": "ng/mL",
+				"refText": "20-300",
+				"flag": "normal"
+			},
+			{
+				"name": "Hemoglobin A",
+				"value": 93.8,
+				"unit": "%",
+				"refText": "95.8-98.0",
+				"flag": "low"
+			},
+			{
+				"name": "Hemoglobin F",
+				"value": 1.3,
+				"unit": "%",
+				"refText": "0.0-2.0",
+				"flag": "normal"
+			},
+			{
+				"name": "Hemoglobin A2",
+				"value": 4.9,
+				"unit": "%",
+				"refText": "2.0-3.5",
+				"flag": "high"
+			}
+		]
+	},
+	{
+		"id": "city-creek-fillings-30-31",
+		"date": "2024-07-30",
+		"title": "Additional fillings #30 & #31",
+		"summary": "New interproximal decay on the lower-right molars restored while out of town: composite fillings #30 DO and #31 MO at City Creek Dental (Salt Lake City); the lingual surfaces flagged by the referring office were judged unnecessary.",
+		"category": "dental",
+		"source": "City Creek Dental"
+	},
+	{
+		"id": "pulmonary-reeval-2024",
+		"date": "2024-12-05",
+		"title": "Adult pulmonary re-evaluation",
+		"summary": "First adult pulmonology visit (UH Cleveland) after a fall flare of shortness of breath linked to allergic rhinitis and inhaled marijuana. Assessed as mild-persistent Th2 asthma; started as-needed Symbicort (ICS/LABA) with counseling to limit inhaled marijuana.",
+		"category": "respiratory",
+		"source": "University Hospitals Cleveland"
+	},
+	{
+		"id": "scoliosis-upper-thoracic-2025",
+		"date": "2025-07-08",
+		"title": "Scoliosis (upper thoracic)",
+		"summary": "His 2025 adult annual physical recorded upper-thoracic joint pain attributed to scoliosis (spinal curvature) on the review of systems. Pediatric notes had recorded mild spine asymmetry in 2019-2020 with a 'consider x-ray' plan, but his 2021 and 2022 pediatric exams found no significant scoliosis. There is no formal imaging or specialist evaluation on record.",
+		"category": "bones",
+		"source": "Willard Family Practice"
+	},
+	{
+		"id": "silent-reflux-lpr-omeprazole",
+		"date": "2026-01-03",
+		"title": "Silent reflux (LPR) — omeprazole",
+		"summary": "On a Teladoc video visit, a year of worsening sore throat and throat-clearing was put down to suspected silent reflux (laryngopharyngeal reflux), perhaps with allergy postnasal drip as well. He started omeprazole 20 mg daily and was told not to eat or drink alcohol within 3 hours of bed and to raise the head of the bed. He was to see ENT if not better in 2 weeks.",
+		"category": "digestive",
+		"source": "Teladoc Health"
+	},
+	{
+		"id": "walnut-accidental-exposure-2026",
+		"date": "2026-03-01",
+		"title": "Accidental walnut exposure",
+		"summary": "Sometime in March 2026 (exact day not recalled) he ate about half a walnut hidden in a salad. Within about 5 minutes he had mouth and throat itching, slight throat tightness, swelling, trouble swallowing and marked nausea; he took a double dose of Benadryl, induced vomiting, and was fully clear about 30 minutes later with no EpiPen needed.",
+		"category": "allergy",
+		"source": "Self-reported",
+		"selfReported": true
+	},
+	{
+		"id": "function-health-cbc-thalassemia-signature-2026",
+		"date": "2026-06-18",
+		"title": "Thalassemia signature on comprehensive CBC",
+		"summary": "A comprehensive Function Health panel showed the classic beta-thalassemia-minor pattern again: RBC high at 7.19 M/uL, hemoglobin mildly low at 12.8 g/dL, MCV 62.9 fL (small red cells), RDW 18.4% (high), and 1+ microcytosis, anisocytosis and elliptocytes on the smear. Iron studies and standard lipids were normal, so the pattern comes from his inherited trait, not iron deficiency.",
+		"category": "blood",
+		"source": "Function Health",
+		"labs": [
+			{
+				"name": "RBC",
+				"value": 7.19,
+				"unit": "Million/uL",
+				"refText": "4.20-5.80",
+				"flag": "high"
+			},
+			{
+				"name": "Hemoglobin",
+				"value": 12.8,
+				"unit": "g/dL",
+				"refText": "13.2-17.1",
+				"flag": "low"
+			},
+			{
+				"name": "Hematocrit",
+				"value": 45.2,
+				"unit": "%",
+				"refText": "39.4-51.1",
+				"flag": "normal"
+			},
+			{
+				"name": "MCV",
+				"value": 62.9,
+				"unit": "fL",
+				"refText": "81.4-101.7",
+				"flag": "low"
+			},
+			{
+				"name": "MCH",
+				"value": 17.8,
+				"unit": "pg",
+				"refText": "27.0-33.0",
+				"flag": "low"
+			},
+			{
+				"name": "MCHC",
+				"value": 28.3,
+				"unit": "g/dL",
+				"refText": "31.6-35.4",
+				"flag": "low"
+			},
+			{
+				"name": "RDW",
+				"value": 18.4,
+				"unit": "%",
+				"refText": "11.0-15.0",
+				"flag": "high"
+			},
+			{
+				"name": "Iron, Total",
+				"value": 147,
+				"unit": "mcg/dL",
+				"refText": "50-195",
+				"flag": "normal"
+			},
+			{
+				"name": "TIBC",
+				"value": 360,
+				"unit": "mcg/dL",
+				"refText": "250-425",
+				"flag": "normal"
+			},
+			{
+				"name": "Transferrin saturation",
+				"value": 41,
+				"unit": "%",
+				"refText": "20-48",
+				"flag": "normal"
+			},
+			{
+				"name": "Ferritin",
+				"value": 105,
+				"unit": "ng/mL",
+				"refText": "38-380",
+				"flag": "normal"
+			},
+			{
+				"name": "Cholesterol, Total",
+				"value": 158,
+				"unit": "mg/dL",
+				"refText": "<200",
+				"flag": "normal"
+			},
+			{
+				"name": "HDL Cholesterol",
+				"value": 51,
+				"unit": "mg/dL",
+				"refText": ">=40",
+				"flag": "normal"
+			},
+			{
+				"name": "Triglycerides",
+				"value": 75,
+				"unit": "mg/dL",
+				"refText": "<150",
+				"flag": "normal"
+			},
+			{
+				"name": "LDL Cholesterol",
+				"value": 91,
+				"unit": "mg/dL",
+				"refText": "<100",
+				"flag": "normal"
+			}
+		]
+	},
+	{
+		"id": "function-health-out-of-range-2026",
+		"date": "2026-06-18",
+		"title": "Function Health panel — out-of-range findings",
+		"summary": "The same Function Health panel flagged several out-of-range markers besides the thalassemia pattern: vitamin D deficiency (19 ng/mL), an HbA1c of 5.8% (in the prediabetes range and to be rechecked) despite normal fasting glucose (81) and insulin (4.2), and a low omega-3 level (4.6%). It also showed an atherogenic small, dense LDL profile (Pattern B): high LDL particle number (1374), high small and medium LDL, smaller LDL peak size, and few large HDL particles, even though standard total and LDL cholesterol were normal.",
+		"category": "blood",
+		"source": "Function Health",
+		"labs": [
+			{
+				"name": "Vitamin D, 25-OH, Total",
+				"value": 19,
+				"unit": "ng/mL",
+				"refText": "30-100",
+				"flag": "low"
+			},
+			{
+				"name": "Hemoglobin A1c",
+				"value": 5.8,
+				"unit": "%",
+				"refText": "<5.7",
+				"flag": "high"
+			},
+			{
+				"name": "LDL Particle Number",
+				"value": 1374,
+				"unit": "nmol/L",
+				"refText": "<1138",
+				"flag": "high"
+			},
+			{
+				"name": "LDL Peak Size",
+				"value": 216.6,
+				"unit": "Angstrom",
+				"refText": ">222.9",
+				"flag": "low"
+			},
+			{
+				"name": "LDL Pattern",
+				"value": "B",
+				"unit": "",
+				"refText": "Pattern A",
+				"flag": "abnormal"
+			},
+			{
+				"name": "Omega-3 (EPA+DPA+DHA)",
+				"value": 4.6,
+				"unit": "% by wt",
+				"refText": ">5.4",
+				"flag": "low"
+			},
+			{
+				"name": "HDL Large",
+				"value": 6213,
+				"unit": "nmol/L",
+				"refText": ">6729",
+				"flag": "low"
+			},
+			{
+				"name": "LDL Small",
+				"value": 304,
+				"unit": "nmol/L",
+				"refText": "<142",
+				"flag": "high"
+			},
+			{
+				"name": "LDL Medium",
+				"value": 335,
+				"unit": "nmol/L",
+				"refText": "<215",
+				"flag": "high"
+			}
+		]
+	},
+	{
+		"id": "gerd-diagnosis-pantoprazole-famotidine-2026",
+		"date": "2026-08-11",
+		"endDate": "2026-08-28",
+		"title": "GERD diagnosis — pantoprazole + famotidine course",
+		"summary": "A Doctronic telehealth video consult diagnosed gastro-esophageal reflux disease without esophagitis. This came after the January 2026 Teladoc LPR assessment and an earlier 3–4 week omeprazole trial that he said helped only a little. He was prescribed pantoprazole 40 mg each morning and famotidine 40 mg at night, a 15-day course with no refills that he took from 2026-08-14 to 2026-08-28.",
+		"category": "digestive",
+		"source": "Self-reported",
+		"selfReported": true
+	},
+	{
+		"id": "famotidine-nightly-rx-2026",
+		"date": "2026-09-02",
+		"title": "Famotidine 40 mg nightly prescription",
+		"summary": "A new prescription for reflux/LPR: famotidine 40 mg, one tablet at bedtime, filled at CVS in Cambridge, MA with 7 refills through September 2027. He reports taking it as directed since the fill date, and it continues after the Symbicort stop.",
+		"category": "digestive",
+		"source": "Self-reported",
+		"selfReported": true
+	},
+	{
+		"id": "budesonide-formoterol-rx-2026",
+		"date": "2026-09-02",
+		"endDate": "2026-09-15",
+		"title": "Budesonide-formoterol (Symbicort) inhaler",
+		"summary": "A new asthma maintenance prescription: budesonide-formoterol 80/4.5 mcg (generic Symbicort), 2 inhalations twice daily, filled at CVS in Cambridge, MA. He had used no albuterol rescue inhaler since starting it. He stopped on 2026-09-15 after talking with his PCP, who said stopping was fine; his stated reason was a thrush-like white tongue coating that had not been clinically evaluated.",
+		"category": "respiratory",
+		"source": "Self-reported",
+		"selfReported": true
+	}
+]

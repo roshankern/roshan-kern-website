@@ -1,0 +1,175 @@
+[
+	{
+		"date": "2003-06-26",
+		"weightKg": 3.1
+	},
+	{
+		"date": "2003-07-07",
+		"heightCm": 51.4,
+		"weightKg": 3.1
+	},
+	{
+		"date": "2003-07-21",
+		"heightCm": 54.6,
+		"weightKg": 3.6
+	},
+	{
+		"date": "2003-08-18",
+		"heightCm": 58.4,
+		"weightKg": 4.7
+	},
+	{
+		"date": "2003-10-23",
+		"heightCm": 64.8,
+		"weightKg": 6.8
+	},
+	{
+		"date": "2003-12-22",
+		"heightCm": 68.6,
+		"weightKg": 7.7
+	},
+	{
+		"date": "2004-03-22",
+		"heightCm": 74.9,
+		"weightKg": 8.6
+	},
+	{
+		"date": "2004-06-16",
+		"heightCm": 77.5,
+		"weightKg": 9.5
+	},
+	{
+		"date": "2004-12-22",
+		"heightCm": 84.5,
+		"weightKg": 10.6
+	},
+	{
+		"date": "2005-06-22",
+		"heightCm": 89.5,
+		"weightKg": 12
+	},
+	{
+		"date": "2006-06-22",
+		"heightCm": 94.6,
+		"weightKg": 14.3
+	},
+	{
+		"date": "2007-06-21",
+		"heightCm": 101.6,
+		"weightKg": 15
+	},
+	{
+		"date": "2008-06-24",
+		"heightCm": 106.7,
+		"weightKg": 17.2
+	},
+	{
+		"date": "2009-06-22",
+		"heightCm": 115.6
+	},
+	{
+		"date": "2010-07-27",
+		"heightCm": 118.7,
+		"weightKg": 20
+	},
+	{
+		"date": "2011-06-22",
+		"heightCm": 124.5,
+		"weightKg": 21.8
+	},
+	{
+		"date": "2012-06-22",
+		"heightCm": 128.3,
+		"weightKg": 24
+	},
+	{
+		"date": "2013-06-21",
+		"heightCm": 133.3,
+		"weightKg": 25.9
+	},
+	{
+		"date": "2014-06-23",
+		"heightCm": 139.1,
+		"weightKg": 27.7
+	},
+	{
+		"date": "2015-06-24",
+		"heightCm": 144.1,
+		"weightKg": 29.9
+	},
+	{
+		"date": "2016-06-21",
+		"heightCm": 149.2,
+		"weightKg": 33.1
+	},
+	{
+		"date": "2016-11-02",
+		"heightCm": 154.9,
+		"weightKg": 37.3
+	},
+	{
+		"date": "2016-12-21",
+		"heightCm": 153.5,
+		"weightKg": 37.1
+	},
+	{
+		"date": "2017-06-21",
+		"heightCm": 159.4,
+		"weightKg": 40.8
+	},
+	{
+		"date": "2018-06-25",
+		"heightCm": 167.6,
+		"weightKg": 49
+	},
+	{
+		"date": "2019-07-03",
+		"heightCm": 175.3,
+		"weightKg": 53.5
+	},
+	{
+		"date": "2020-06-29",
+		"heightCm": 175.9,
+		"weightKg": 55.3
+	},
+	{
+		"date": "2021-06-22",
+		"heightCm": 177.2,
+		"weightKg": 57.2
+	},
+	{
+		"date": "2022-06-23",
+		"heightCm": 178.4,
+		"weightKg": 68.8
+	},
+	{
+		"date": "2022-08-01",
+		"heightCm": 177.8,
+		"weightKg": 68.2
+	},
+	{
+		"date": "2023-12-28",
+		"heightCm": 177.8,
+		"weightKg": 70.7
+	},
+	{
+		"date": "2024-05-24",
+		"heightCm": 180.3,
+		"weightKg": 73.5
+	},
+	{
+		"date": "2024-12-30",
+		"heightCm": 180.3,
+		"weightKg": 72.8
+	},
+	{
+		"date": "2025-07-08",
+		"heightCm": 180.3,
+		"weightKg": 73.9
+	},
+	{
+		"date": "2026-01-02",
+		"heightCm": 180.3,
+		"weightKg": 72.6
+	}
+]
