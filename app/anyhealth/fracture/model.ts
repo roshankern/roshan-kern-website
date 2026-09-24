@@ -11,8 +11,11 @@ export const FRACTURE_DATE = '2009-09-02';
 export const FRACTURE_ISSUE_ID = 'left-humerus-fracture-2009';
 /** BodyParts3D part name of the broken bone. */
 export const FRACTURE_PART = 'Left humerus';
-/** Break level as a fraction of the humerus length, measured from the proximal (shoulder) end. */
-export const FRACTURE_LEVEL = 0.34;
+/** Break level as a fraction of the humerus length, measured from the proximal (shoulder) end. From the
+ *  2009-09-02 film (public/anyhealth/figures/left-humerus-fracture-2009.jpg): just below the proximal
+ *  metaphysis, at the top of the shaft. The distal shaft sits shifted laterally by ~1/4 of its width, the
+ *  head fragment tilted ~12°, the ends almost touching; the proximal end has a jagged lateral corner. */
+export const FRACTURE_LEVEL = 0.21;
 /** Wall-clock length of the "snap" played when the date crosses the fracture moving forward. */
 export const BREAK_MS = 700;
 
@@ -38,8 +41,9 @@ export interface FractureState {
 	line: number;
 }
 
-/** Maximum radial bulge of the callus over the bone surface, metres. */
-export const CALLUS_BULGE = 0.0055;
+/** Maximum radial bulge of the callus over the bone surface, metres. The day-23 film shows a lumpy,
+ *  cloud-like periosteal cuff on both sides of the break, larger medially, about a shaft width long each way. */
+export const CALLUS_BULGE = 0.007;
 /** Half-length of the callus sleeve along the bone, metres. */
 export const CALLUS_HALF_LENGTH = 0.022;
 
@@ -57,12 +61,13 @@ export function fractureAt(iso: string, fractionalDay?: number): FractureState |
 	// Displaced at the fall; the hanging cast pulls it into alignment over ~3 days; the residual
 	// angulation then remodels away over the year (children straighten small angles fully).
 	const reduce = smooth(0, 3, day), remodel = smooth(45, HEALED_DAY - 20, day);
-	const gap = lerp(lerp(0.0045, 0.0015, reduce), 0, smooth(20, 45, day));
-	const shift = lerp(lerp(0.007, 0.0018, reduce), 0, remodel);
-	const angle = lerp(lerp(0.2, 0.06, reduce), 0, remodel);
+	const gap = lerp(lerp(0.0015, 0.0008, reduce), 0, smooth(20, 45, day));
+	const shift = lerp(lerp(0.0055, 0.0015, reduce), 0, remodel);
+	const angle = lerp(lerp(0.21, 0.07, reduce), 0, remodel);
 	const hematoma = smooth(0, 0.6, day) * (1 - smooth(4, 16, day));
-	const callus = smooth(6, 30, day) * (1 - smooth(60, HEALED_DAY - 10, day));
-	const mineral = smooth(20, 50, day);
+	const callus = smooth(6, 26, day) * (1 - smooth(60, HEALED_DAY - 10, day));
+	// The 9/25 film (day 23) already shows the callus radiographically, so it mineralises early.
+	const mineral = smooth(12, 38, day);
 	const line = 1 - smooth(25, 70, day);
 	const phase: FracturePhase = day < 1 ? 'Fracture' : day < 8 ? 'Hematoma' : day < 23 ? 'Soft callus' : day < 60 ? 'Hard callus' : 'Remodeling';
 	return {day, phase, gap, shift, angle, hematoma, callus, mineral, line};
