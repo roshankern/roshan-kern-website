@@ -39,7 +39,7 @@ Date: 2026-09-24. Status: approved in chat, executing.
 ## UI (`atlas/atlas-app.tsx`, `health/timeline-bar.tsx`, `app/anyhealth/test/page.tsx`)
 
 - `AtlasApp` gains a `fracture?: boolean` prop, and the test page renders `<AtlasApp fracture/>`. The prop passes `date` and `fracture` to the scene.
-- The timeline warp comes from `TIMELINE_DENSITY`. At a 1000 px track, the first three months after the break get about 22% of the track, which is about 2 px per day, so slow dragging shows healing day by day.
+- The timeline warp comes from `TIMELINE_DENSITY`. At a 1000 px track, the first three months after the break get about a third of the track, which is about 2 px per day on a 612 px desktop track, so slow dragging shows healing day by day.
   - Ticks, year labels, handle, dragging, keyboard and play all use the same mapping. Play therefore slows through the fracture.
   - It is off by default.
 - While a fracture state exists, a status line under the body stats reads `Left humerus · Soft callus · day 12`.
