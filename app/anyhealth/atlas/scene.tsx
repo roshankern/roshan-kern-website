@@ -10,13 +10,16 @@ import {SYSTEMS,type Atlas,type SceneState} from './anatomy';
 import IssueDots,{type DotsHandle} from '../health/issue-dots';
 import type {Anchor} from '../health/anchors';
 import type {Issue} from '../health/types';
-interface Props {atlas:Atlas;state:SceneState;onProgress:(n:number)=>void;onError:(s:string)=>void;issues:Issue[];selectedIssue:string|null;onSelectIssue:(id:string|null)=>void}
-export default function AnatomyScene({atlas,state,onProgress,onError,issues,selectedIssue,onSelectIssue}:Props){
+import {createFracture,type FractureHandle} from '../fracture/fracture-scene';
+interface Props {atlas:Atlas;state:SceneState;onProgress:(n:number)=>void;onError:(s:string)=>void;issues:Issue[];selectedIssue:string|null;onSelectIssue:(id:string|null)=>void;date?:string;fracture?:boolean}
+/** `date` + `fracture` (the /anyhealth/test page) draw the 2009 humerus fracture as of the timeline date; off by default. */
+export default function AnatomyScene({atlas,state,onProgress,onError,issues,selectedIssue,onSelectIssue,date,fracture=false}:Props){
  const host=useRef<HTMLDivElement>(null),latest=useRef(state),dots=useRef<DotsHandle|null>(null);
  latest.current=state;
+ const latestDate=useRef({date,fracture});latestDate.current={date,fracture};
  useEffect(()=>{
   const el=host.current!;let disposed=false,frame=0,dirty=true,ready=false;
-  let lastState:SceneState|null=null;
+  let lastState:SceneState|null=null,fx:FractureHandle|null=null,fxTried=false;
   const abort=new AbortController();
   let renderer:T.WebGLRenderer;
   try{renderer=new T.WebGLRenderer({antialias:true,alpha:false,powerPreference:'high-performance'});}catch{onError('This browser could not start the 3D viewer. Please try a browser with WebGL enabled.');return;}
@@ -137,9 +140,10 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
    controls.target.copy(point);camera.lookAt(point);setOffset(w/2-(clientX-rect.left),h/2-(clientY-rect.top));controls.update();dirty=true;
   };
   // Double-click / double-tap: fly to frame the part under the pointer, or back to the default view on empty space.
-  const focusPart=(index:number)=>{
-   const box=bounds[index],center=box.getCenter(new T.Vector3()),size=box.getSize(new T.Vector3()),area=openArea();const {w,h,left,right,top,bottom}=area;
-   const availableWidth=Math.max(150,right-left),availableHeight=Math.max(40,bottom-top),distance=Math.max(controls.minDistance*2,Math.max(size.y*h/availableHeight,size.x*w/availableWidth/camera.aspect,size.z)/(2*Math.tan(T.MathUtils.degToRad(camera.fov/2)))*2.4);
+  const focusPart=(index:number)=>focusBox(bounds[index]);
+  const focusBox=(box:T.Box3,margin=2.4)=>{
+   const center=box.getCenter(new T.Vector3()),size=box.getSize(new T.Vector3()),area=openArea();const {w,h,left,right,top,bottom}=area;
+   const availableWidth=Math.max(150,right-left),availableHeight=Math.max(40,bottom-top),distance=Math.max(controls.minDistance*2,Math.max(size.y*h/availableHeight,size.x*w/availableWidth/camera.aspect,size.z)/(2*Math.tan(T.MathUtils.degToRad(camera.fov/2)))*margin);
    const direction=camera.position.clone().sub(controls.target).normalize();
    flyTo({target:center,position:center.clone().addScaledVector(direction,distance),ox:w/2-(left+right)/2,oy:h/2-(top+bottom)/2});
   };
@@ -169,11 +173,13 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
     atlas.parts.forEach((p,i)=>{data[i*4+3]=visible.has(p.system)?1:0;});
     partTexture.needsUpdate=true;lastState=s;dirty=true;
    }
+   const fd=latestDate.current;if(ready&&fd.fracture&&!fxTried){fxTried=true;fx=createFracture({scene,atlas,pickers,data,partTexture});}
+   if(fx){const r=fx.update(fd.fracture?fd.date??'':'',s.visible.includes('skeletal'),performance.now());if(r.changed||r.animating)dirty=true;if(r.fly)focusBox(fx.box,1.35);}
    controls.update();
    if(dirty){renderer.render(scene,camera);dirty=false;dots.current?.place(projectDot);}else if(dots.current?.stale)dots.current.place(projectDot);
   };fit();animate();
   const contextLost=(e:Event)=>{e.preventDefault();onError('The 3D session was paused by your device. Reload to continue.');};renderer.domElement.addEventListener('webglcontextlost',contextLost);
-  return()=>{disposed=true;abort.abort();cancelAnimationFrame(frame);observer.disconnect();el.removeEventListener('pointerdown',down,{capture:true});el.removeEventListener('wheel',wheel,{capture:true});controls.dispose();geometries.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());scene.traverse(o=>{if(o instanceof T.Mesh&&!geometries.includes(o.geometry)){o.geometry.dispose();const ms=Array.isArray(o.material)?o.material:[o.material];ms.forEach(m=>m.dispose());}});env.dispose();partTexture.dispose();renderer.dispose();renderer.domElement.remove();};
+  return()=>{disposed=true;fx?.dispose();abort.abort();cancelAnimationFrame(frame);observer.disconnect();el.removeEventListener('pointerdown',down,{capture:true});el.removeEventListener('wheel',wheel,{capture:true});controls.dispose();geometries.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());scene.traverse(o=>{if(o instanceof T.Mesh&&!geometries.includes(o.geometry)){o.geometry.dispose();const ms=Array.isArray(o.material)?o.material:[o.material];ms.forEach(m=>m.dispose());}});env.dispose();partTexture.dispose();renderer.dispose();renderer.domElement.remove();};
  },[atlas]);
  return <><div className="scene" ref={host}/><IssueDots issues={issues} selectedIssue={selectedIssue} onSelectIssue={onSelectIssue} handle={dots}/></>;
 }
