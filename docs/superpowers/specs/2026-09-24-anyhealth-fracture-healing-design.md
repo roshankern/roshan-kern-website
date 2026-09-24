@@ -14,11 +14,11 @@ Date: 2026-09-24. Status: approved in chat, executing.
 
 | Days | Phase | What is drawn |
 |---|---|---|
-| 0 | Fracture | Transverse break at 34% of the humerus length from the shoulder. The distal fragment is displaced: 4.5 mm gap, 7 mm shift, 11° angulation. |
+| 0 | Fracture | Transverse break at 21% of the humerus length from the shoulder, just below the metaphysis, as on the injury X-ray. The shaft is shifted laterally 5.5 mm (about a quarter of its width) with 12° angulation and a gap of about 1.5 mm. |
 | 0–3 | | The hanging cast pulls it into a small residual displacement. |
 | 0–16 | Hematoma | A red, translucent clot around the break, peaking over days 1–4. |
-| 6–30 | Soft callus | A translucent blue-white cartilage sleeve grows over the break. |
-| 20–50 | Hard callus | The sleeve turns bone-coloured and the gap closes. The dark fracture line fades by day 70. |
+| 6–26 | Soft callus | A lumpy, cloud-like cuff grows over the break, larger medially, as on the day-23 film. |
+| 12–45 | Hard callus | It mineralises to bone colour and the gap closes. The dark fracture line fades by day 70. |
 | 60–400 | Remodeling | The bulge and the residual angle shrink to zero. At day 400 the original part is shown again. |
 
 `breakKick(ms)` is a wall-clock multiplier on the displacement. It is played once when the date crosses the fracture moving forward, and makes the break look like a snap rather than a jump between two frames.
