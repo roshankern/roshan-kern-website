@@ -115,3 +115,6 @@ h1{display:flex;justify-content:center;align-items:center;gap:12px;font-size:32p
  .body-stats{display:none}.systems-fab{bottom:100px}
  .issue-panel{left:auto;top:12px;bottom:12px;right:max(var(--panel-inset),env(safe-area-inset-right));max-height:none}
 }
+/* /anyhealth/test only: fracture healing status, one line above the body stats (hidden with them in short landscape). */
+.body-stats.fracture-status{bottom:142px;font-size:11px;color:#737d89}
+@media(max-width:767px){.body-stats.fracture-status{bottom:calc(132px + env(safe-area-inset-bottom));font-size:10.5px}}

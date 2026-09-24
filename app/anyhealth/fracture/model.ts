@@ -84,6 +84,6 @@ export function breakKick(ms: number): number {
 /** Timeline density: the track gives these date ranges `k` times their natural width, so a slow
  *  drag across the fracture moves the date about a day at a time. Everything else stays linear. */
 export const TIMELINE_DENSITY: {from: string; to: string; k: number}[] = [
-	{from: '2009-08-26', to: '2009-12-01', k: 26},
-	{from: '2009-12-01', to: '2010-10-06', k: 3},
+	{from: '2009-08-26', to: '2009-12-01', k: 44},
+	{from: '2009-12-01', to: '2010-10-06', k: 3.5},
 ];
