@@ -67,7 +67,7 @@ export function fractureAt(iso: string, fractionalDay?: number): FractureState |
 	const hematoma = smooth(0, 0.6, day) * (1 - smooth(4, 16, day));
 	const callus = smooth(6, 26, day) * (1 - smooth(60, HEALED_DAY - 10, day));
 	// The 9/25 film (day 23) already shows the callus radiographically, so it mineralises early.
-	const mineral = smooth(12, 38, day);
+	const mineral = smooth(8, 30, day);
 	const line = 1 - smooth(25, 70, day);
 	const phase: FracturePhase = day < 1 ? 'Fracture' : day < 8 ? 'Hematoma' : day < 23 ? 'Soft callus' : day < 60 ? 'Hard callus' : 'Remodeling';
 	return {day, phase, gap, shift, angle, hematoma, callus, mineral, line};

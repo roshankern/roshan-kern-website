@@ -18,7 +18,7 @@ export interface FractureHandle {
 }
 interface Options {scene:T.Scene;atlas:Atlas;pickers:(T.Mesh|undefined)[];data:Float32Array;partTexture:T.DataTexture}
 
-const BONE=SYSTEMS.find(s=>s.id==='skeletal')?.mesh??'#e2d9ba',CARTILAGE='#abcddb',WOVEN='#d3c49c';
+const BONE=SYSTEMS.find(s=>s.id==='skeletal')?.mesh??'#e2d9ba',CARTILAGE='#abcddb',WOVEN='#cbb98d';
 /** Mesh refinement around the break: edge length in the break zone and over the rest of the callus. */
 const FINE=.0012,COARSE=.0024,NEAR=.0075,BAND=CALLUS_HALF_LENGTH+.004;
 /** Snap waits for the camera flight so the break is seen happening. */
@@ -120,7 +120,7 @@ export function createFracture({scene,atlas,pickers,data,partTexture}:Options):F
 	const root=new T.Group();root.visible=false;root.name='fracture';scene.add(root);
 	// Fragment surfaces: the skeletal material plus a dark, blood-stained band along the crack, faded by `line`.
 	const uLine={value:1};
-	const withCrack=(m:T.MeshStandardMaterial,strength:number)=>{m.onBeforeCompile=sh=>{(globalThis as any).__sh=sh;sh.uniforms.uLine=uLine;sh.vertexShader='attribute float cutDist; varying float vCut;\n'+sh.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nvCut = cutDist;');sh.fragmentShader='uniform float uLine; varying float vCut;\n'+sh.fragmentShader.replace('#include <color_fragment>',`#include <color_fragment>\nfloat crack = uLine * (1.0 - smoothstep(0.0005, 0.005, vCut));\ncrack *= crack * (3.0 - 2.0 * crack);\ndiffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.045, 0.014, 0.01), crack * ${strength.toFixed(2)});`);};m.customProgramCacheKey=()=>`fracture-crack-${strength}`;return m;};
+	const withCrack=(m:T.MeshStandardMaterial,strength:number)=>{m.onBeforeCompile=sh=>{sh.uniforms.uLine=uLine;sh.vertexShader='attribute float cutDist; varying float vCut;\n'+sh.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nvCut = cutDist;');sh.fragmentShader='uniform float uLine; varying float vCut;\n'+sh.fragmentShader.replace('#include <color_fragment>',`#include <color_fragment>\nfloat crack = uLine * (1.0 - smoothstep(0.0005, 0.005, vCut));\ncrack *= crack * (3.0 - 2.0 * crack);\ndiffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.045, 0.014, 0.01), crack * ${strength.toFixed(2)});`);};m.customProgramCacheKey=()=>`fracture-crack-${strength}`;return m;};
 	const boneMat=withCrack(new T.MeshStandardMaterial({color:BONE,metalness:.08,roughness:.53,side:T.DoubleSide}),.9);disposables.push(boneMat);
 	const fragment=(s:number)=>{
 		const map=new Map<number,number>(),pos:number[]=[],nrm:number[]=[],cut:number[]=[],index:number[]=[];
@@ -129,7 +129,7 @@ export function createFracture({scene,atlas,pickers,data,partTexture}:Options):F
 		const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(pos,3));g.setAttribute('normal',new T.Float32BufferAttribute(nrm,3));g.setAttribute('cutDist',new T.Float32BufferAttribute(cut,1));g.setIndex(index);g.computeBoundingSphere();disposables.push(g);
 		const mesh=new T.Mesh(g,boneMat);mesh.matrixAutoUpdate=false;root.add(mesh);return mesh;
 	};
-	const head=fragment(0),shaft=fragment(1);(globalThis as any).__fx={boneMat,capMat:null,root,uLine};
+	const head=fragment(0),shaft=fragment(1);
 
 	// Caps: the open end of each fragment, as a rough cross-section (cortex ring, then cancellous marrow).
 	const next=new Map<number,number>();
@@ -170,7 +170,7 @@ export function createFracture({scene,atlas,pickers,data,partTexture}:Options):F
 	const R=.012;
 	const lumps=(th:number,d:number)=>{let s=0;for(const k of blobs){const dth=Math.atan2(Math.sin(th-k.th),Math.cos(th-k.th))*R,dd=d-k.d;s+=k.h*Math.exp(-(dth*dth+dd*dd)/(k.r*k.r));}return Math.min(1.3,s);};
 	const envelope=(d:number)=>{const x=clamp01(1-(d/CALLUS_HALF_LENGTH)**2);return x*x;};
-	const bulgeAt=(th:number,d:number)=>{const medial=(1-Math.cos(th))/2,e=envelope(d);return e**.8*(.2+.3*medial)+e**.4*.75*lumps(th,d);};
+	const bulgeAt=(th:number,d:number)=>{const medial=(1-Math.cos(th))/2,e=envelope(d);return e**.8*(.2+.3*medial)+e**.4*.95*lumps(th,d);};
 	// Remodelling first smooths the lumps into a plain spindle, which then shrinks away.
 	const spindleAt=(th:number,d:number)=>{const medial=(1-Math.cos(th))/2;return envelope(d)*(.55+.35*medial);};
 	const cvert=(w:number,r:number)=>{let i=cmap.get(w);if(i===undefined){i=cBase.length/3;cmap.set(w,i);W(w,b);cBase.push(b.x,b.y,b.z);cNrm.push(0,0,0);const {d,th}=polar(b);cBulge.push(bulgeAt(th,d));cSpindle.push(spindleAt(th,d));cWeight.push(smooth(-.0025,.0025,cutS(b)));cCut.push(Math.abs(cutS(b)));}
@@ -200,7 +200,7 @@ export function createFracture({scene,atlas,pickers,data,partTexture}:Options):F
 			fragmentShader:'uniform vec3 uColor; uniform float uOpacity; varying vec3 vN; varying vec3 vV; varying float vPole; void main(){ float f = clamp(dot(normalize(vN), normalize(vV)), 0.0, 1.0); gl_FragColor = vec4(uColor, uOpacity * f * f * (1.0 - smoothstep(0.35, 0.8, abs(vPole)))); \n#include <tonemapping_fragment>\n#include <colorspace_fragment>\n}'});
 		disposables.push(m);const mesh=new T.Mesh(g,m);mesh.renderOrder=1;return mesh;
 	};
-	const hematoma=new T.Group(),clots=[clot(.0175,.026,'#b3262e',7),clot(.0145,.019,'#7e151d',11)];clots.forEach(m=>hematoma.add(m));hematoma.quaternion.setFromUnitVectors(new T.Vector3(0,1,0),u);root.add(hematoma);
+	const hematoma=new T.Group(),clots=[clot(.021,.03,'#b3262e',7),clot(.0175,.022,'#7e151d',11)];clots.forEach(m=>hematoma.add(m));hematoma.quaternion.setFromUnitVectors(new T.Vector3(0,1,0),u);root.add(hematoma);
 
 	// The whole left upper arm, for the camera.
 	const box=new T.Box3(new T.Vector3().fromArray(atlas.parts[part].bounds[0]),new T.Vector3().fromArray(atlas.parts[part].bounds[1])).expandByScalar(.012);

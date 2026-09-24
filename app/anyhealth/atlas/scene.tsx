@@ -173,8 +173,8 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
     atlas.parts.forEach((p,i)=>{data[i*4+3]=visible.has(p.system)?1:0;});
     partTexture.needsUpdate=true;lastState=s;dirty=true;
    }
-   const fd=latestDate.current;if(ready&&fd.fracture&&!fxTried){fxTried=true;console.warn("fxdbg create",fd.date,performance.now());fx=createFracture({scene,atlas,pickers,data,partTexture});}
-   if(fx){const r=fx.update(fd.fracture?fd.date??'':'',s.visible.includes('skeletal'),performance.now());if(r.changed||r.animating)dirty=true;if(r.fly)focusBox(fx.box,1.35);if(r.changed||r.fly)console.warn("fxdbg",fd.date,JSON.stringify(r),JSON.stringify(fx.box));}
+   const fd=latestDate.current;if(ready&&fd.fracture&&!fxTried){fxTried=true;fx=createFracture({scene,atlas,pickers,data,partTexture});}
+   if(fx){const r=fx.update(fd.fracture?fd.date??'':'',s.visible.includes('skeletal'),performance.now());if(r.changed||r.animating)dirty=true;if(r.fly)focusBox(fx.box,1.35);}
    controls.update();
    if(dirty){renderer.render(scene,camera);dirty=false;dots.current?.place(projectDot);}else if(dots.current?.stale)dots.current.place(projectDot);
   };fit();animate();
