@@ -1,21 +1,21 @@
 export type SystemId = 'skeletal'|'muscular'|'arterial'|'venous'|'nervous'|'digestive'|'respiratory'|'urinary'|'reproductive'|'lymphatic'|'endocrine'|'integumentary'|'connective'|'sensory'|'cardiac';
 /** `color` marks a system in the UI (legend, issue dots, timeline): seaborn-style "hls", 15 evenly spaced hues from h=0.01 at lightness .6, saturation .65, each given to the system it suits. `mesh` is the anatomical colour the 3D model is drawn in. */
-export const SYSTEMS: {id:SystemId;name:string;color:string;mesh:string;description:string}[] = [
- {id:'skeletal',name:'Skeleton',color:'#dbc957',mesh:'#e2d9ba',description:'Bones form the supporting framework of the body, protect organs, and provide attachment points for muscles. Their internal tissue also stores minerals and produces blood cells.'},
- {id:'muscular',name:'Muscles',color:'#db9457',mesh:'#a85b50',description:'Skeletal muscles generate movement by pulling on their attachments. Together with tendons, they move joints, stabilize posture, and produce heat.'},
- {id:'cardiac',name:'Heart',color:'#db5f57',mesh:'#b96760',description:'The heart is a muscular pump with four chambers. Its valves direct blood forward through the pulmonary and systemic circuits.'},
- {id:'sensory',name:'Sensory organs',color:'#5f57db',mesh:'#b0c8ce',description:'These structures contribute to special senses, including sight, hearing, and balance. Their specialized tissues detect stimuli and work with the nervous system to convey information.'},
- {id:'arterial',name:'Arteries',color:'#db5784',mesh:'#c05245',description:'The heart drives blood through the circulation. Arteries carry blood away from the heart to supply tissues or, in the pulmonary circuit, to the lungs.'},
- {id:'venous',name:'Veins',color:'#5784db',mesh:'#527c9f',description:'Veins return blood toward the heart. Superficial and deep networks collect blood from the tissues; the pulmonary veins bring oxygenated blood back from the lungs.'},
- {id:'nervous',name:'Nervous system',color:'#b9db57',mesh:'#d8b565',description:'The brain, spinal cord, and peripheral nerves carry and process signals. They support sensation, movement, coordination, and automatic regulation of body functions.'},
- {id:'respiratory',name:'Respiratory',color:'#57b9db',mesh:'#b98991',description:'The airways conduct air to the lungs, where oxygen and carbon dioxide move between air and blood. Breathing depends on pressure changes produced by respiratory muscles.'},
- {id:'digestive',name:'Digestive',color:'#c957db',mesh:'#b8916b',description:'The digestive tract breaks down food, absorbs nutrients and water, and moves waste onward. Accessory organs contribute bile and digestive enzymes.'},
- {id:'urinary',name:'Urinary',color:'#57dbc9',mesh:'#b47961',description:'The kidneys filter blood and regulate fluid, electrolyte, and acid–base balance. Urine travels through the ureters to the bladder and exits through the urethra.'},
- {id:'lymphatic',name:'Lymphatic',color:'#57db5f',mesh:'#879f7c',description:'Lymphatic vessels return excess tissue fluid to the circulation. Lymph nodes and other lymphoid organs support immune surveillance and responses.'},
- {id:'endocrine',name:'Endocrine',color:'#84db57',mesh:'#c5a09a',description:'Endocrine organs release hormones into the blood to coordinate processes such as metabolism, growth, stress responses, and reproduction.'},
- {id:'reproductive',name:'Reproductive',color:'#9457db',mesh:'#bda098',description:'The male reproductive structures represented here contribute to sperm production, maturation, transport, and the production of sex hormones.'},
- {id:'integumentary',name:'Body surface',color:'#db57b9',mesh:'#ba9b7d',description:'The body surface provides an outer anatomical reference. The integumentary system forms a protective barrier and contributes to sensation and temperature regulation.'},
- {id:'connective',name:'Connective tissue',color:'#57db94',mesh:'#aec3bb',description:'Cartilage, ligaments, and other connective tissues support, connect, and separate structures. Their roles include stabilizing joints and distributing mechanical loads.'},
+export const SYSTEMS: {id:SystemId;name:string;color:string;mesh:string}[] = [
+ {id:'skeletal',name:'Skeleton',color:'#dbc957',mesh:'#e2d9ba'},
+ {id:'muscular',name:'Muscles',color:'#db9457',mesh:'#a85b50'},
+ {id:'cardiac',name:'Heart',color:'#db5f57',mesh:'#b96760'},
+ {id:'sensory',name:'Sensory organs',color:'#5f57db',mesh:'#b0c8ce'},
+ {id:'arterial',name:'Arteries',color:'#db5784',mesh:'#c05245'},
+ {id:'venous',name:'Veins',color:'#5784db',mesh:'#527c9f'},
+ {id:'nervous',name:'Nervous system',color:'#b9db57',mesh:'#d8b565'},
+ {id:'respiratory',name:'Respiratory',color:'#57b9db',mesh:'#b98991'},
+ {id:'digestive',name:'Digestive',color:'#c957db',mesh:'#b8916b'},
+ {id:'urinary',name:'Urinary',color:'#57dbc9',mesh:'#b47961'},
+ {id:'lymphatic',name:'Lymphatic',color:'#57db5f',mesh:'#879f7c'},
+ {id:'endocrine',name:'Endocrine',color:'#84db57',mesh:'#c5a09a'},
+ {id:'reproductive',name:'Reproductive',color:'#9457db',mesh:'#bda098'},
+ {id:'integumentary',name:'Body surface',color:'#db57b9',mesh:'#ba9b7d'},
+ {id:'connective',name:'Connective tissue',color:'#57db94',mesh:'#aec3bb'},
 ];
 export interface Part {id:string;name:string;conceptId:string;system:SystemId;chunk:number;vertices:number;vertexBytes:number;indices:number;indexBytes:number;vertexCount:number;indexCount:number;bounds:[number[],number[]]}
 export interface Concept {id:string;name:string;elements:string[]}

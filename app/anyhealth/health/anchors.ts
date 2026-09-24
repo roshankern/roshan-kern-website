@@ -18,7 +18,7 @@ const NOSE: Anchor = {part: 'Right lateral nasal cartilage', system: 'respirator
 const STOMACH: Anchor = {part: 'Stomach', system: 'digestive', hint: [0.05, 1.18, 0.1]};
 const HUMERUS: Anchor = {part: 'Left humerus', system: 'skeletal', hint: [0.21, 1.31, 0.01]};
 
-export const ANCHORS: Record<string, Anchor> = {
+const ANCHORS: Record<string, Anchor> = {
 	// Blood: all on the heart.
 	'microcytosis-suspected-thalassemia-2004': HEART,
 	'first-abnormal-cbc-2023': HEART,
@@ -76,7 +76,7 @@ export const ANCHORS: Record<string, Anchor> = {
 };
 
 /** Fallback for an issue id with no entry above. */
-export const CATEGORY_ANCHOR: Record<Category, Anchor> = {
+const CATEGORY_ANCHOR: Record<Category, Anchor> = {
 	skin: {part: 'Skin', system: 'integumentary', hint: [-0.28, 0.78, 0.1]},
 	vision: {part: 'Right sclera', system: 'sensory', hint: [-0.031, 1.596, 0.07]},
 	dental: {part: 'Right upper first secondary molar tooth', system: 'skeletal'},
@@ -95,6 +95,6 @@ export const anchorKey = (a: Anchor) => a.part + (a.hint ? '@' + a.hint.join(','
 
 /** The dot colour for an issue: the AnyHealth system colour of the tissue its anchor sits on. */
 export function issueColor(issue: Issue): string {
-	const system = anchorFor(issue).system ?? CATEGORY_ANCHOR[issue.category]?.system;
+	const system = anchorFor(issue).system;
 	return SYSTEMS.find(s => s.id === system)?.color ?? '#20242b';
 }
