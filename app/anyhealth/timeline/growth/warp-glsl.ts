@@ -34,22 +34,29 @@ vec3 twInflate(int i, vec3 p, float w, float dBone){
 	return (w * (twS[i].z - twS[i].y) * min(1.0, dBone / max(length(r), 1e-9))) * r;
 }
 `;
-/** GLSL declaring the segment attributes (engine, after `#include <common>`): none under `TW_FIXED_SEG`; the atlas's `vec4 seg` = the 4 segments.bin bytes, not normalized, under `TW_SEG_BYTES`; else a float `vec3 seg` (segA, segB, weightA) and `float segD` (bone distance, metres; a layer without it reads 0: no inflation). */
+/** GLSL declaring the segment attributes (engine, after `#include <common>`): none under `TW_FIXED_SEG`; the atlas's `vec4 seg` = the 4 segments.bin bytes, not normalized, under `TW_SEG_BYTES`; else a float `vec3 seg` (segA, segB, weightA), plus `float segD` (bone distance, metres) only under `TW_SEG_D` (layers created with `segD`; without it twD is 0: no inflation). */
 export const TW_SEG_ATTRS=`#if defined(TW_FIXED_SEG)
 #elif defined(TW_SEG_BYTES)
 attribute vec4 seg;
 #else
 attribute vec3 seg;
+#ifdef TW_SEG_D
 attribute float segD;
+#endif
 #endif`;
-/** GLSL that defines the locals `vec3 twSeg` (segA, segB, weightA 0..1) and `float twD` (bone distance, metres) just before WARP_APPLY, from (in order): the material's `TW_FIXED_SEG` define (custom layers with one segment, no inflation); the atlas's byte `seg` = (segA | segB<<4, round(weightA·255), dBone low, high byte) under `TW_SEG_BYTES`; else the float `seg` and `segD`. */
+/** GLSL that defines the locals `vec3 twSeg` (segA, segB, weightA 0..1) and `float twD` (bone distance, metres) just before WARP_APPLY, from (in order): the material's `TW_FIXED_SEG` define (custom layers with one segment, no inflation); the atlas's byte `seg` = (segA | segB<<4, round(weightA·255), dBone low, high byte) under `TW_SEG_BYTES`; else the float `seg`, and `segD` under `TW_SEG_D` (0 otherwise). */
 export const TW_SEG=`#if defined(TW_FIXED_SEG)
 vec3 twSeg = vec3(float(TW_FIXED_SEG), float(TW_FIXED_SEG), 1.0); float twD = 0.0;
 #elif defined(TW_SEG_BYTES)
 float twHi = floor(seg.x * (1.0 / 16.0));
 vec3 twSeg = vec3(seg.x - 16.0 * twHi, twHi, seg.y * (1.0 / 255.0)); float twD = (seg.z + 256.0 * seg.w) * ${D_UNIT.toExponential(6)};
 #else
-vec3 twSeg = seg; float twD = segD;
+vec3 twSeg = seg;
+#ifdef TW_SEG_D
+float twD = segD;
+#else
+float twD = 0.0;
+#endif
 #endif`;
 /** GLSL that rewrites `transformed` and `objectNormal` (rest space → this date's body), reading the engine's `vec3 twSeg` = (segA, segB, weightA) and `float twD`. */
 export const WARP_APPLY=`

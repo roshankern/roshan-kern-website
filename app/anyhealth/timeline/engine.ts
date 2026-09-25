@@ -121,7 +121,7 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 		},
 		material(m){
 			const mat=new T.MeshStandardMaterial({color:m.color,metalness:.08,roughness:.53,side:T.DoubleSide,transparent:!!m.transparent,opacity:m.opacity??1,depthWrite:m.depthWrite??true});
-			if(m.segment)mat.defines={...mat.defines,TW_FIXED_SEG:SEGMENTS.indexOf(m.segment)};
+			if(m.segment)mat.defines={...mat.defines,TW_FIXED_SEG:SEGMENTS.indexOf(m.segment)};else if(m.segD)mat.defines={...mat.defines,TW_SEG_D:''};
 			patchMaterial(mat,{partFx:false,soft:!!m.soft});layerMaterials.push(mat);return mat;
 		},
 		requestFly(box){pendingFly=warpBox(box);},

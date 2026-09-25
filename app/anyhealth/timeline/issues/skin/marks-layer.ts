@@ -96,7 +96,7 @@ export function marksLayer(spec:MarksSpec,id=''):MarksLayer{
 			const b=buildMarks(surfaceOf(rg),spec.marks);placed=b.placed;
 			const g=new T.BufferGeometry();g.setAttribute('position',new T.BufferAttribute(b.position,3));g.setAttribute('seg',new T.BufferAttribute(b.seg,3));g.setAttribute('segD',new T.BufferAttribute(b.segD,1));
 			colors=new T.BufferAttribute(new Float32Array(b.position.length/3*4),4);g.setAttribute('color',colors);g.setIndex(b.index);g.computeVertexNormals();g.computeBoundingBox();g.computeBoundingSphere();
-			const mat=ctx.material({color:0xffffff,soft:true,transparent:true,depthWrite:true});mat.vertexColors=true;mat.alphaTest=.01;mat.roughness=.75;mat.needsUpdate=true;
+			const mat=ctx.material({color:0xffffff,soft:true,segD:true,transparent:true,depthWrite:true});mat.vertexColors=true;mat.alphaTest=.01;mat.roughness=.75;mat.needsUpdate=true;
 			mesh=new T.Mesh(g,mat);mesh.name=`marks:${id}`;mesh.frustumCulled=false;mesh.renderOrder=2;mesh.visible=false;mesh.matrixAutoUpdate=false;scene=ctx.scene;scene.add(mesh);
 			return true;
 		},

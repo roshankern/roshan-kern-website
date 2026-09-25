@@ -3,7 +3,7 @@
 // headless Chromium (SwiftShader), pushes 64 test points through it as gl.POINTS (one per pixel of an RGBA32F target), reads the warped
 // positions and normals back and compares them with applyFxPoint + warpPoint / warpNormal in node. Not a screenshot check.
 // The atlas variant feeds `seg` as the 4 unnormalized segments.bin bytes (segA | segB<<4, weightA·255, dBone uint16) with `#define TW_SEG_BYTES`, as scene.tsx / engine.segAttribute do.
-// Also compiles two custom-layer variants (no part fx): `#define TW_FIXED_SEG 3` with no seg attribute (checked against warpPoint with segment 3), and a float per-vertex `seg` + `segD`.
+// Also compiles three custom-layer variants (no part fx): `#define TW_FIXED_SEG 3` with no seg attribute (checked against warpPoint with segment 3), a float per-vertex `seg` + `segD` under `#define TW_SEG_D`, and a float `seg` without TW_SEG_D (segD compiled out, checked against dBone 0).
 // Needs playwright-core, kept OUTSIDE the repo (no new dependency): mkdir -p <dir> && cd <dir> && npm i playwright-core, then run with
 // ANYHEALTH_PLAYWRIGHT=<dir>. Chromium: ANYHEALTH_CHROME=<binary>, else the newest cached ~/Library/Caches/ms-playwright/chromium-* build.
 import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {createRequire} from 'node:module';
@@ -67,10 +67,10 @@ function testPoints(){
 }
 
 // ── The shaders, wired as engine.ts patchMaterial wires them (tfxRow copied verbatim from there; twSeg from TW_SEG) ──
-type Kind='atlas'|'fixed'|'float';
+type Kind='atlas'|'fixed'|'float'|'floatNoD';
 /** Atlas parts: partFx + warp with the byte seg attribute (TW_SEG_BYTES). Custom layers: warp only, either `#define TW_FIXED_SEG` with no seg attribute, or a float seg attribute. */
 const vsFor=(kind:Kind)=>{const fx=kind==='atlas';return `#version 300 es
-${kind==='fixed'?`#define TW_FIXED_SEG ${FIXED}\n`:''}${kind==='atlas'?'#define TW_SEG_BYTES\n':''}precision highp float;precision highp int;precision highp sampler2D;
+${kind==='fixed'?`#define TW_FIXED_SEG ${FIXED}\n`:''}${kind==='float'?'#define TW_SEG_D\n':''}${kind==='atlas'?'#define TW_SEG_BYTES\n':''}precision highp float;precision highp int;precision highp sampler2D;
 #define attribute in
 #define varying out
 #define texture2D texture
@@ -150,7 +150,7 @@ async function main(){
 		const p:Vec3=[pos[i*3],pos[i*3+1],pos[i*3+2]],n:Vec3=[nrm[i*3],nrm[i*3+1],nrm[i*3+2]],m:Vec3=[0,0,0],q:Vec3=[0,0,0];
 		const [a,b,w]=kind==='fixed'?[FIXED,FIXED,1]:[seg[i*3],seg[i*3+1],seg[i*3+2]];
 		if(kind!=='atlas'){q[0]=p[0];q[1]=p[1];q[2]=p[2];m[0]=n[0];m[1]=n[1];m[2]=n[2];}else applyFxPoint(FX[part[i]],p,n,q,m);
-		warpPoint(ws,q,a,b,w,!!soft,q,kind==='fixed'?0:dist[i]);warpNormal(ws,m,a,b,w,m);P.push(...q);M.push(...m);
+		warpPoint(ws,q,a,b,w,!!soft,q,kind==='atlas'||kind==='float'?dist[i]:0);warpNormal(ws,m,a,b,w,m);P.push(...q);M.push(...m);
 	}return [P,M];}).flat();
 
 	const browser=await pw.chromium.launch({executablePath:exe,headless:true,args:['--use-angle=swiftshader','--enable-unsafe-swiftshader','--ignore-gpu-blocklist']});
@@ -160,7 +160,7 @@ async function main(){
 		let failed=false;
 		// The bytes the atlas uploads (segments.bin): segA | segB<<4, round(weightA·255), dBone / D_UNIT as uint16; the test weights and distances are exact in these units.
 		const bytes=Array.from({length:N},(_,i)=>{const d=Math.round(dist[i]/D_UNIT);return [seg[i*3]|seg[i*3+1]<<4,Math.round(seg[i*3+2]*255),d&255,d>>8];}).flat();
-		for(const [label,kind] of [['atlas parts (part fx + byte seg attribute)','atlas'],[`custom layer (TW_FIXED_SEG ${FIXED})`,'fixed'],['custom layer (float seg attribute)','float']] as const){
+		for(const [label,kind] of [['atlas parts (part fx + byte seg attribute)','atlas'],[`custom layer (TW_FIXED_SEG ${FIXED})`,'fixed'],['custom layer (float seg + segD, TW_SEG_D)','float'],['custom layer (float seg, no TW_SEG_D: segD compiled out, no inflation)','floatNoD']] as const){
 			const want=reference(kind);
 			const r=await page.evaluate(gpu,{vs:vsFor(kind),fs:fsFor(kind),n:N,pos:[...pos],nrm:[...nrm],seg:kind==='atlas'?bytes:[...seg],segD:[...dist],segBytes:kind==='atlas',part:[...part],tex:[...tex.data],texW:tex.width,rows:FX_ROWS,u:{twJ:flat('twJ'),twA:flat('twA'),twN:flat('twN'),twS:flat('twS'),twGround:[ws.ground]}});
 			if('error' in r){console.error(`GLSL check failed (${label}):\n${r.error}`);process.exit(1);}

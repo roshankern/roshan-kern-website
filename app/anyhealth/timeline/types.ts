@@ -90,8 +90,8 @@ export interface LayerContext {
 	indicesOf(name:string):number[];
 	/** Rest-pose decoded geometry of a part (positions, normals, index, float `seg` = (segA, segB, weightA) and `segD` = rest distance to the nearest bone in metres, from segments.bin), shared; do not mutate. */
 	restGeometry(index:number):T.BufferGeometry|undefined;
-	/** A material for custom meshes that gets the same body warp. `segment` sets every vertex's segment (weight 1), or pass a per-vertex `seg` attribute on the geometry (itemSize 3: segA, segB, weightA) and leave it undefined; with `soft`, an optional float `segD` attribute (rest distance to the nearest bone, metres) adds the soft-girth inflation (growth/warp.ts). */
-	material(opts:{color:T.ColorRepresentation;segment?:SegmentId;soft?:boolean;transparent?:boolean;opacity?:number;depthWrite?:boolean}):T.MeshStandardMaterial;
+	/** A material for custom meshes that gets the same body warp. `segment` sets every vertex's segment (weight 1), or pass a per-vertex `seg` attribute on the geometry (itemSize 3: segA, segB, weightA) and leave it undefined; with `soft` and `segD: true`, a float `segD` attribute (rest distance to the nearest bone, metres; required then) adds the soft-girth inflation (growth/warp.ts). */
+	material(opts:{color:T.ColorRepresentation;segment?:SegmentId;soft?:boolean;segD?:boolean;transparent?:boolean;opacity?:number;depthWrite?:boolean}):T.MeshStandardMaterial;
 	/** Ask the scene to fly the camera to frame a rest-space box (warped by the engine first). */
 	requestFly(box:T.Box3):void;
 }
