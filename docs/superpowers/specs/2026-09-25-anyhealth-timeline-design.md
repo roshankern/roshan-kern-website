@@ -50,7 +50,9 @@ The warp runs on the GPU, so the CPU picker meshes would otherwise sit in rest p
 
 **Stature and weight.** These are interpolated from my measurements (`health/growth.ts`). The model's native stature is measured once from atlas bounds. The global scale is `stature(date) / modelStature`.
 
-**Segments.** The rest model is split by position into regions: head, neck, trunk, and left/right upper arm, forearm, hand, thigh, shank and foot. Joint pivots (atlanto-occipital, C7/T1, shoulders, elbows, wrists, hips, knees, ankles) are found once from named bones (for example the bounds of `Left humerus` head and condyles) and hardcoded with a comment. Each region's length along its axis scales so that the segment-to-stature ratio matches the reference for my age. Limbs scale away from their parent joint, so they stay attached. Across each joint the scales blend with a smoothstep over about 3 cm (in rest-model units), so no part tears or overlaps at a boundary.
+**Segments.** The body has 15 segments: trunk, neck, head, and left/right upper arm, forearm, hand, thigh, shank and foot. An offline script (`scripts/anyhealth-timeline-rig.ts`) finds each joint (hips, knees, ankles, shoulders, elbows, wrists, C7/T1, atlanto-occipital) as the centroid of the contact region between the two named bones. It writes `timeline/growth/rig.json`. Each segment's length along its axis scales so that the segment-to-stature ratio matches the reference for my age. Limbs scale away from their parent joint, so they stay attached.
+
+**Segment weights.** Assigning segments by position fails because the arms hang beside the torso, and rib-side skin sits close to the arm's axis. Instead, the same script labels every vertex with its two nearest segments by distance to the nearest *bone surface* of each segment. It stores `(segA, segB, weightA)` per vertex in `public/anyhealth/models/segments.bin`. `weightA` blends smoothly from 0.5 where the two distances are equal to 1 once segment A is 2 cm closer. Bones themselves get their own segment with weight 1. The GPU blends the two segment transforms (linear blend skinning), so a seam never tears. Normals use the blended inverse-transpose.
 
 **Girth.** Width (x/z about the local segment axis) scales with weight-for-height relative to the reference. Soft tissue (muscular, integumentary, connective) gets the full factor. Bones and organs get an age-based factor only, so bones keep their correct width for my age whatever my weight.
 
@@ -111,7 +113,7 @@ Each script adds density ranges around its acute phase. Examples: fracture day 0
 ## Verification
 
 1. `npx tsc --noEmit` and `npm run build` pass.
-2. **Unit checks** (`scripts/anyhealth-timeline-check.ts`, run with `node scripts/anyhealth-timeline-check.ts`; Node 24 strips the types natively, so the timeline modules it imports must use only erasable TS syntax: no enums and no parameter properties):
+2. **Unit checks** (`scripts/anyhealth-timeline-check.ts`, run with `npx tsx scripts/anyhealth-timeline-check.ts [filter]`. `tsx` is a new dev dependency: the repo's extensionless imports need a bundler-style resolver, which plain Node's type stripping lacks):
    - `bodyAt` reproduces the measured stature and weight at every measurement date, within 0.5%.
    - The segment ratios are monotonic and match the reference tables at birth, 2, 6, 12 and 18 y, within 2%.
    - Every script's `parts` exist in atlas.json. Every issues.json id has a script.
