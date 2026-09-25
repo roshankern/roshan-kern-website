@@ -23,14 +23,14 @@ export default function IssuePanel({issue,onClose}:{issue:Issue|null;onClose:()=
 	</aside>;
 }
 
-function Figure({src,alt}:{src:string;alt:string}){
+export function Figure({src,alt}:{src:string;alt:string}){
 	const [failed,setFailed]=useState(false);
 	if(failed)return null;
 	// eslint-disable-next-line @next/next/no-img-element
 	return <a className="issue-figure" href={src} target="_blank" rel="noreferrer" title="Open full size"><img src={src} alt={alt} onError={()=>setFailed(true)}/></a>;
 }
 
-function Labs({labs}:{labs:Lab[]}){
+export function Labs({labs}:{labs:Lab[]}){
 	return <div className="issue-labs">
 		<div className="issue-lab head"><span>Test</span><span>Result</span><span>Ref</span></div>
 		{labs.map((l,i)=>{const mark=l.flag==='high'?'▲':l.flag==='low'?'▼':l.flag==='abnormal'?'!':'';return <div className={`issue-lab ${mark?'flagged':''}`} key={i}>
@@ -39,7 +39,7 @@ function Labs({labs}:{labs:Lab[]}){
 	</div>;
 }
 
-function Chart({chart}:{chart:AllergyChart}){
+export function Chart({chart}:{chart:AllergyChart}){
 	const pos=chart.items.filter(i=>i.class>0).map(i=>i.value),top=pos.length?Math.max(...pos):1;
 	return <div className="issue-chart">
 		<div className="issue-chart-head"><span>{chart.title}</span>{chart.unit&&<span>{chart.unit}</span>}</div>

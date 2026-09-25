@@ -118,7 +118,4 @@ h1{display:flex;justify-content:center;align-items:center;gap:12px;font-size:32p
 /* /anyhealth/test only: fracture healing status, one line above the body stats (hidden with them in short landscape). */
 .body-stats.fracture-status{bottom:142px;font-size:11px;color:#737d89}
 @media(max-width:767px){.body-stats.fracture-status{bottom:calc(132px + env(safe-area-inset-bottom));font-size:10.5px}}
-/* /anyhealth/timeline only (<main class="studio timeline">): the Issue tracker stub sits in the issue panel's footprint (--issue-panel-w); Task 7 replaces it with tracker/tracker.css. */
-.studio.timeline .issue-tracker{position:absolute;z-index:8;right:var(--panel-inset);top:24px;bottom:24px;width:var(--issue-panel-w);display:flex;flex-direction:column;padding:18px 17px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
-.studio.timeline .issue-tracker ul{list-style:none;margin:12px 0 0;padding:0;display:flex;flex-direction:column;gap:8px;font-size:13px;line-height:1.4;color:#4d5864}.studio.timeline .issue-tracker p{margin:12px 0 0;font-size:13px;color:#8a949e}
-@media(max-width:767px){.studio.timeline .issue-tracker{display:none}}
+/* /anyhealth/timeline only: the Issue tracker is styled in timeline/tracker/tracker.css (imported by the component). */
