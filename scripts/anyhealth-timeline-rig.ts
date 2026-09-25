@@ -1,16 +1,21 @@
 // Builds the AnyHealth timeline rig and per-vertex segment weights from the rest-pose atlas: npx tsx scripts/anyhealth-timeline-rig.ts
 // Writes app/anyhealth/timeline/growth/rig.json (a Rig) and public/anyhealth/models/segments.bin
-// (per atlas part in order, vertexCount × 2 bytes: byte0 = segA | segB<<4, byte1 = round(weightA*255)).
+// (per atlas part in order, vertexCount × 3 bytes: byte0 = segA | segB<<4, byte1 = round(weightA*255), byte2 = round(dBone / 0.5 mm), the rest distance to the nearest bone point, capped at 255).
+// Weights (Task 14a): parent/child blends are centred on their joint plane (smoothstep over ±PLANE_B along the child axis), fading to the nearest-bone weight where one bone clearly owns the tissue (dB − dA from FADE[0] to FADE[1]).
 import fs from 'node:fs';
 import {loadAtlasNode} from '../app/anyhealth/timeline/check/node-atlas';
 import {boneSegment} from '../app/anyhealth/timeline/growth/segment-map';
-import {SEGMENTS,type Rig,type Segment,type SegmentId,type Vec3} from '../app/anyhealth/timeline/types';
+import {SEGMENTS,type Rig,type SegmentId,type Vec3} from '../app/anyhealth/timeline/types';
 
 const RIG_OUT='app/anyhealth/timeline/growth/rig.json',BIN_OUT='public/anyhealth/models/segments.bin';
 /** Contact radius for joints, widened step by step if two bones never come that close. */
 const CONTACT=[0.006,0.008,0.010,0.012];
-/** Proximity grid: cell size, bone-point subsampling, search radius, and the dB−dA blend width. */
-const CELL=0.01,SUB=4,REACH=0.12,BLEND=0.02;
+/** Weights (Task 14a). GRID: voxel size of the per-segment distance fields. Per joint, the child-side indicator is smoothstep(−ANG, ANG, cos of the angle from the child axis at the joint) (the joint plane, scale-free),
+ * faded (FADE on |r|) into smoothstep(−RQ, RQ, r), r = (d_parent − d_child subtree)/(sum), the nearest-bone ratio; SQ gates siblings apart. Overridable for sweeps via ANYHEALTH_<NAME> (FADE as "lo,hi"). */
+const env=(k:string,d:number)=>Number(process.env[`ANYHEALTH_${k}`]??d);
+const GRID=env('GRID',0.005),ANG=env('ANG',0.5),RQ=env('RQ',0.5),SQ=env('SQ',0.3),FADE=(process.env.ANYHEALTH_FADE??'0.3,0.6').split(',').map(Number);
+/** dBone byte unit (metres); matches D_UNIT in growth/warp.ts. */
+const D_UNIT=0.0005;
 const NS=SEGMENTS.length,SEG=(id:SegmentId)=>SEGMENTS.indexOf(id);
 const r5=(v:number)=>Math.round(v*1e5)/1e5;
 const smoothstep=(a:number,b:number,x:number)=>{const t=Math.min(1,Math.max(0,(x-a)/(b-a)));return t*t*(3-2*t);};
@@ -81,59 +86,72 @@ async function main(){
 	console.log('\nsegments:');for(const s of segments)console.log(`  ${s.id.padEnd(10)} length ${s.length.toFixed(4)}  axis [${s.axis.map(x=>x.toFixed(3)).join(', ')}]  parent ${s.parent??'-'}`);
 	console.log(`\nstature ${rig.stature} (y ${yMin.toFixed(4)} → ${yMax.toFixed(4)})  (${Date.now()-t0} ms)`);
 
-	// Bone points per segment (every SUB-th vertex) in a dense CSR grid.
-	const bx:number[]=[],bs:number[]=[];
-	parts.forEach((g,i)=>{const s=boneSegment(atlas.parts[i].name);if(!s)return;const si=SEG(s),v=g.position;for(let j=0;j<v.length;j+=3*SUB){bx.push(v[j],v[j+1],v[j+2]);bs.push(si);}});
-	const np=bs.length,lo=[Infinity,Infinity,Infinity],hi=[-Infinity,-Infinity,-Infinity];
+	// Per-segment distance fields: squared EDT (Felzenszwalb) on a GRID voxel grid seeded by every bone vertex, read back trilinearly (smooth, no point-sample noise).
+	const lo=[Infinity,Infinity,Infinity],hi=[-Infinity,-Infinity,-Infinity];
 	for(const g of parts){const v=g.position;for(let i=0;i<v.length;i+=3)for(let a=0;a<3;a++){if(v[i+a]<lo[a])lo[a]=v[i+a];if(v[i+a]>hi[a])hi[a]=v[i+a];}}
-	const dim=lo.map((l,a)=>Math.floor((hi[a]-l)/CELL)+1),[nx,ny,nz]=dim,cellOf=(x:number,a:number)=>Math.min(dim[a]-1,Math.max(0,Math.floor((x-lo[a])/CELL)));
-	const start=new Int32Array(nx*ny*nz+1),pc=new Int32Array(np);
-	for(let p=0;p<np;p++){pc[p]=cellOf(bx[3*p],0)+nx*(cellOf(bx[3*p+1],1)+ny*cellOf(bx[3*p+2],2));start[pc[p]+1]++;}
-	for(let c=0;c<nx*ny*nz;c++)start[c+1]+=start[c];
-	const fill=start.slice(0,-1),pts=new Float32Array(np*3),pseg=new Uint8Array(np);
-	for(let p=0;p<np;p++){const o=fill[pc[p]]++;pts.set([bx[3*p],bx[3*p+1],bx[3*p+2]],3*o);pseg[o]=bs[p];}
-	console.log(`\nbone points: ${np} (every ${SUB}th vertex), grid ${nx}×${ny}×${nz} @ ${CELL*100} cm`);
-
-	// Fallback when no bone is within REACH: distance to each segment's joint→distal line.
-	const lineD=(x:number,y:number,z:number,s:Segment)=>{const [jx,jy,jz]=s.joint,[ax,ay,az]=s.axis,t=Math.min(s.length,Math.max(0,(x-jx)*ax+(y-jy)*ay+(z-jz)*az));return Math.hypot(x-jx-ax*t,y-jy-ay*t,z-jz-az*t);};
+	for(let a=0;a<3;a++){lo[a]-=2*GRID;hi[a]+=2*GRID;}
+	const dim=lo.map((l,a)=>Math.ceil((hi[a]-l)/GRID)+1),[nx,ny,nz]=dim,nc=nx*ny*nz,INF=1e20;
+	const field:Float32Array[]=[];
+	{
+		const f=new Float64Array(Math.max(nx,ny,nz)),d=new Float64Array(f.length),vv=new Int32Array(f.length),zz=new Float64Array(f.length+1);
+		/** 1-D squared distance transform of f[0..n) into d (Felzenszwalb & Huttenlocher). */
+		const dt1=(n:number)=>{let k=0;vv[0]=0;zz[0]=-INF;zz[1]=INF;for(let q=1;q<n;q++){let s=((f[q]+q*q)-(f[vv[k]]+vv[k]*vv[k]))/(2*q-2*vv[k]);while(s<=zz[k]){k--;s=((f[q]+q*q)-(f[vv[k]]+vv[k]*vv[k]))/(2*q-2*vv[k]);}k++;vv[k]=q;zz[k]=s;zz[k+1]=INF;}k=0;for(let q=0;q<n;q++){while(zz[k+1]<q)k++;d[q]=(q-vv[k])*(q-vv[k])+f[vv[k]];}};
+		for(let s=0;s<NS;s++){
+			const g2=new Float64Array(nc).fill(INF);
+			parts.forEach((g,i)=>{if(boneSegment(atlas.parts[i].name)!==SEGMENTS[s])return;const v=g.position;for(let j=0;j<v.length;j+=3){const c=Math.round((v[j]-lo[0])/GRID)+nx*(Math.round((v[j+1]-lo[1])/GRID)+ny*Math.round((v[j+2]-lo[2])/GRID));g2[c]=0;}});
+			for(let z=0;z<nz;z++)for(let y=0;y<ny;y++){const o=nx*(y+ny*z);for(let x=0;x<nx;x++)f[x]=g2[o+x];dt1(nx);for(let x=0;x<nx;x++)g2[o+x]=d[x];}
+			for(let z=0;z<nz;z++)for(let x=0;x<nx;x++){for(let y=0;y<ny;y++)f[y]=g2[x+nx*(y+ny*z)];dt1(ny);for(let y=0;y<ny;y++)g2[x+nx*(y+ny*z)]=d[y];}
+			for(let y=0;y<ny;y++)for(let x=0;x<nx;x++){for(let z=0;z<nz;z++)f[z]=g2[x+nx*(y+ny*z)];dt1(nz);for(let z=0;z<nz;z++)g2[x+nx*(y+ny*z)]=d[z];}
+			const out=new Float32Array(nc);for(let c=0;c<nc;c++)out[c]=Math.sqrt(g2[c])*GRID;field.push(out);
+		}
+	}
+	console.log(`\ndistance fields: ${NS} segments on ${nx}×${ny}×${nz} @ ${GRID*1000} mm (${Date.now()-t0} ms)`);
+	/** Trilinear samples of every segment's field at (x,y,z) into D. */
+	const sample=(x:number,y:number,z:number,D:Float64Array)=>{
+		const fx=Math.min(nx-1.001,Math.max(0,(x-lo[0])/GRID)),fy=Math.min(ny-1.001,Math.max(0,(y-lo[1])/GRID)),fz=Math.min(nz-1.001,Math.max(0,(z-lo[2])/GRID));
+		const ix=Math.floor(fx),iy=Math.floor(fy),iz=Math.floor(fz),tx=fx-ix,ty=fy-iy,tz=fz-iz,c=ix+nx*(iy+ny*iz),X=1,Y=nx,Z=nx*ny;
+		for(let s=0;s<NS;s++){const F=field[s];D[s]=((F[c]*(1-tx)+F[c+X]*tx)*(1-ty)+(F[c+Y]*(1-tx)+F[c+Y+X]*tx)*ty)*(1-tz)+((F[c+Z]*(1-tx)+F[c+Z+X]*tx)*(1-ty)+(F[c+Z+Y]*(1-tx)+F[c+Z+Y+X]*tx)*ty)*tz;}
+	};
 	/** Rig neighbours of each segment (parent and children). segB is only ever chosen from these, so no blend spans segments the warp scales independently (thigh↔thigh, hand↔thigh, forearm↔trunk). */
 	const ADJ=SEGMENTS.map((id,i)=>SEGMENTS.map((_,j)=>j).filter(j=>segments[i].parent===SEGMENTS[j]||segments[j].parent===id));
-	/** sA = nearest segment overall, sB = nearest rig neighbour of sA (−1 if none is finite). */
-	const pick=(d:ArrayLike<number>)=>{let sA=-1,sB=-1;for(let s=0;s<NS;s++)if(d[s]<(sA<0?Infinity:d[sA]))sA=s;if(sA>=0)for(const s of ADJ[sA])if(d[s]<(sB<0?Infinity:d[sB]))sB=s;return [sA,sB];};
-	const best=new Float64Array(NS),line=new Float64Array(NS),maxRing=Math.ceil(REACH/CELL),hands=[SEG('lHand'),SEG('rHand')],thighs=[SEG('lThigh'),SEG('rThigh')];
-	const out=new Uint8Array(parts.reduce((s,p)=>s+p.position.length/3,0)*2);let o=0,far=0,mixed=0,skinHandOnThigh=0;
+	const PAR=segments.map(s=>s.parent?SEG(s.parent):-1),KIDS=SEGMENTS.map((_,i)=>PAR.map((p,j)=>p===i?j:-1).filter(j=>j>=0));
+	/** Each segment's subtree (itself and every descendant). */
+	const SUBTREE=SEGMENTS.map((_,i)=>{const out=[i];for(let k=0;k<out.length;k++)out.push(...KIDS[out[k]]);return out;});
+	const D=new Float64Array(NS),DS=new Float64Array(NS),c=new Float64Array(NS),W=new Float64Array(NS),EPS=1e-4;
+	const out=new Uint8Array(parts.reduce((s,p)=>s+p.position.length/3,0)*3);let o=0,mixed=0,dropped=0,maxDrop=0;
+	const dbgF=process.env.ANYHEALTH_FLOAT_OUT?new Float32Array(out.length/3*2):null;
 	parts.forEach((g,pi)=>{
-		const fixed=boneSegment(atlas.parts[pi].name),v=g.position,nv=v.length/3,skin=atlas.parts[pi].name==='Skin';
-		if(fixed){const s=SEG(fixed);for(let i=0;i<nv;i++){out[o++]=s|s<<4;out[o++]=255;}return;}
+		const fixed=boneSegment(atlas.parts[pi].name),v=g.position,nv=v.length/3;
+		if(fixed){const s=SEG(fixed);for(let i=0;i<nv;i++){if(dbgF){dbgF[o/3*2]=1;dbgF[o/3*2+1]=0;}out[o++]=s|s<<4;out[o++]=255;out[o++]=0;}return;}
 		for(let i=0;i<nv;i++){
-			const x=v[3*i],y=v[3*i+1],z=v[3*i+2],cx=cellOf(x,0),cy=cellOf(y,1),cz=cellOf(z,2);best.fill(Infinity);
-			let dA=Infinity,dB=Infinity,sA=-1,sB=-1;
-			// Scan cubic shells of cells. After ring r every bone point closer than r*CELL has been seen.
-			for(let r=0;r<=maxRing;r++){
-				for(let k=cz-r;k<=cz+r;k++){if(k<0||k>=nz)continue;const ek=k===cz-r||k===cz+r;
-					for(let j=cy-r;j<=cy+r;j++){if(j<0||j>=ny)continue;const ej=ek||j===cy-r||j===cy+r;
-						for(let h=cx-r;h<=cx+r;h+=ej||h===cx+r?1:2*r){if(h<0||h>=nx)continue;const c=h+nx*(j+ny*k);
-							for(let p=start[c];p<start[c+1];p++){const ex=pts[3*p]-x,ey=pts[3*p+1]-y,ez=pts[3*p+2]-z,d=ex*ex+ey*ey+ez*ez,s=pseg[p];if(d<best[s])best[s]=d;}
-						}
-					}
-				}
-				[sA,sB]=pick(best);dA=sA<0?Infinity:Math.sqrt(best[sA]);dB=sB<0?Infinity:Math.sqrt(best[sB]);
-				// Done once A is exact and B is either exact or at least BLEND farther (weight saturates).
-				const seen=r*CELL;
-				if(sA>=0&&seen>=dA&&(seen>=dB||seen>=dA+BLEND)||seen>=REACH)break;
+			const x=v[3*i],y=v[3*i+1],z=v[3*i+2];sample(x,y,z,D);
+			for(let s=0;s<NS;s++){let m=Infinity;for(const t of SUBTREE[s])m=Math.min(m,D[t]);DS[s]=m;}
+			// Child-side indicator per joint: the joint plane (scale-free: the cosine of the angle from the child axis at the joint), faded into the nearest-bone ratio where one side clearly owns the tissue.
+			c[0]=1;
+			for(let s=1;s<NS;s++){
+				const P=PAR[s],r=(D[P]-DS[s])/(D[P]+DS[s]+EPS),J=segments[s].joint,a=segments[s].axis,dx=x-J[0],dy=y-J[1],dz=z-J[2],dl=Math.hypot(dx,dy,dz)+EPS;
+				const sa=smoothstep(-ANG,ANG,(dx*a[0]+dy*a[1]+dz*a[2])/dl),sr=smoothstep(-RQ,RQ,r),f=smoothstep(FADE[0],FADE[1],Math.abs(r));
+				let cs=sa+(sr-sa)*f;
+				// Siblings never overlap: the side nearer another sibling's subtree fades this one out (they meet at the crotch midline, the shoulders / neck).
+				for(const m of KIDS[P])if(m!==s)cs*=smoothstep(0,SQ,(DS[m]-DS[s])/(DS[m]+DS[s]+EPS));
+				c[s]=cs;
 			}
-			if(sA<0||dA>REACH){far++;segments.forEach((s,si)=>{line[si]=lineD(x,y,z,s);});[sA,sB]=pick(line);dA=line[sA];dB=sB<0?Infinity:line[sB];}
-			// No neighbour within the blend window: fully A.
-			const w=sB<0?1:0.5+0.5*smoothstep(0,BLEND,dB-dA);
-			if(w>=1)sB=sA;else mixed++;
-			if(skin&&hands.includes(sA)&&Math.min(...thighs.map(t=>lineD(x,y,z,segments[t])))<lineD(x,y,z,segments[sA]))skinHandOnThigh++;
-			out[o++]=sA|sB<<4;out[o++]=Math.round(w*255);
+			// Tree partition of unity: w_s = (Π of c along the path to s) × (1 − Σ c over s's children).
+			let sum=0;
+			for(let s=0;s<NS;s++){let path=1;for(let t=s;t>=0;t=PAR[t])path*=c[t];let ch=0;for(const k of KIDS[s])ch+=c[k];W[s]=path*Math.max(0,1-ch);sum+=W[s];}
+			// Keep the heaviest segment and its heaviest rig neighbour.
+			let sA=0;for(let s=1;s<NS;s++)if(W[s]>W[sA])sA=s;let sB=-1;for(const s of ADJ[sA])if(sB<0||W[s]>W[sB])sB=s;
+			const kept=W[sA]+(sB<0?0:W[sB]),drop=sum>0?1-kept/sum:0;if(drop>1e-3)dropped++;if(drop>maxDrop)maxDrop=drop;
+			let w=sB<0||kept<=0?1:W[sA]/kept;
+			if(Math.round(w*255)>=255){w=1;sB=sA;}else mixed++;
+			let dBone=Infinity;for(let s=0;s<NS;s++)dBone=Math.min(dBone,D[s]);
+			if(dbgF){dbgF[o/3*2]=w;dbgF[o/3*2+1]=dBone;}out[o++]=sA|sB<<4;out[o++]=Math.round(w*255);out[o++]=Math.min(255,Math.round(dBone/D_UNIT));
 		}
 	});
+	if(dbgF)fs.writeFileSync(process.env.ANYHEALTH_FLOAT_OUT!,Buffer.from(dbgF.buffer));
 	if(o!==out.length)throw new Error(`wrote ${o} of ${out.length} bytes`);
 	fs.writeFileSync(BIN_OUT,out);
-	console.log(`vertices with no bone within ${REACH*100} cm (joint-line fallback): ${far}; blended vertices: ${mixed}`);
-	console.log(`residual mislabel: Skin vertices with segA = l/rHand but closer to a thigh axis than to that hand axis: ${skinHandOnThigh}`);
+	console.log(`blended vertices: ${mixed}; vertices with > 0.1% weight on a third segment (dropped): ${dropped}, max dropped ${maxDrop.toFixed(3)}`);
 	console.log(`\nwrote ${RIG_OUT} (${fs.statSync(RIG_OUT).size} B), ${BIN_OUT} (${(fs.statSync(BIN_OUT).size/1e6).toFixed(2)} MB) in ${((Date.now()-t0)/1000).toFixed(1)} s`);
 }
 main().catch(e=>{console.error(e);process.exit(1);});
