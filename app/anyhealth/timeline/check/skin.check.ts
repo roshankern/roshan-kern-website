@@ -11,6 +11,7 @@ import {buildMarks,localScale,type MarksLayer} from '../issues/skin/marks-layer'
 import {sutureCount} from '../issues/skin/lacerations';
 import {acneLesionCount} from '../issues/skin/acne';
 import {SEGMENTS,type Body,type SegmentId} from '../types';
+import {segAt,SEG_STRIDE} from '../growth/warp';
 
 /** Day just before a script's effects may start (the LEAD_DAYS ruling). */
 const before=(id:string)=>-(LEAD_DAYS[id]??0)-1;
@@ -22,20 +23,20 @@ const quiet=(f:PartFx)=>(f.swell??0)===0&&(f.tint?.[3]??0)===0&&(f.scale??[1,1,1
 let segBytes:Uint8Array|null=null;
 function segFor(na:NodeAtlas,i:number){
 	segBytes??=new Uint8Array(fs.readFileSync(path.resolve('public/anyhealth/models/segments.bin')));
-	let o=0;for(let k=0;k<i;k++)o+=na.atlas.parts[k].vertexCount*2;
-	const vc=na.atlas.parts[i].vertexCount,a=new Float32Array(vc*3);for(let v=0;v<vc;v++){const b0=segBytes[o+v*2];a[v*3]=b0&15;a[v*3+1]=b0>>4;a[v*3+2]=segBytes[o+v*2+1]/255;}
-	return a;
+	let o=0;for(let k=0;k<i;k++)o+=na.atlas.parts[k].vertexCount*SEG_STRIDE;
+	const vc=na.atlas.parts[i].vertexCount,a=new Float32Array(vc*3),d=new Float32Array(vc);for(let v=0;v<vc;v++){const s=segAt(segBytes,o,v);a[v*3]=s[0];a[v*3+1]=s[1];a[v*3+2]=s[2];d[v]=s[3];}
+	return Object.assign(a,{segD:d});
 }
 function fakeCtx(na:NodeAtlas):LayerContext{
 	const cache=new Map<number,T.BufferGeometry>();
 	return {
 		scene:new T.Scene(),atlas:na.atlas,indicesOf:na.indicesOf,
-		restGeometry(i){let g=cache.get(i);if(!g){const p=na.parts[i];g=new T.BufferGeometry();g.setAttribute('position',new T.BufferAttribute(p.position,3));g.setAttribute('normal',new T.BufferAttribute(p.normal,3,true));g.setAttribute('seg',new T.BufferAttribute(segFor(na,i),3));g.setIndex(new T.BufferAttribute(p.index,1));cache.set(i,g);}return g;},
+		restGeometry(i){let g=cache.get(i);if(!g){const p=na.parts[i];g=new T.BufferGeometry();g.setAttribute('position',new T.BufferAttribute(p.position,3));g.setAttribute('normal',new T.BufferAttribute(p.normal,3,true));{const s=segFor(na,i);g.setAttribute('seg',new T.BufferAttribute(s,3));g.setAttribute('segD',new T.BufferAttribute(s.segD,1));}g.setIndex(new T.BufferAttribute(p.index,1));cache.set(i,g);}return g;},
 		material:o=>new T.MeshStandardMaterial({color:o.color,transparent:o.transparent,opacity:o.opacity??1}),
 		requestFly(){},
 	};
 }
-const skinOf=(na:NodeAtlas)=>{const i=na.indicesOf('Skin')[0],p=na.parts[i];return {i,surface:skinSurface(p.position,v=>[p.normal[v*3]/127,p.normal[v*3+1]/127,p.normal[v*3+2]/127],p.index,segFor(na,i))};};
+const skinOf=(na:NodeAtlas)=>{const i=na.indicesOf('Skin')[0],p=na.parts[i];return {i,surface:skinSurface(p.position,v=>[p.normal[v*3]/127,p.normal[v*3+1]/127,p.normal[v*3+2]/127],p.index,segFor(na,i),segFor(na,i).segD)};};
 
 export const checks:Check[]=[
 	{name:'skin: no effect before onset',run(c){AREA.forEach(s=>c.assert(s.fxAt(before(s.id),{body:bodyAt(s.onset),date:s.onset}).every(quiet),`${s.id} before onset`));}},

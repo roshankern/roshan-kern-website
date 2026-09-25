@@ -1,14 +1,14 @@
 /** GLSL for the body warp, the shader twin of warp.ts (warpPoint / warpNormal), line for line; scripts/anyhealth-timeline-glsl.ts compiles it headless and checks parity against the TS.
  *
  * Contract with engine.ts (patchMaterial):
- * - WARP_PARS is injected after `#include <common>` in the vertex shader. It declares the uniforms `twJ`, `twA`, `twN`, `twS` (vec4[15]), `twGround` and `twSoft` (float), and any functions. It must NOT declare `seg`: the engine does.
+ * - WARP_PARS is injected after `#include <common>` in the vertex shader. It declares the uniforms `twJ`, `twA`, `twN`, `twS` (vec4[15]), `twGround` and `twSoft` (float), and any functions. It must NOT declare `seg`: the engine does, with TW_SEG_ATTRS.
  * - WARP_APPLY is injected right after FX_APPLY, at a point where both `transformed` (vec3, starts as `position`) and `objectNormal` (vec3) are live and nothing has read them yet. It rewrites both in place.
- * - When WARP_APPLY is non-empty the engine declares `attribute vec3 seg;` and defines a local `vec3 twSeg` (segA, segB, weightA 0..1) just before WARP_APPLY with TW_SEG; read `twSeg`, not `seg` (atlas parts carry `seg` as 3 unnormalized bytes, custom layers a float seg or a fixed-segment define with no attribute).
+ * - When WARP_APPLY is non-empty the engine declares the segment attributes with TW_SEG_ATTRS and defines the locals `vec3 twSeg` (segA, segB, weightA 0..1) and `float twD` (rest distance to the nearest bone, metres) just before WARP_APPLY with TW_SEG; read those, not `seg` (atlas parts carry `seg` as the 4 unnormalized segments.bin bytes, custom layers a float `seg` + optional float `segD`, or a fixed-segment define with no attribute).
  * - `objectTangent` is NOT warped: the atlas materials use no normal maps, so no tangent is needed. Add a tangent warp here if one ever is.
  * - `twSoft` is bound per material (1 for muscular / integumentary / connective, and for custom layers created with `soft`); every other uniform comes from warpUniforms() and is shared by every material. */
 import * as T from 'three';
 import {SEGMENTS} from '../types';
-import type {WarpState} from './warp';
+import {D_UNIT,type WarpState} from './warp';
 
 /** GLSL declarations: the tw* uniforms and the per-segment point / normal maps. Needs GLSL ES 3.00 (three's WebGL2 programs) for dynamic uniform-array indexing. */
 export const WARP_PARS=`
@@ -21,31 +21,44 @@ uniform vec4 twN[${SEGMENTS.length}];
 uniform vec4 twS[${SEGMENTS.length}];
 uniform float twGround;
 uniform float twSoft;
-float twGirth(int i){ return mix(twS[i].y, twS[i].z, twSoft); }
 vec3 twPoint(int i, vec3 p){
 	vec3 ax = twA[i].xyz; vec3 d = p - twJ[i].xyz; float t = dot(d, ax);
-	return twN[i].xyz + twS[i].x * t * ax + twGirth(i) * (d - t * ax);
+	return twN[i].xyz + twS[i].x * t * ax + twS[i].y * (d - t * ax);
 }
 vec3 twNormal(int i, vec3 n){
 	vec3 ax = twA[i].xyz; float t = dot(n, ax);
-	return (1.0 / twS[i].x) * t * ax + (1.0 / twGirth(i)) * (n - t * ax);
+	return (1.0 / twS[i].x) * t * ax + (1.0 / twS[i].y) * (n - t * ax);
+}
+vec3 twInflate(int i, vec3 p, float w, float dBone){
+	vec3 ax = twA[i].xyz; vec3 d = p - twJ[i].xyz; vec3 r = d - dot(d, ax) * ax;
+	return (w * (twS[i].z - twS[i].y) * min(1.0, dBone / max(length(r), 1e-9))) * r;
 }
 `;
-/** GLSL that defines the local `vec3 twSeg` (segA, segB, weightA 0..1) just before WARP_APPLY, from (in order): the material's `TW_FIXED_SEG` define (custom layers with one segment); the atlas's packed byte attribute `seg` = (segA, segB, round(weightA·255)), not normalized, when `TW_SEG_BYTES` is defined (atlas parts, 3 bytes per vertex); else a float `seg` with weightA in 0..1 (custom layers with per-vertex weights). */
-export const TW_SEG=`#if defined(TW_FIXED_SEG)
-vec3 twSeg = vec3(float(TW_FIXED_SEG), float(TW_FIXED_SEG), 1.0);
+/** GLSL declaring the segment attributes (engine, after `#include <common>`): none under `TW_FIXED_SEG`; the atlas's `vec4 seg` = the 4 segments.bin bytes, not normalized, under `TW_SEG_BYTES`; else a float `vec3 seg` (segA, segB, weightA) and `float segD` (bone distance, metres; a layer without it reads 0: no inflation). */
+export const TW_SEG_ATTRS=`#if defined(TW_FIXED_SEG)
 #elif defined(TW_SEG_BYTES)
-vec3 twSeg = vec3(seg.xy, seg.z * (1.0 / 255.0));
+attribute vec4 seg;
 #else
-vec3 twSeg = seg;
+attribute vec3 seg;
+attribute float segD;
 #endif`;
-/** GLSL that rewrites `transformed` and `objectNormal` (rest space → this date's body), reading the engine's `vec3 twSeg` = (segA, segB, weightA). */
+/** GLSL that defines the locals `vec3 twSeg` (segA, segB, weightA 0..1) and `float twD` (bone distance, metres) just before WARP_APPLY, from (in order): the material's `TW_FIXED_SEG` define (custom layers with one segment, no inflation); the atlas's byte `seg` = (segA | segB<<4, round(weightA·255), dBone low, high byte) under `TW_SEG_BYTES`; else the float `seg` and `segD`. */
+export const TW_SEG=`#if defined(TW_FIXED_SEG)
+vec3 twSeg = vec3(float(TW_FIXED_SEG), float(TW_FIXED_SEG), 1.0); float twD = 0.0;
+#elif defined(TW_SEG_BYTES)
+float twHi = floor(seg.x * (1.0 / 16.0));
+vec3 twSeg = vec3(seg.x - 16.0 * twHi, twHi, seg.y * (1.0 / 255.0)); float twD = (seg.z + 256.0 * seg.w) * ${D_UNIT.toExponential(6)};
+#else
+vec3 twSeg = seg; float twD = segD;
+#endif`;
+/** GLSL that rewrites `transformed` and `objectNormal` (rest space → this date's body), reading the engine's `vec3 twSeg` = (segA, segB, weightA) and `float twD`. */
 export const WARP_APPLY=`
 {
 	int twIa = int(twSeg.x + 0.5); int twIb = int(twSeg.y + 0.5); float twW = twSeg.z;
-	vec3 twP = twPoint(twIa, transformed); vec3 twM = twW * twNormal(twIa, objectNormal);
-	if (twW < 1.0) { twP = twW * twP + (1.0 - twW) * twPoint(twIb, transformed); twM += (1.0 - twW) * twNormal(twIb, objectNormal); }
-	transformed = twP + vec3(0.0, twGround, 0.0);
+	vec3 twP = twPoint(twIa, transformed); vec3 twM = twW * twNormal(twIa, objectNormal); vec3 twI = vec3(0.0);
+	if (twSoft > 0.5 && twD > 0.0) twI = twInflate(twIa, transformed, twW, twD);
+	if (twW < 1.0) { twP = twW * twP + (1.0 - twW) * twPoint(twIb, transformed); twM += (1.0 - twW) * twNormal(twIb, objectNormal); if (twSoft > 0.5 && twD > 0.0) twI += twInflate(twIb, transformed, 1.0 - twW, twD); }
+	transformed = twP + twI + vec3(0.0, twGround, 0.0);
 	objectNormal = twM * inversesqrt(max(dot(twM, twM), 1e-20));
 }
 `;

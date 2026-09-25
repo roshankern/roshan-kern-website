@@ -8,6 +8,7 @@ import {bodyAt} from '../growth/proportions';
 import {toDays,fromDays} from '../../health/dates';
 import {HEALED_DAY,TIMELINE_DENSITY,FRACTURE_DATE,FRACTURE_PART} from '../../fracture/model';
 import {createEngine} from '../engine';
+import {SEG_STRIDE} from '../growth/warp';
 import rigJson from '../growth/rig.json';
 import type {Rig} from '../types';
 
@@ -84,7 +85,7 @@ export const checks:Check[]=[
 	{name:'bones: through the real engine, the fracture pose runs after the hoisted begin_vertex and before the fx/warp block',async run(c){
 		const g=await c.geometry(),{atlas}=g,scene=new T.Scene();
 		const bounds=atlas.parts.map(p=>new T.Box3(new T.Vector3().fromArray(p.bounds[0]),new T.Vector3().fromArray(p.bounds[1])));
-		const segments=new ArrayBuffer(atlas.parts.reduce((s,p)=>s+p.vertexCount*2,0));
+		const segments=new ArrayBuffer(atlas.parts.reduce((s,p)=>s+p.vertexCount*SEG_STRIDE,0));
 		const engine=createEngine({atlas,scene,bounds,rig:rigJson as Rig,segments});
 		// Only the humerus needs a picker: the engine's restGeometry reads it.
 		const pickers:(T.Mesh|undefined)[]=[];g.indicesOf(FRACTURE_PART).forEach(i=>{const p=g.parts[i],geo=new T.BufferGeometry();geo.setAttribute('position',new T.BufferAttribute(p.position.slice(),3));geo.setAttribute('normal',new T.BufferAttribute(p.normal,3));geo.setIndex(new T.BufferAttribute(p.index,1));pickers[i]=new T.Mesh(geo);});

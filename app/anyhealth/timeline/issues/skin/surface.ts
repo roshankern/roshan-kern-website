@@ -15,12 +15,14 @@ export interface SkinSurface {
 	closest(p:Vec3):SurfaceHit;
 	/** The (segA, segB, weightA) of a Skin vertex, from the `seg` attribute; trunk at weight 1 when there is none. */
 	segOfVertex(v:number):Vec3;
+	/** A Skin vertex's rest distance to the nearest bone (metres), from the `segD` attribute (the soft-girth inflation, growth/warp.ts); 0 when there is none. */
+	boneDistOfVertex(v:number):number;
 }
 
 const CELL=.02;
 
 /** Builds the query structure. `normal` is read as floats in -1..1 (pass a normalized view, e.g. BufferAttribute.getX). */
-export function skinSurface(position:ArrayLike<number>,normal:(v:number)=>Vec3,index:ArrayLike<number>,seg?:ArrayLike<number>):SkinSurface{
+export function skinSurface(position:ArrayLike<number>,normal:(v:number)=>Vec3,index:ArrayLike<number>,seg?:ArrayLike<number>,segD?:ArrayLike<number>):SkinSurface{
 	const tris=index.length/3,grid=new Map<number,number[]>(),key=(x:number,y:number,z:number)=>((x+512)*1024+(y+512))*1024+(z+512);
 	const cell=(v:number)=>Math.floor(v/CELL);
 	for(let t=0;t<tris;t++){
@@ -62,5 +64,6 @@ export function skinSurface(position:ArrayLike<number>,normal:(v:number)=>Vec3,i
 	return {
 		closest,
 		segOfVertex:v=>seg&&seg.length>=(v+1)*3?[seg[v*3],seg[v*3+1],seg[v*3+2]]:[0,0,1],
+		boneDistOfVertex:v=>segD&&segD.length>v?segD[v]:0,
 	};
 }

@@ -1,7 +1,7 @@
 /** The skin marks CustomLayer, shared by every skin script: small opaque meshes (cuts, sutures, scars, papules, vesicles, warts, patches) laid on the Skin part.
  *
  * - Placement (init, rest space): each mark's hint is projected to the closest point on the Skin mesh; the mark's (rest-space) offset is taken in that point's tangent frame (t1 = the body's up, projected; t2 = normal × t1) and projected again, and every mark vertex is projected too, so a mark hugs the surface. Vertices sit MARK_LIFT (0.3 mm) out along the local normal, or `depth` when a mark is buried under the translucent skin.
- * - Segments: every mark vertex carries the `seg` (segA, segB, weightA) of the Skin vertex nearest it (segOfVertex, read from ctx.restGeometry(skin).getAttribute('seg'), i.e. segments.bin), and the material leaves `segment` unset, so marks follow the blended body warp exactly like the skin under them.
+ * - Segments: every mark vertex carries the `seg` (segA, segB, weightA) and `segD` (bone distance, for the soft-girth inflation) of the Skin vertex nearest it (segOfVertex / boneDistOfVertex, read from ctx.restGeometry(skin), i.e. segments.bin), and the material leaves `segment` unset and is `soft`, so marks follow the blended body warp exactly like the skin under them.
  * - Look (update): the script's pure `state(day)` gives each mark an alpha and colour; the layer rewrites its RGBA vertex colours only when that changes. The Skin part is drawn at opacity 0.1, so marks use their own material (vertex colours, alphaTest) and draw after it.
  * - Size: a mark's physical size is divided by the local warp scale at its segment on `scaleDate` (localScale), so it is life-size on that date.
  * - One mesh per layer (named `marks:<script id>`), frustumCulled off (the warp moves it far from its rest bounds). A spec with `onlyIsolated` draws only while its script is isolated: the isotretinoin layer repeats the acne marks, so it shows them only on its own Isolate and never doubles the acne layer's copy. */
@@ -57,8 +57,8 @@ function outline(def:MarkDef):{pts:[number,number,number][];tris:number[]}{
 }
 
 /** Builds the mesh data for a list of marks on a Skin surface. Exported for the node checks. */
-export function buildMarks(surface:SkinSurface,marks:MarkDef[]):{position:Float32Array;seg:Float32Array;index:number[];placed:PlacedMark[]}{
-	const pos:number[]=[],seg:number[]=[],index:number[]=[],placed:PlacedMark[]=[],anchors=new Map<string,SurfaceHit>(),bodies=new Map<string,Body>();
+export function buildMarks(surface:SkinSurface,marks:MarkDef[]):{position:Float32Array;seg:Float32Array;segD:Float32Array;index:number[];placed:PlacedMark[]}{
+	const pos:number[]=[],seg:number[]=[],segD:number[]=[],index:number[]=[],placed:PlacedMark[]=[],anchors=new Map<string,SurfaceHit>(),bodies=new Map<string,Body>();
 	for(const def of marks){
 		let body=bodies.get(def.scaleDate);if(!body){body=bodyAt(def.scaleDate);bodies.set(def.scaleDate,body);}
 		const key=def.at.join(',');let ah=anchors.get(key);if(!ah){ah=surface.closest(def.at);anchors.set(key,ah);}
@@ -71,19 +71,19 @@ export function buildMarks(surface:SkinSurface,marks:MarkDef[]):{position:Float3
 		const project=Math.max(hl,hw)>.0015;
 		for(const [a,b,h] of pts){
 			const p=add(add(hit.point,dir,a*hl),perp,b*hw),s=project?surface.closest(p):hit,q=add(project?s.point:p,project?s.normal:n,lift+h*hh);
-			pos.push(...q);seg.push(...surface.segOfVertex(s.vertex));
+			pos.push(...q);seg.push(...surface.segOfVertex(s.vertex));segD.push(surface.boneDistOfVertex(s.vertex));
 		}
 		tris.forEach(t=>index.push(start+t));
 		placed.push({def,anchor:ah.point,center:hit.point,normal:n,start,count:pts.length});
 	}
-	return {position:new Float32Array(pos),seg:new Float32Array(seg),index,placed};
+	return {position:new Float32Array(pos),seg:new Float32Array(seg),segD:new Float32Array(segD),index,placed};
 }
 
 // One surface grid per rest Skin geometry, shared by every skin layer.
 const surfaces=new WeakMap<T.BufferGeometry,SkinSurface>();
 function surfaceOf(rg:T.BufferGeometry):SkinSurface{
-	let s=surfaces.get(rg);if(s)return s;const p=rg.getAttribute('position'),nm=rg.getAttribute('normal'),sg=rg.getAttribute('seg');
-	s=skinSurface(p.array as ArrayLike<number>,v=>[nm.getX(v),nm.getY(v),nm.getZ(v)],rg.getIndex()!.array as ArrayLike<number>,sg?.array as ArrayLike<number>|undefined);surfaces.set(rg,s);return s;
+	let s=surfaces.get(rg);if(s)return s;const p=rg.getAttribute('position'),nm=rg.getAttribute('normal'),sg=rg.getAttribute('seg'),sd=rg.getAttribute('segD');
+	s=skinSurface(p.array as ArrayLike<number>,v=>[nm.getX(v),nm.getY(v),nm.getZ(v)],rg.getIndex()!.array as ArrayLike<number>,sg?.array as ArrayLike<number>|undefined,sd?.array as ArrayLike<number>|undefined);surfaces.set(rg,s);return s;
 }
 
 /** A skin marks layer for one script. */
@@ -94,7 +94,7 @@ export function marksLayer(spec:MarksSpec,id=''):MarksLayer{
 		init(ctx:LayerContext){
 			const i=ctx.indicesOf('Skin')[0],rg=i===undefined?undefined:ctx.restGeometry(i);if(!rg||!rg.getIndex())return false;
 			const b=buildMarks(surfaceOf(rg),spec.marks);placed=b.placed;
-			const g=new T.BufferGeometry();g.setAttribute('position',new T.BufferAttribute(b.position,3));g.setAttribute('seg',new T.BufferAttribute(b.seg,3));
+			const g=new T.BufferGeometry();g.setAttribute('position',new T.BufferAttribute(b.position,3));g.setAttribute('seg',new T.BufferAttribute(b.seg,3));g.setAttribute('segD',new T.BufferAttribute(b.segD,1));
 			colors=new T.BufferAttribute(new Float32Array(b.position.length/3*4),4);g.setAttribute('color',colors);g.setIndex(b.index);g.computeVertexNormals();g.computeBoundingBox();g.computeBoundingSphere();
 			const mat=ctx.material({color:0xffffff,soft:true,transparent:true,depthWrite:true});mat.vertexColors=true;mat.alphaTest=.01;mat.roughness=.75;mat.needsUpdate=true;
 			mesh=new T.Mesh(g,mat);mesh.name=`marks:${id}`;mesh.frustumCulled=false;mesh.renderOrder=2;mesh.visible=false;mesh.matrixAutoUpdate=false;scene=ctx.scene;scene.add(mesh);
