@@ -8,6 +8,10 @@ import {toDays,fromDays} from '../../health/dates';
 import {mergeFx} from '../fx/part-fx';
 import {pacing} from '../issues/pacing';
 import {CROUP_EPISODES} from '../issues/airway/croup';
+import {skinSurface} from '../issues/skin/surface';
+import {warpState,warpPoint} from '../growth/warp';
+import rigJson from '../growth/rig.json';
+import type {Rig,Vec3} from '../types';
 import {LEAD_DAYS as boneLead} from '../issues/catalog/bones';
 import {LEAD_DAYS as airwayLead} from '../issues/catalog/airway';
 import {LEAD_DAYS as digestiveLead} from '../issues/catalog/digestive';
@@ -105,5 +109,17 @@ export const checks:Check[]=[
 		const [a0,i0]=on(null);c.assert(a0&&!i0,`nothing isolated: acne ${a0}, isotretinoin ${i0}`);
 		const [a1,i1]=on(ISO);c.assert(!a1&&i1,`isotretinoin isolated: acne ${a1}, isotretinoin ${i1}`);
 		const [a2,i2]=on(ACNE);c.assert(a2&&!i2,`acne isolated: acne ${a2}, isotretinoin ${i2}`);
+	}},
+	{name:'skin marks stay on the warped skin at growth scale (every mark vertex within 3 mm of the warped Skin on its script\'s dates)',async run(c){
+		const g=await c.geometry(),{scene}=nodeEngine(g),fs=await import('node:fs'),bin=fs.readFileSync('public/anyhealth/models/segments.bin'),si=g.indicesOf('Skin')[0];
+		let off=0;for(let i=0;i<si;i++)off+=g.atlas.parts[i].vertexCount*2;const skin=g.parts[si],nv=skin.position.length/3;
+		const warped=(date:string)=>{const ws=warpState(rigJson as Rig,bodyAt(date)),w=new Float32Array(skin.position.length),q:Vec3=[0,0,0];for(let v=0;v<nv;v++){warpPoint(ws,[skin.position[v*3],skin.position[v*3+1],skin.position[v*3+2]],bin[off+v*2]&15,bin[off+v*2]>>4,bin[off+v*2+1]/255,true,q);w.set(q,v*3);}return {ws,surface:skinSurface(w,v=>[skin.normal[v*3]/127,skin.normal[v*3+1]/127,skin.normal[v*3+2]/127],skin.index)};};
+		const cache=new Map<string,ReturnType<typeof warped>>(),worst:string[]=[];let checked=0;
+		for(const s of SCRIPTS){const m=scene.getObjectByName(`marks:${s.id}`) as import('three').Mesh|undefined;if(!m)continue;
+			const P=m.geometry.getAttribute('position').array as Float32Array,S=m.geometry.getAttribute('seg').array as Float32Array;
+			for(const date of [s.onset,s.resolve??fromDays(toDays(s.onset)+365)]){let w=cache.get(date);if(!w){w=warped(date);cache.set(date,w);}const q:Vec3=[0,0,0];let far=0;
+				for(let v=0;v<P.length/3;v++){warpPoint(w.ws,[P[v*3],P[v*3+1],P[v*3+2]],S[v*3],S[v*3+1],S[v*3+2],true,q);far=Math.max(far,w.surface.closest(q).distance);}
+				checked++;if(far>0.003)worst.push(`${s.id} on ${date}: ${(far*1000).toFixed(2)} mm`);}}
+		c.assert(checked>=16,`checked ${checked} layer-dates`);c.assert(!worst.length,worst.join('; '));
 	}},
 ];

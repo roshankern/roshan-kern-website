@@ -67,6 +67,10 @@ export const checks:Check[]=[
 			applyFxPoint(r,p,n,out);c.near(Math.hypot(out[0]-p[0],out[1]-p[1],out[2]-p[2]),0,1e-9,`Trachea vertex at y=${y.toFixed(4)} moved`);tested++;
 		}
 		c.assert(tested>0,'found Trachea vertices 5 cm below the band');
+		// Task 14 (applyFxPoint is real now): inside the band every vertex moves by the full swell along its normal.
+		let inside=0;for(let v=0;v<pos.length/3;v++){const y=pos[v*3+1];if(y<SUBGLOTTIC_BAND[0]||y>SUBGLOTTIC_BAND[1])continue;const p:[number,number,number]=[pos[v*3],y,pos[v*3+2]],n:[number,number,number]=[nor[v*3]/127,nor[v*3+1]/127,nor[v*3+2]/127],out:[number,number,number]=[0,0,0];
+			applyFxPoint(r,p,n,out);c.near(Math.hypot(out[0]-p[0],out[1]-p[1],out[2]-p[2]),-r.swell,1e-9,`in-band Trachea vertex at y=${y.toFixed(4)}`);inside++;}
+		c.assert(inside>0,'found Trachea vertices inside the band');
 		c.assert(fx.filter(f=>f.swell).every(f=>f.part==='Trachea'),'only the Trachea swells');
 	}},
 	{name:'airway: (c) asthma baseline present on 2019-01-01 and stronger on 2016-12-25',run(c){

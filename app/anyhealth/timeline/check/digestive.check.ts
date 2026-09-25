@@ -54,6 +54,9 @@ export const checks:Check[]=[
 		const idx=g.indicesOf('Esophagus'),merged=mergeFx(fx,n=>n==='Esophagus'?idx:[],i=>{const P=g.parts[i].position,l=[Infinity,Infinity,Infinity],h=[-Infinity,-Infinity,-Infinity];for(let v=0;v<P.length;v+=3)for(let k=0;k<3;k++){l[k]=Math.min(l[k],P[v+k]);h[k]=Math.max(h[k],P[v+k]);}return [0,1,2].map(k=>(l[k]+h[k])/2) as Vec3;});
 		let n=0;for(const i of idx){const P=g.parts[i].position,N=g.parts[i].normal,r=merged.get(i)!;for(let v=0;v<P.length;v+=3){if(P[v+1]>distalTop)continue;n++;const p:Vec3=[P[v],P[v+1],P[v+2]],o:Vec3=[0,0,0];applyFxPoint(r,p,[N[v]/127,N[v+1]/127,N[v+2]/127],o);c.near(Math.hypot(o[0]-p[0],o[1]-p[1],o[2]-p[2]),0,1e-9,`distal vertex moved (y ${p[1].toFixed(3)})`);}}
 		c.assert(n>0,'found distal esophagus vertices');
+		// Task 14 (applyFxPoint is real now): inside the band the LPR swell moves every vertex by the full swell.
+		let m=0;for(const i of idx){const P=g.parts[i].position,N=g.parts[i].normal,r=merged.get(i)!;for(let v=0;v<P.length;v+=3){if(P[v+1]<band![0]||P[v+1]>band![1])continue;m++;const p:Vec3=[P[v],P[v+1],P[v+2]],o:Vec3=[0,0,0];applyFxPoint(r,p,[N[v]/127,N[v+1]/127,N[v+2]/127],o);c.near(Math.hypot(o[0]-p[0],o[1]-p[1],o[2]-p[2]),r.swell,1e-9,`in-band vertex (y ${p[1].toFixed(3)})`);}}
+		c.assert(m>0,'found in-band esophagus vertices');
 	}},
 	{name:'digestive: rectum pivot and esophagus constants match the atlas rest bounds',async run(c){
 		const g=await c.geometry(),r=partBox(g,'Rectum'),piv=partFx(at(ENC,0),'Rectum').find(f=>f.pivot)?.pivot;
