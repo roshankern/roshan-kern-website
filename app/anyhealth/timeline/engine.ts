@@ -27,8 +27,8 @@ export interface Engine {
 	/** After every chunk is decoded: build custom layers. */
 	ready(pickers:(T.Mesh|undefined)[]):void;
 	update(f:EngineFrame):{changed:boolean;animating:boolean;fly:T.Box3|null};
-	/** Re-warp picker geometry and the shared per-part bounds (in place). Call when the date settles. */
-	settle():void;
+	/** Re-warp picker geometry and the shared per-part bounds (in place). Call when the date settles. Skips parts whose resolved fx and warp segments are unchanged since their last settle; returns how many parts it re-warped. */
+	settle():number;
 	/** Warped union box of an issue's parts and layer, for Isolate. */
 	isolateBox(id:string):T.Box3|null;
 	/** Default pivot of atlas part `i`: its rest bounds centre, from the decoded vertices once ready() has them (atlas.json bounds are corrupt for a few parts, e.g. Right cornea), else from atlas bounds. */
@@ -122,8 +122,32 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 		requestFly(box){pendingFly=warpBox(box);},
 	};
 
+	// settle(): per part, a bit mask of the segments its vertices use; the fx and warp it was last settled with.
+	let segMask=new Uint16Array(0),settledFx:(ResolvedFx|undefined)[]=[],settledWs:WarpState|null=null,unsettled=true;
+	const sameFx=(a:ResolvedFx|undefined,b:ResolvedFx|undefined)=>a===b||!!a&&!!b&&a.visible===b.visible&&a.swell===b.swell&&a.swellBand?.[0]===b.swellBand?.[0]&&a.swellBand?.[1]===b.swellBand?.[1]&&(['tint','scale','rotate','translate','pivot'] as const).every(k=>a[k].every((v,j)=>v===b[k][j]));
+	/** Bit mask of the segments whose warp parameters differ between two states (all of them when the ground moved). */
+	const changedSegments=(a:WarpState|null,b:WarpState)=>{
+		if(!a||a.ground!==b.ground)return 0xffff;let m=0;
+		for(let i=0;i<SEGMENTS.length;i++){const k=i*3;if(a.alongScale[i]!==b.alongScale[i]||a.boneScale[i]!==b.boneScale[i]||a.softScale[i]!==b.softScale[i]||a.newJoint[k]!==b.newJoint[k]||a.newJoint[k+1]!==b.newJoint[k+1]||a.newJoint[k+2]!==b.newJoint[k+2])m|=1<<i;}
+		return m;
+	};
+	const settle=()=>{
+		const p:Vec3=[0,0,0],nn:Vec3=[0,0,0],q:Vec3=[0,0,0],moved=changedSegments(settledWs,ws);let count=0;
+		pickers.forEach((mesh,i)=>{
+			const r=rest[i];if(!mesh||!r)return;const fi=fxMap.get(i);
+			if(settledWs&&!(segMask[i]&moved)&&sameFx(settledFx[i],fi))return;settledFx[i]=fi;count++;
+			const g=mesh.geometry,pos=g.getAttribute('position') as T.BufferAttribute,arr=pos.array as Float32Array,nrm=g.getAttribute('normal').array as Int8Array,sg=g.getAttribute('seg')?.array as Float32Array|undefined,f=fi??identityFx(restCenters[i]);
+			for(let v=0,k=0;v<r.length/3;v++,k+=3){
+				p[0]=r[k];p[1]=r[k+1];p[2]=r[k+2];nn[0]=nrm[k]/127;nn[1]=nrm[k+1]/127;nn[2]=nrm[k+2]/127;
+				applyFxPoint(f,p,nn,q);warpPoint(ws,q,sg?sg[k]:0,sg?sg[k+1]:0,sg?sg[k+2]:1,soft[i],q);arr[k]=q[0];arr[k+1]=q[1];arr[k+2]=q[2];
+			}
+			pos.needsUpdate=true;bounds[i].setFromBufferAttribute(pos);g.boundingBox=bounds[i].clone();g.computeBoundingSphere();
+		});
+		settledWs=ws;unsettled=false;return count;
+	};
+
 	const isolateBox=(id:string)=>{
-		const s=scriptFor(id);if(!s)return null;const box=new T.Box3();s.parts.forEach(name=>indicesOf(name).forEach(i=>box.union(bounds[i])));
+		const s=scriptFor(id);if(!s)return null;if(unsettled)settle();const box=new T.Box3();s.parts.forEach(name=>indicesOf(name).forEach(i=>box.union(bounds[i])));
 		const lb=layers.find(l=>l.script.id===id)?.layer.box();if(lb&&!lb.isEmpty())box.union(warpBox(lb));
 		return box.isEmpty()?null:box;
 	};
@@ -134,6 +158,7 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 		ready(p){
 			pickers=p;rest=p.map(m=>(m?.geometry.getAttribute('position').array as Float32Array|undefined)?.slice());
 			// Default pivots from the decoded vertices (atlas.json bounds carry stray vertices for a few parts).
+			segMask=new Uint16Array(n);for(let i=0;i<n;i++){let m=0;for(let k=segOffset[i];k<segOffset[i+1]&&k+1<segBytes.length;k+=2){m|=1<<(segBytes[k]&15);if(segBytes[k+1]<255)m|=1<<(segBytes[k]>>4);}segMask[i]=m||1;}
 			rest.forEach((r,i)=>{if(!r||!r.length)return;const lo=[Infinity,Infinity,Infinity],hi=[-Infinity,-Infinity,-Infinity];for(let k=0;k<r.length;k+=3)for(let j=0;j<3;j++){const v=r[k+j];if(v<lo[j])lo[j]=v;if(v>hi[j])hi[j]=v;}restCenters[i]=[(lo[0]+hi[0])/2,(lo[1]+hi[1])/2,(lo[2]+hi[2])/2];});
 			for(const s of SCRIPTS){if(!s.layer)continue;let ok=false;try{const layer=s.layer();ok=layer.init(layerCtx);if(ok)layers.push({script:s,layer});else layer.dispose();}catch(e){console.warn(`AnyHealth timeline: layer ${s.id} failed`,e);}if(!ok)noLayer.add(s.id);}
 			forceChange=true;remerge=true;
@@ -142,7 +167,7 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 			const dateChanged=!!f.date&&f.date!==last.date,isoChanged=f.isolate!==last.isolate,visChanged=f.visible!==last.visible;
 			const date=f.date||last.date,remerged=remerge&&!!date;
 			if(dateChanged||remerged){
-				if(dateChanged&&last.date)direction=f.date>last.date?1:-1;remerge=false;
+				if(dateChanged&&last.date)direction=f.date>last.date?1:-1;remerge=false;unsettled=true;
 				const body=bodyAt(date);ws=warpState(rig,body);writeWarpUniforms(warpU,ws);ctx={body,date};const c=ctx;
 				const list:PartFx[]=[];for(const s of SCRIPTS){try{const l=s.fxAt(dayOf(s,date),c);list.push(...(noLayer.has(s.id)?l.map(({visible:_,...r})=>r):l));}catch(e){console.warn(`AnyHealth timeline: ${s.id} fxAt failed`,e);}}
 				list.push(...growthFx(body),...eruptionFx(body));fxMap=mergeFx(list,indicesOf,restCenter);
@@ -162,17 +187,7 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 			last={date:f.date||last.date,visible:f.visible,isolate:f.isolate};
 			return {changed,animating,fly};
 		},
-		settle(){
-			const p:Vec3=[0,0,0],nn:Vec3=[0,0,0],q:Vec3=[0,0,0];
-			pickers.forEach((mesh,i)=>{
-				const r=rest[i];if(!mesh||!r)return;const g=mesh.geometry,pos=g.getAttribute('position') as T.BufferAttribute,arr=pos.array as Float32Array,nrm=g.getAttribute('normal').array as Int8Array,sg=g.getAttribute('seg')?.array as Float32Array|undefined,f=fxMap.get(i)??identityFx(restCenters[i]);
-				for(let v=0,k=0;v<r.length/3;v++,k+=3){
-					p[0]=r[k];p[1]=r[k+1];p[2]=r[k+2];nn[0]=nrm[k]/127;nn[1]=nrm[k+1]/127;nn[2]=nrm[k+2]/127;
-					applyFxPoint(f,p,nn,q);warpPoint(ws,q,sg?sg[k]:0,sg?sg[k+1]:0,sg?sg[k+2]:1,soft[i],q);arr[k]=q[0];arr[k+1]=q[1];arr[k+2]=q[2];
-				}
-				pos.needsUpdate=true;bounds[i].setFromBufferAttribute(pos);g.boundingBox=bounds[i].clone();g.computeBoundingSphere();
-			});
-		},
+		settle,
 		dispose(){
 			layers.forEach(l=>l.layer.dispose());layers.length=0;layerMaterials.forEach(m=>m.dispose());restGeoms.forEach(g=>g.dispose());restGeoms.clear();fx.texture.dispose();pickers=[];rest=[];
 		},

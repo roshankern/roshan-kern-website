@@ -52,4 +52,18 @@ export const checks:Check[]=[
 		console.log(`     scripts carrying a swellBand: ${[...new Set([...at.values()].flat().map(e=>`${e.id} [${e.band.map(v=>v.toFixed(4))}]`))].join("; ")}`);console.log(`     swellBand overlapping pairs: ${pairs.size?'':'none'}`);
 		for(const [k,p] of pairs)console.log(`       ${k}: ${fromDays(Math.floor(p.from))} .. ${fromDays(Math.floor(p.to))}, merged band [${p.merged.map(v=>v.toFixed(4)).join(', ')}]`);
 	}},
+	{name:'isolateBox settles first when the date changed since the last settle',async run(c){
+		const g=await c.geometry(),A=nodeEngine(g).engine,B=nodeEngine(g).engine,id='left-humerus-fracture-2009';
+		A.update(frame('2020-01-01'));A.settle();A.update(frame('2009-09-10'));const a=A.isolateBox(id)!;
+		B.update(frame('2009-09-10'));B.settle();const b=B.isolateBox(id)!;
+		for(const k of ['min','max'] as const)for(const ax of ['x','y','z'] as const)c.near(a[k][ax],b[k][ax],1e-9,`${k}.${ax}`);
+	}},
+	{name:'settle re-warps only parts whose fx or warp changed, with the same result as a full settle',async run(c){
+		const g=await c.geometry(),A=nodeEngine(g),B=nodeEngine(g),n=g.atlas.parts.length;
+		A.engine.update(frame('2026-03-01'));c.assert(A.engine.settle()===n,'first settle re-warps every part');c.assert(A.engine.settle()===0,'nothing changed: none');
+		A.engine.update(frame('2026-03-02'));const k=A.engine.settle();c.assert(k<n*0.05,`adult body held, walnut reaction fading: ${k} of ${n}`);
+		B.engine.update(frame('2026-03-02'));B.engine.settle();
+		A.bounds.forEach((b,i)=>{for(const key of ['min','max'] as const)for(const ax of ['x','y','z'] as const)c.near(b[key][ax],B.bounds[i][key][ax],1e-9,`${g.atlas.parts[i].name} ${key}.${ax}`);});
+		A.engine.update(frame('2012-01-01'));c.assert(A.engine.settle()>n*0.9,'a child date re-warps nearly everything');
+	}},
 ];
