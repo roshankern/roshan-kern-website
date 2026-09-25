@@ -3,14 +3,19 @@
  * Segment i (SEGMENTS order): rest joint J_i, unit axis a_i, global scale S = body.scale, along factor ℓ_i = body.length, bone perpendicular factor γb_i = body.boneGirth, soft factor γs_i = body.softGirth.
  *   T_i(p) = N_i + S·(ℓ_i (d·a_i) a_i + γb_i (d − (d·a_i) a_i)),  d = p − J_i: ONE map (bone girth) for every vertex, so parent and child agree at their joint for soft tissue too (Task 14a).
  *   N_trunk = S·J_trunk (scale about the origin); N_i = T_parent(J_i), so every child stays attached at its joint.
- *   p' = wA·T_segA(p) + (1 − wA)·T_segB(p) + soft · n' · dBone · (wA·S(γs−γb)_segA + (1 − wA)·S(γs−γb)_segB), then p'.y += ground.
- *     The soft-tissue girth is a post-warp inflation along the warped normal n': dBone is the vertex's rest distance to the nearest bone surface (segments.bin byte 2; 0 for bone), so tissue d from the bone ends S·γs·d from it, not S·γb·d. `soft` = the part is muscular / integumentary / connective.
+ *   p' = wA·T_segA(p) + (1 − wA)·T_segB(p) + soft · Σ_{i∈{A,B}} w_i · S(γs_i − γb_i) · min(1, dBone/ρ_i) · r_i(p), then p'.y += ground.
+ *     The soft-tissue girth is a post-warp inflation: r_i = d − (d·a_i) a_i is the point's rest offset from segment i's axis (ρ_i = |r_i|; the bone-girth map keeps its direction), and dBone is its rest distance to the nearest bone
+ *     (segments.bin bytes 2-3; 0 for bone). So tissue dBone from the bone ends S·γs·dBone from it instead of S·γb·dBone, and near the axis (ρ < dBone) it is the plain soft-girth scaling. It vanishes at the bones, so parent and child agree at their joint.
+ *     The direction is radial, not the vertex normal: a normal offset folds thin sheets (Task 14a report: 17,836 flipped triangles on the hand-built child, 51,202 on the infant). `soft` = the part is muscular / integumentary / connective.
  *   ground = −(lowest warped sole point): the four points under each ankle and each toe tip on the rest floor (y = 0), warped by their foot segment.
  *   Normal: n' = normalize(wA·M_A n + (1 − wA)·M_B n), M_i = (1/ℓ_i) a aᵀ + (1/γb_i)(I − a aᵀ) (the inverse transpose of T_i's linear part, up to S). */
 import {SEGMENTS,type Body,type Rig,type Vec3} from '../types';
 
-/** segments.bin: per atlas part in order, vertexCount × SEG_STRIDE bytes: byte0 = segA | segB<<4, byte1 = round(weightA·255), byte2 = round(dBone / D_UNIT), the rest distance to the nearest bone surface (0 for bone, capped at 255 units = 12.75 cm). */
-export const SEG_STRIDE=3,D_UNIT=0.0005;
+/** segments.bin: per atlas part in order, vertexCount × SEG_STRIDE bytes: byte0 = segA | segB<<4, byte1 = round(weightA·255), bytes 2-3 = round(dBone / D_UNIT) (uint16, little-endian): the rest distance to the nearest bone (0 for bone, capped at 65535 units = 13.1 cm).
+ * 16 bits because 0.5 mm steps of dBone alone flip hundreds of thin-sheet triangles (Task 14a report). The engine hands these 4 bytes to the shader unchanged. */
+export const SEG_STRIDE=4,D_UNIT=2e-6;
+/** Decode vertex v of a segments.bin slice starting at byte `o`: [segA, segB, weightA 0..1, dBone metres]. */
+export const segAt=(b:ArrayLike<number>,o:number,v:number):[number,number,number,number]=>{const k=o+v*SEG_STRIDE;return [b[k]&15,b[k]>>4,b[k+1]/255,(b[k+2]|b[k+3]<<8)*D_UNIT];};
 
 export interface WarpState {/** per segment, index = SEGMENTS order */ restJoint:Float32Array;axis:Float32Array;newJoint:Float32Array;/** S·ℓ_i */ alongScale:Float32Array;/** S·γ_i (bone) */ boneScale:Float32Array;/** S·γ_i (soft) */ softScale:Float32Array;/** y shift to keep the feet on the floor */ ground:number}
 
@@ -39,16 +44,16 @@ export function warpState(rig:Rig,body:Body):WarpState{
 	ws.ground=-lo;return ws;
 }
 
-const tn:Vec3=[0,0,0];
-/** Warp one rest-space point with blend weights (segA with weight wA, segB with 1-wA). `soft` parts with a rest normal `n` and a bone distance `dBone` (metres) get the soft-girth inflation along the warped normal. Writes and returns `out` (which may be `p`, not `n`). */
-export function warpPoint(ws:WarpState,p:Vec3,segA:number,segB:number,wA:number,soft:boolean,out:Vec3,n?:Vec3,dBone=0):Vec3{
-	const g=ws.boneScale,x=p[0],y=p[1],z=p[2];
-	const k=soft&&n&&dBone>0?dBone*(wA*(ws.softScale[segA]-g[segA])+(wA<1?(1-wA)*(ws.softScale[segB]-g[segB]):0)):0;
-	if(k!==0)warpNormal(ws,n!,segA,segB,wA,tn);
+/** Warp one rest-space point with blend weights (segA with weight wA, segB with 1-wA). `soft` parts with a bone distance `dBone` (metres) get the soft-girth inflation. Writes and returns `out` (which may be `p`). */
+export function warpPoint(ws:WarpState,p:Vec3,segA:number,segB:number,wA:number,soft:boolean,out:Vec3,dBone=0):Vec3{
+	const g=ws.boneScale,x=p[0],y=p[1],z=p[2];let ix=0,iy=0,iz=0;
+	if(soft&&dBone>0){
+		const add=(i:number,w:number)=>{const k=i*3,ax=ws.axis[k],ay=ws.axis[k+1],az=ws.axis[k+2],dx=x-ws.restJoint[k],dy=y-ws.restJoint[k+1],dz=z-ws.restJoint[k+2],t=dx*ax+dy*ay+dz*az,rx=dx-t*ax,ry=dy-t*ay,rz=dz-t*az,m=w*(ws.softScale[i]-g[i])*Math.min(1,dBone/Math.max(Math.sqrt(rx*rx+ry*ry+rz*rz),1e-9));ix+=m*rx;iy+=m*ry;iz+=m*rz;};
+		add(segA,wA);if(wA<1)add(segB,1-wA);
+	}
 	segPoint(ws,segA,g[segA],x,y,z,out);
 	if(wA<1){const ax=out[0],ay=out[1],az=out[2];segPoint(ws,segB,g[segB],x,y,z,out);out[0]=wA*ax+(1-wA)*out[0];out[1]=wA*ay+(1-wA)*out[1];out[2]=wA*az+(1-wA)*out[2];}
-	if(k!==0){out[0]+=k*tn[0];out[1]+=k*tn[1];out[2]+=k*tn[2];}
-	out[1]+=ws.ground;return out;
+	out[0]+=ix;out[1]+=iy+ws.ground;out[2]+=iz;return out;
 }
 
 /** Warp one rest-space normal the same way (inverse-transpose of each segment's bone-girth map, blended, normalized). Writes and returns `out` (which may be `n`). */

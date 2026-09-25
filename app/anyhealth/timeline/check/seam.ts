@@ -7,7 +7,7 @@ import type {Vec3} from '../types';
 /** Edges shorter than this (metres) are skipped by the ratio and tear tests, and faces with a smaller doubled area by the orientation test: their ratios / normals are noise. */
 const MIN_EDGE=1e-4,MIN_AREA2=1e-10,TEAR=0.001;
 
-/** Counts, over triangles of parts with mixed segment weights (segments.bin: per part in atlas order, vertexCount × SEG_STRIDE bytes; soft parts inflate by their bone distance along the vertex normal, as in the engine):
+/** Counts, over triangles of parts with mixed segment weights (segments.bin: per part in atlas order, vertexCount × SEG_STRIDE bytes; soft parts get the soft-girth inflation from their bone distance, as in the engine):
  * - flipped: the warped face normal · the blended warped normal (warpNormal of the rest face normal, summed over the three vertices' weights) ≤ 0, i.e. an inverted triangle;
  * - torn: some warped edge > rest edge × the triangle's max segment scale + 1 mm;
  * - ratioOut: some warped / rest edge ratio outside [0.2, 5] × the triangle's max segment scale. */
@@ -16,8 +16,8 @@ export function seamDefects(ws:WarpState,geometry:NodeAtlas,segBin:Uint8Array):{
 	geometry.parts.forEach((part,i)=>{
 		const n=part.position.length/3,o=off,Z=SEG_STRIDE;off+=n*Z;const soft=SOFT_SYSTEMS.includes(geometry.atlas.parts[i].system),girth=soft?ws.softScale:ws.boneScale;
 		let mixed=false;for(let v=0;v<n&&!mixed;v++)mixed=bin[o+v*Z]!==bin[o]||(bin[o+v*Z+1]<255&&(bin[o+v*Z]&15)!==bin[o+v*Z]>>4);if(!mixed)return;
-		const sa=(v:number)=>bin[o+v*Z]&15,sb=(v:number)=>bin[o+v*Z]>>4,wa=(v:number)=>bin[o+v*Z+1]/255,R=part.position,N=part.normal,Nv:Vec3=[0,0,0];
-		const w=new Float64Array(n*3);for(let v=0;v<n;v++){P[0]=R[v*3];P[1]=R[v*3+1];P[2]=R[v*3+2];Nv[0]=N[v*3]/127;Nv[1]=N[v*3+1]/127;Nv[2]=N[v*3+2]/127;w.set(warpPoint(ws,P,sa(v),sb(v),wa(v),soft,[0,0,0],Nv,bin[o+v*Z+2]*D_UNIT),v*3);}
+		const sa=(v:number)=>bin[o+v*Z]&15,sb=(v:number)=>bin[o+v*Z]>>4,wa=(v:number)=>bin[o+v*Z+1]/255,R=part.position;
+		const w=new Float64Array(n*3);for(let v=0;v<n;v++){P[0]=R[v*3];P[1]=R[v*3+1];P[2]=R[v*3+2];w.set(warpPoint(ws,P,sa(v),sb(v),wa(v),soft,[0,0,0],(bin[o+v*Z+2]|bin[o+v*Z+3]<<8)*D_UNIT),v*3);}
 		const segMax=(v:number)=>{const a=sa(v),b=sb(v),s=Math.max(ws.alongScale[a],girth[a]);return wa(v)<1?Math.max(s,ws.alongScale[b],girth[b]):s;};
 		const len=(A:ArrayLike<number>,u:number,v:number)=>Math.hypot(A[u*3]-A[v*3],A[u*3+1]-A[v*3+1],A[u*3+2]-A[v*3+2]);
 		const cross=(A:ArrayLike<number>,a:number,b:number,c:number):Vec3=>{const ux=A[b*3]-A[a*3],uy=A[b*3+1]-A[a*3+1],uz=A[b*3+2]-A[a*3+2],vx=A[c*3]-A[a*3],vy=A[c*3+1]-A[a*3+1],vz=A[c*3+2]-A[a*3+2];return [uy*vz-uz*vy,uz*vx-ux*vz,ux*vy-uy*vx];};

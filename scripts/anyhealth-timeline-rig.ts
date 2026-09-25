@@ -1,10 +1,11 @@
 // Builds the AnyHealth timeline rig and per-vertex segment weights from the rest-pose atlas: npx tsx scripts/anyhealth-timeline-rig.ts
 // Writes app/anyhealth/timeline/growth/rig.json (a Rig) and public/anyhealth/models/segments.bin
-// (per atlas part in order, vertexCount × 3 bytes: byte0 = segA | segB<<4, byte1 = round(weightA*255), byte2 = round(dBone / 0.5 mm), the rest distance to the nearest bone (distance field), capped at 255).
+// (per atlas part in order, vertexCount × 4 bytes: byte0 = segA | segB<<4, byte1 = round(weightA*255), bytes 2-3 = uint16 LE round(dBone / 2 µm), the rest distance to the nearest bone (distance field); see growth/warp.ts SEG_STRIDE).
 // Weights (Task 14a): per joint, a child-side indicator centred on the joint plane, faded into the nearest-bone side where one bone clearly owns the tissue; the indicators combine into a tree partition of unity (see WEIGHTS below).
 import fs from 'node:fs';
 import {loadAtlasNode} from '../app/anyhealth/timeline/check/node-atlas';
 import {boneSegment} from '../app/anyhealth/timeline/growth/segment-map';
+import {SEG_STRIDE,D_UNIT} from '../app/anyhealth/timeline/growth/warp';
 import {SEGMENTS,type Rig,type Segment,type SegmentId,type Vec3} from '../app/anyhealth/timeline/types';
 
 const RIG_OUT='app/anyhealth/timeline/growth/rig.json',BIN_OUT='public/anyhealth/models/segments.bin';
@@ -18,8 +19,6 @@ const CONTACT=[0.006,0.008,0.010,0.012];
  * Chosen by a sweep (see the Task 14a report); overridable as ANYHEALTH_<NAME> (pairs as "lo,hi"). */
 const env=(k:string,d:number)=>Number(process.env[`ANYHEALTH_${k}`]??d),pair=(k:string,d:string)=>(process.env[`ANYHEALTH_${k}`]??d).split(',').map(Number);
 const GRID=env('GRID',0.005),PLANE_B=env('PLANE_B',0.05),BLEND=env('BLEND',0.02),FADE=pair('FADE','0.02,0.06'),SIB=env('SIB',0.3),SIB_FAR=pair('SIB_FAR','0.1,0.4');
-/** dBone byte unit (metres); matches D_UNIT in growth/warp.ts. */
-const D_UNIT=0.0005;
 const NS=SEGMENTS.length,SEG=(id:SegmentId)=>SEGMENTS.indexOf(id);
 const r5=(v:number)=>Math.round(v*1e5)/1e5;
 const smoothstep=(a:number,b:number,x:number)=>{const t=Math.min(1,Math.max(0,(x-a)/(b-a)));return t*t*(3-2*t);};
@@ -122,11 +121,11 @@ async function main(){
 	/** Each segment's subtree (itself and every descendant). */
 	const SUBTREE=SEGMENTS.map((_,i)=>{const out=[i];for(let k=0;k<out.length;k++)out.push(...KIDS[out[k]]);return out;});
 	const D=new Float64Array(NS),DS=new Float64Array(NS),c=new Float64Array(NS),W=new Float64Array(NS),EPS=1e-4;
-	const out=new Uint8Array(parts.reduce((s,p)=>s+p.position.length/3,0)*3);let o=0,mixed=0,dropped=0,maxDrop=0;
-	const dbgF=process.env.ANYHEALTH_FLOAT_OUT?new Float32Array(out.length/3*2):null;
+	const out=new Uint8Array(parts.reduce((s,p)=>s+p.position.length/3,0)*SEG_STRIDE);let o=0,mixed=0,dropped=0,maxDrop=0;
+	const dbgF=process.env.ANYHEALTH_FLOAT_OUT?new Float32Array(out.length/SEG_STRIDE*2):null;
 	parts.forEach((g,pi)=>{
 		const fixed=boneSegment(atlas.parts[pi].name),v=g.position,nv=v.length/3;
-		if(fixed){const s=SEG(fixed);for(let i=0;i<nv;i++){if(dbgF){dbgF[o/3*2]=1;dbgF[o/3*2+1]=0;}out[o++]=s|s<<4;out[o++]=255;out[o++]=0;}return;}
+		if(fixed){const s=SEG(fixed);for(let i=0;i<nv;i++){if(dbgF){dbgF[o/SEG_STRIDE*2]=1;dbgF[o/SEG_STRIDE*2+1]=0;}out[o++]=s|s<<4;out[o++]=255;out[o++]=0;out[o++]=0;}return;}
 		for(let i=0;i<nv;i++){
 			const x=v[3*i],y=v[3*i+1],z=v[3*i+2];sample(x,y,z,D);
 			for(let s=0;s<NS;s++){let m=Infinity;for(const t of SUBTREE[s])m=Math.min(m,D[t]);DS[s]=m;}
@@ -148,7 +147,7 @@ async function main(){
 			let w=sB<0||kept<=0?1:W[sA]/kept;
 			if(Math.round(w*255)>=255){w=1;sB=sA;}else mixed++;
 			let dBone=Infinity;for(let s=0;s<NS;s++)dBone=Math.min(dBone,D[s]);
-			if(dbgF){dbgF[o/3*2]=w;dbgF[o/3*2+1]=dBone;}out[o++]=sA|sB<<4;out[o++]=Math.round(w*255);out[o++]=Math.min(255,Math.round(dBone/D_UNIT));
+			if(dbgF){dbgF[o/SEG_STRIDE*2]=w;dbgF[o/SEG_STRIDE*2+1]=dBone;}const du=Math.min(65535,Math.round(dBone/D_UNIT));out[o++]=sA|sB<<4;out[o++]=Math.round(w*255);out[o++]=du&255;out[o++]=du>>8;
 		}
 	});
 	if(dbgF)fs.writeFileSync(process.env.ANYHEALTH_FLOAT_OUT!,Buffer.from(dbgF.buffer));
