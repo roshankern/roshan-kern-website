@@ -35,8 +35,24 @@ The atlas is one adult male reference model (BodyParts3D), so some anatomy the t
 - **No third molars** — wisdom-tooth issues add small custom meshes (cloned, scaled second molars) rather than animating an existing part.
 - **Adult-only dentition** — the atlas ships one adult tooth set; primary (baby) teeth before eruption are shown as scaled-down stand-ins on the same sockets, noted as illustrative.
 
+### airway
+
+- **No subglottis part.** Croup narrowing is drawn as a `swellBand` on the `Trachea`, covering the 2 cm below the cricoid's lower edge. The true subglottis also runs inside the cricoid ring, which is cartilage in the atlas and does not swell.
+- **Swell pushes along the mesh normals.** The trachea and bronchi are surface meshes, so a negative swell draws the tube narrowing. It does not model the mucosa thickening into a separate lumen. The mm values are set on the adult rest mesh, and the body warp scales them with the child.
+- **Laryngomalacia on the epiglottis only.** The atlas has no aryepiglottic-fold or supraglottic mucosa mesh, so the curl and posterior tilt of the `Epiglottis` carry the whole sign.
+- **Asthma and COVID live on the bronchial trees**, since there is no lung parenchyma. Asthma swells and tints all 22 respiratory `/bronch/i` names (100 parts). Small-airway disease below the segmental level is not modelled.
+- **Recurrent croup dates.** The record gives counts, not dates, for most episodes ("about 3 each winter"). Those episodes are spread with a seeded PRNG across October–March. Documented episodes with only a month use the 15th. See `airway.md#croup-winter`.
+
 ## Illustrative effects
 
 Effects that are stylized rather than literal anatomy (`illustrative: true` on the issue script, shown with an "Illustrative" tag in the tracker). Filled in by each area's agent as scripts are written:
 
 *(none yet — populated by the area tasks)*
+
+### airway
+
+- **COVID-19 (2020-08-28)** (`illustrative: true`): a patchy warm tint on a deterministic 40% of the segmental bronchial trees for 14 days. It stands in for a lung infection the model has no parenchyma to show.
+- **Not flagged, but partly stylized:**
+  - The seeded winter croup dates (the counts come from the record, the days do not).
+  - The laryngomalacia curl angle.
+  - The blue highlight tints marking the bronchoscopy, spirometry, re-evaluation and budesonide windows.
