@@ -6,7 +6,10 @@ import {SCRIPTS as AREA,LEAD_DAYS} from '../issues/catalog/bones';
 import {SCOLIOSIS_LEVELS,SCOLIOSIS_RIBS} from '../issues/bones/scoliosis';
 import {bodyAt} from '../growth/proportions';
 import {toDays,fromDays} from '../../health/dates';
-import {HEALED_DAY,TIMELINE_DENSITY,FRACTURE_DATE} from '../../fracture/model';
+import {HEALED_DAY,TIMELINE_DENSITY,FRACTURE_DATE,FRACTURE_PART} from '../../fracture/model';
+import {createEngine} from '../engine';
+import rigJson from '../growth/rig.json';
+import type {Rig} from '../types';
 
 const TODAY='2026-09-25';
 const script=(id:string)=>AREA.find(s=>s.id===id)!;
@@ -78,19 +81,43 @@ export const checks:Check[]=[
 		let meshes=0;scene.traverse(o=>{if((o as T.Mesh).isMesh){meshes++;c.assert(!(o as T.Mesh).frustumCulled,'custom meshes are not frustum-culled (the warp moves them)');}});c.assert(meshes>=6,`fragments, caps, callus, clots (${meshes})`);
 		layer.dispose();c.assert(scene.children.length===0,'dispose removes the layer');
 	}},
+	{name:'bones: through the real engine, the fracture pose runs after the hoisted begin_vertex and before the fx/warp block',async run(c){
+		const g=await c.geometry(),{atlas}=g,scene=new T.Scene();
+		const bounds=atlas.parts.map(p=>new T.Box3(new T.Vector3().fromArray(p.bounds[0]),new T.Vector3().fromArray(p.bounds[1])));
+		const segments=new ArrayBuffer(atlas.parts.reduce((s,p)=>s+p.vertexCount*2,0));
+		const engine=createEngine({atlas,scene,bounds,rig:rigJson as Rig,segments});
+		// Only the humerus needs a picker: the engine's restGeometry reads it.
+		const pickers:(T.Mesh|undefined)[]=[];g.indicesOf(FRACTURE_PART).forEach(i=>{const p=g.parts[i],geo=new T.BufferGeometry();geo.setAttribute('position',new T.BufferAttribute(p.position.slice(),3));geo.setAttribute('normal',new T.BufferAttribute(p.normal,3));geo.setIndex(new T.BufferAttribute(p.index,1));pickers[i]=new T.Mesh(geo);});
+		engine.ready(pickers);
+		const root=scene.getObjectByName('fracture');c.assert(!!root,'the engine built the fracture layer');
+		const mats=new Set<T.Material>();root!.traverse(o=>{if((o as T.Mesh).isMesh)mats.add((o as T.Mesh).material as T.Material);});c.assert(mats.size>=7,`materials (${mats.size})`);
+		let posed=0;
+		for(const m of mats){
+			const sh={vertexShader:T.ShaderLib.standard.vertexShader,fragmentShader:T.ShaderLib.standard.fragmentShader,uniforms:{} as Record<string,{value:unknown}>};
+			m.onBeforeCompile(sh as unknown as Parameters<T.Material['onBeforeCompile']>[0],undefined as unknown as T.WebGLRenderer);
+			const v=sh.vertexShader,bn=v.indexOf('#include <beginnormal_vertex>'),bv=v.indexOf('#include <begin_vertex>'),block=v.indexOf('{',bv);
+			c.assert(bn>=0&&bv>bn&&v.indexOf('#include <begin_vertex>',bv+1)<0,'begin_vertex hoisted once, after beginnormal_vertex');
+			c.assert(m.customProgramCacheKey().includes('timeline:'),'engine cache key kept');
+			const pose=v.indexOf('uPose * vec4(transformed');if(pose<0)continue;posed++;
+			c.assert(pose>bv&&pose<block,'uPose line sits between begin_vertex and the fx/warp block');
+			c.assert('uPose' in sh.uniforms&&'twSoft' in sh.uniforms,'both the pose and the engine uniforms are bound');
+		}
+		c.assert(posed===6,`fragments, caps and clots are posed in the shader (${posed})`);
+		engine.dispose();
+	}},
 	{name:'bones: scoliosis parts are T1–T6, their disks and ribs 1–6 on each side',run(c){
 		const p=new Set(script(SCOLIOSIS).parts);SCOLIOSIS_LEVELS.forEach(l=>{c.assert(p.has(l.vertebra)&&p.has(l.disk),`${l.vertebra} + disk`);});SCOLIOSIS_RIBS.forEach(r=>{c.assert(p.has(r.left)&&p.has(r.right),r.left);});
 		c.assert(p.size===SCOLIOSIS_LEVELS.length*2+SCOLIOSIS_RIBS.length*2&&p.size===24,'24 parts');c.assert(script(SCOLIOSIS).chronic===true,'chronic');
 	}},
 	{name:'bones: scoliosis rest levels match the atlas (bounds centres, 1 mm)',async run(c){
 		const {atlas}=await c.geometry(),centre=(n:string)=>{const p=atlas.parts.find(q=>q.name===n);c.assert(!!p,`atlas has ${n}`);return [0,1,2].map(k=>(p!.bounds[0][k]+p!.bounds[1][k])/2);};
-		SCOLIOSIS_LEVELS.forEach(l=>{c.near(centre(l.vertebra)[1],l.y,.001,`${l.vertebra} y`);c.near(centre(l.vertebra)[2],l.z,.001,`${l.vertebra} z`);c.near(centre(l.disk)[1],l.diskY,.001,`${l.disk} y`);});
+		SCOLIOSIS_LEVELS.forEach(l=>{c.near(centre(l.vertebra)[0],l.x,.001,`${l.vertebra} x`);c.near(centre(l.vertebra)[1],l.y,.001,`${l.vertebra} y`);c.near(centre(l.vertebra)[2],l.z,.001,`${l.vertebra} z`);c.near(centre(l.disk)[1],l.diskY,.001,`${l.disk} y`);});
 	}},
 	{name:'bones: scoliosis at today peaks at T3/T4 and stays within 1.2 cm',run(c){
 		const d=toDays(TODAY)-toDays(script(SCOLIOSIS).onset),fx=at(SCOLIOSIS,d,TODAY),off=(n:string)=>Math.abs(fxOf(fx,n)?.translate?.[0]??0);
 		const [t1,,t3,t4,,t6]=SCOLIOSIS_LEVELS.map(l=>off(l.vertebra)),apex=Math.max(t3,t4);
 		c.assert(apex>0,'the apex moves');c.assert(apex>=t1&&apex>=t6,`apex ${apex} ≥ T1 ${t1}, T6 ${t6}`);c.assert(fx.every(f=>Math.hypot(...(f.translate??[0,0,0]))<=.012),'|offset| ≤ 1.2 cm');
-		c.assert(fx.every(f=>(f.translate?.[0]??0)<=0),'convex to the right (−x)');
+		c.assert(fx.every(f=>(f.translate?.[0]??0)>=0),'convex to the left (+x), the proximal thoracic side');
 		SCOLIOSIS_RIBS.forEach((r,i)=>{const v=fxOf(fx,SCOLIOSIS_LEVELS[i].vertebra)?.translate?.[0];c.assert(fxOf(fx,r.left)?.translate?.[0]===v&&fxOf(fx,r.right)?.translate?.[0]===v,`${r.left} follows its vertebra`);});
 		c.assert(fxOf(fx,SCOLIOSIS_LEVELS[2].vertebra)?.rotate!==undefined,'vertebrae rotate');
 	}},

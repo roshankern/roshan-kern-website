@@ -38,6 +38,7 @@ The atlas is one adult male reference model (BodyParts3D), so some anatomy the t
 ### bones
 
 - **Fracture on an adult humerus.** The 2009 break is cut into the adult atlas humerus in rest space. The fragments, caps, callus and clot then ride the `lUpperArm` segment warp, so they scale with the 6-year-old arm. Each fragment's pose is applied before the warp. The pose pivots at the rest shoulder and elbow ends of the bone, not at a child-sized skeleton's joints, but the displacements are millimetres, so the error is negligible.
+- **Fracture meshes use one fixed segment.** The fragments, caps, callus and clot all warp with the fixed `lUpperArm` segment (weight 1). The atlas humerus blends trunk and upper-arm weights near the shoulder, so during childhood warp a slight seam is possible where the head fragment meets the shoulder.
 - **Physis not modelled.** A 6-year-old's proximal humerus has an open growth plate. The atlas humerus is one fused adult bone, so the break is placed by fraction of length (0.21 from the shoulder end) rather than relative to the physis.
 - **Scoliosis moves parts rigidly.** T1–T6 and their disks shift, tilt and turn as whole parts. Ribs 1–6 only shift with their vertebra: they do not rotate into a rib hump. The costal cartilages and sternum stay put, so at the apex (≈4.5 mm) the rib ends can separate slightly from their cartilages. Vertebral wedging is not modelled.
 
@@ -49,5 +50,5 @@ Effects that are stylized rather than literal anatomy (`illustrative: true` on t
 
 ### bones
 
-- **`scoliosis-upper-thoracic-2025`** (`illustrative: true`). The record has no imaging, so the angle (10° Cobb), side (right-convex), apex (T3–T4), axial rotation and 2020–2025 development are typical values from the literature. They are not measured on this patient (see [bones.md](bones.md)).
+- **`scoliosis-upper-thoracic-2025`** (`illustrative: true`). The record has no imaging, so the angle (10° Cobb), side (left-convex, the classic side of a proximal thoracic curve; the side is uncertain because no imaging exists), apex (T3–T4), axial rotation and 2020–2025 development are typical values from the literature. They are not measured on this patient (see [bones.md](bones.md)).
 - **Fracture clot and callus lumps** (`left-humerus-fracture-2009`). The fragment displacement and the callus extent come from the films. The hematoma is drawn as two soft translucent ellipsoids (≈4 × 6 cm), and the callus lumps are a seeded random pattern: both are stylized. The script is not flagged illustrative because the break itself is literal.

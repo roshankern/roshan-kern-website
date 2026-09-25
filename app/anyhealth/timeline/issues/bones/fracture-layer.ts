@@ -177,7 +177,7 @@ export function fractureLayer():CustomLayer{
 			// Wind each triangle to face out of its fragment: +u from the head, -u from the shaft.
 			for(let i=0;i<p.length;i+=9){v0.fromArray(p,i);v1.fromArray(p,i+3);v2.fromArray(p,i+6);if(v1.sub(v0).cross(v2.sub(v0)).dot(u)*dir<0)for(let k=0;k<3;k++){const x=p[i+3+k];p[i+3+k]=p[i+6+k];p[i+6+k]=x;}}
 			const g=geo(new T.BufferGeometry());g.setAttribute('position',new T.Float32BufferAttribute(p,3));g.setAttribute('color',new T.Float32BufferAttribute(capCol,3));g.computeVertexNormals();g.computeBoundingSphere();
-			const m=ctx.material({color:'#ffffff',segment:SEGMENT});m.vertexColors=true;m.metalness=0;m.roughness=.86;m.side=T.FrontSide;disposables.push(m);withPose(m,pose,`cap-${key}`);
+			const m=ctx.material({color:'#ffffff',segment:SEGMENT});m.vertexColors=true;m.metalness=0;m.roughness=.86;disposables.push(m);withPose(m,pose,`cap-${key}`);
 			add(new T.Mesh(g,m));
 		};
 		cap(1,poseHead,'head');cap(-1,poseShaft,'shaft');
@@ -270,7 +270,8 @@ export function fractureLayer():CustomLayer{
 				const key=`${day}|${kick}`;
 				if(key!==lastKey){
 					lastKey=key;changed=true;place(state.gap*kick,state.shift*kick,state.angle*kick);
-					uLine.value=state.line;
+					// No crack while the snap is pending: the bone is still drawn intact.
+					uLine.value=pending?0:state.line;
 					const soft=1-state.mineral;callus.visible=state.callus>.004;uCallus.fadeMix.value=state.mineral**2;
 					callusMat.opacity=(.72*soft+state.mineral)*Math.min(1,state.callus*3);callusMat.depthWrite=state.mineral>.6;
 					if(callus.visible)pose(state.callus,smooth(50,200,state.day));

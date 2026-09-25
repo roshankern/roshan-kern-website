@@ -1,14 +1,14 @@
-/** Upper-thoracic scoliosis as part effects: T1–T6 and their disks shift sideways along a smooth arc (apex between T3 and T4), tilt with the arc and turn axially toward the convexity; ribs 1–6 follow their vertebra's shift. It develops from 2020 to the 2025-07-08 record and then holds (chronic). The record has no imaging, so the angle, side and apex are typical values (see docs/anyhealth/timeline-medical-basis/bones.md). */
+/** Upper-thoracic scoliosis as part effects: T1–T6 and their disks shift sideways (to the left, the classic side of a proximal thoracic curve) along a smooth arc (apex between T3 and T4), tilt with the arc and turn axially toward the convexity; ribs 1–6 follow their vertebra's shift. It develops from 2020 to the 2025-07-08 record and then holds (chronic). The record has no imaging, so the angle, side and apex are typical values (see docs/anyhealth/timeline-medical-basis/bones.md). */
 import type {PartFx,Quat} from '../../types';
 import {toDays} from '../../../health/dates';
 
-/** One thoracic level: vertebra and the disk below it, with rest bounds-centre y / z of the vertebra and y of the disk (atlas.json, checked in bones.check.ts). */
-export interface SpineLevel {vertebra:string;disk:string;y:number;z:number;diskY:number}
+/** One thoracic level: vertebra and the disk below it, with the rest bounds centre (x, y, z) of the vertebra and y of the disk (atlas.json, checked in bones.check.ts). */
+export interface SpineLevel {vertebra:string;disk:string;x:number;y:number;z:number;diskY:number}
 const ORD=['first','second','third','fourth','fifth','sixth'],Ord=ORD.map(o=>o[0].toUpperCase()+o.slice(1));
-const REST:[number,number,number][]=// [vertebra y, vertebra z, disk y], metres (model geometry, not medical)
-[[1.4402,-.048,1.4264],[1.4216,-.0526,1.4063],[1.4002,-.061,1.3852],[1.3777,-.0651,1.3628],[1.3466,-.067,1.3379],[1.3173,-.0668,1.3112]];
+const REST:[number,number,number,number][]=// [vertebra x, vertebra y, vertebra z, disk y], metres (model geometry, not medical)
+[[-.0007,1.4402,-.048,1.4264],[-.0007,1.4216,-.0526,1.4063],[-.0006,1.4002,-.061,1.3852],[-.0006,1.3777,-.0651,1.3628],[-.0006,1.3466,-.067,1.3379],[-.0007,1.3173,-.0668,1.3112]];
 /** T1–T6, top to bottom. */
-export const SCOLIOSIS_LEVELS:SpineLevel[]=ORD.map((o,i)=>({vertebra:`${Ord[i]} thoracic vertebra`,disk:`Intervertebral disk of ${o} thoracic vertebra`,y:REST[i][0],z:REST[i][1],diskY:REST[i][2]}));
+export const SCOLIOSIS_LEVELS:SpineLevel[]=ORD.map((o,i)=>({vertebra:`${Ord[i]} thoracic vertebra`,disk:`Intervertebral disk of ${o} thoracic vertebra`,x:REST[i][0],y:REST[i][1],z:REST[i][2],diskY:REST[i][3]}));
 /** Ribs 1–6, paired with T1–T6. */
 export const SCOLIOSIS_RIBS=ORD.map(o=>({left:`Left ${o} rib`,right:`Right ${o} rib`}));
 /** Every part the scoliosis moves (the script's `parts`). */
@@ -22,10 +22,10 @@ export const SCOLIOSIS_LEAD_DAYS=toDays(SCOLIOSIS_RECORD)-toDays(SCOLIOSIS_START
 
 /** Cobb angle at the record: 10°, the diagnostic threshold (a "mild" curve; the 2021–2022 exams found none significant). */
 export const COBB_DEG=10; // basis: bones#scoliosis-cobb
-/** Convexity: −1 = to the body's right (−x), the usual side for thoracic curves. */
-export const CONVEX=-1; // basis: bones#scoliosis-convexity
+/** Convexity: +1 = to the body's left (+x). Proximal (upper) thoracic curves are classically left-convex, opposite a right main thoracic curve; the record gives no side. */
+export const CONVEX=1; // basis: bones#scoliosis-convexity
 /** Apex between T3 and T4 (rest y of their bounds centres, averaged). */
-export const APEX_Y=(REST[2][0]+REST[3][0])/2; // basis: bones#scoliosis-apex
+export const APEX_Y=(REST[2][1]+REST[3][1])/2; // basis: bones#scoliosis-apex
 /** The arc runs from C7 (its rest bounds centre) down to T7: neutral vertebrae at both ends, so the curve blends into the unmoved spine. */
 const TOP_Y=1.4564,BOTTOM_Y=1.2887; // basis: bones#scoliosis-apex
 /** Apical axial rotation per degree of Cobb angle. */
@@ -56,8 +56,8 @@ export function scoliosisFx(day:number):PartFx[]{
 	const out:PartFx[]=[];
 	SCOLIOSIS_LEVELS.forEach((l,i)=>{
 		const v=levelFx(l.vertebra,l.y,k);out.push(v);
-		// The disk turns about its vertebra's axis (the canal), so the two stay together.
-		out.push(levelFx(l.disk,l.diskY,k,[-.0007,l.diskY,l.z]));
+		// The disk turns about the same vertical axis as its vertebra (the vertebra's rest bounds-centre x/z, which the vertebra pivots on by default), so the two stay together.
+		out.push(levelFx(l.disk,l.diskY,k,[l.x,l.diskY,l.z]));
 		const r=SCOLIOSIS_RIBS[i];out.push({part:r.left,translate:[...v.translate!]},{part:r.right,translate:[...v.translate!]});
 	});
 	return out;
