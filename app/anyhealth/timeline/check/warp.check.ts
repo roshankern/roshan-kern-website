@@ -22,6 +22,10 @@ const unitBody=():Body=>{const ones=()=>Object.fromEntries(SEGMENTS.map(s=>[s,1]
 const oddBody=():Body=>{const b=unitBody();b.scale=0.3;b.statureM=R.stature*0.3;b.length.head=2.0;for(const s of ['lThigh','lShank','lFoot','rThigh','rShank','rFoot'] as const)b.length[s]=0.7;for(const s of SEGMENTS){b.boneGirth[s]=0.9;b.softGirth[s]=1.25;}return b;};
 /** A moderate hand-built child (about age 6-8). It still flips / tears a few hundred seam triangles (see the KNOWN check and the Task 6 report). */
 const childBody=():Body=>{const b=unitBody();b.scale=0.75;b.statureM=R.stature*0.75;b.length.head=1.2;for(const s of ['lThigh','lShank','lFoot','rThigh','rShank','rFoot'] as const)b.length[s]=0.9;for(const s of SEGMENTS){b.boneGirth[s]=0.9;b.softGirth[s]=1.0;}return b;};
+/** S 0.75 with every segment's length / boneGirth / softGirth factor varied deterministically within ±x (different per segment and per field, so soft ≠ bone). */
+const perturbedBody=(x:number):Body=>{const b=unitBody();b.scale=0.75;b.statureM=R.stature*0.75;SEGMENTS.forEach((s,i)=>{const u=(f:number)=>Math.sin(12.9898*(i+1)+78.233*(f+1)*1.7);b.length[s]=1+x*u(0);b.boneGirth[s]=1+x*u(1);b.softGirth[s]=1+x*u(2);});return b;};
+/** Seam tolerance of the current segments.bin weights, from a sweep of perturbedBody(x) (Task 6 fix round 2): x = 0.0006 (±0.06%) is the largest with 0 defects; 0.0007 flips one Glans penis triangle; 0.002 → 2 flipped / 36 torn; 0.02 → 63 / 266 / 8. Effectively 0, so the hard list carries 0.8·x and a ratchet guards ±2%. */
+const SEAM_X=0.0006,RATCHET_2PCT={flipped:63,torn:266,ratioOut:8};
 const SEG_BIN='public/anyhealth/models/segments.bin';
 /** Visit every `stride`-th vertex of every part with its segment weights from segments.bin (per part in atlas order, vertexCount × 2 bytes). */
 async function eachVertex(c:CheckContext,stride:number,fn:(p:Vec3,segA:number,segB:number,wA:number,soft:boolean)=>void){
@@ -51,10 +55,15 @@ checks.push(
 		// seamDefects: flipped faces, edges longer than rest × max segment scale + 1 mm, edge ratios outside [0.2, 5] × max segment scale.
 		const g=await c.geometry(),fs=await import('node:fs'),bin=fs.readFileSync(SEG_BIN);
 		const uniform=unitBody();uniform.scale=0.75;uniform.statureM=R.stature*0.75;
-		for(const [label,body] of [['uniform scale 0.75',uniform],['bodyAt 2006-06-22',bodyAt('2006-06-22')],['bodyAt 2012-01-01',bodyAt('2012-01-01')]] as const){
+		for(const [label,body] of [['uniform scale 0.75',uniform],[`perturbed ±${(0.8*SEAM_X*100).toFixed(3)}% (0.8 × the measured zero-defect limit)`,perturbedBody(0.8*SEAM_X)],['bodyAt 2006-06-22',bodyAt('2006-06-22')],['bodyAt 2012-01-01',bodyAt('2012-01-01')]] as const){
 			const d=seamDefects(warpState(R,body),g,bin);c.assert(d.triangles>0,'no mixed-weight triangles found');
 			c.assert(d.flipped===0&&d.torn===0&&d.ratioOut===0,`${label}: ${d.flipped} flipped, ${d.torn} torn, ${d.ratioOut} out-of-ratio of ${d.triangles} triangles (e.g. ${d.worst})`);
 		}
+	}},
+	{name:'seam ratchet: a ±2% perturbed body has no more seam defects than measured',async run(c){
+		// Ratchet: lower RATCHET_2PCT when the weights improve; the seam rework should bring it to 0.
+		const g=await c.geometry(),fs=await import('node:fs'),d=seamDefects(warpState(R,perturbedBody(0.02)),g,fs.readFileSync(SEG_BIN));
+		c.assert(d.flipped<=RATCHET_2PCT.flipped&&d.torn<=RATCHET_2PCT.torn&&d.ratioOut<=RATCHET_2PCT.ratioOut,`±2%: ${d.flipped} flipped, ${d.torn} torn, ${d.ratioOut} out-of-ratio (ratchet ${JSON.stringify(RATCHET_2PCT)})`);
 	}},
 	{name:'KNOWN(seam rework): infant-proportion body folds',async run(){
 		// Reports only; the integration seam rework turns this into a hard assertion (and moves the hand-built child into the check above).
