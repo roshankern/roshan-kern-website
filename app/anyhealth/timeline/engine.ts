@@ -33,6 +33,8 @@ export interface Engine {
 	isolateBox(id:string):T.Box3|null;
 	/** Default pivot of atlas part `i`: its rest bounds centre, from the decoded vertices once ready() has them (atlas.json bounds are corrupt for a few parts, e.g. Right cornea), else from atlas bounds. */
 	restCenter(i:number):Vec3;
+	/** Performance fallback state: tier 0 normal, 1 pixel ratio 1, 2 also throttled date applies; lowRes = the engine set pixel ratio 1 (the scene keeps 1 on resize); applies = date recomputes so far. */
+	stats():{tier:0|1|2;lowRes:boolean;applies:number};
 	/** Final fx row-0 visibility of atlas part `i` (switches × Isolate × merged PartFx visible), as the shader sees it: picking treats < 0.5 as hidden. */
 	partVisible(i:number):number;
 	dispose():void;
@@ -65,7 +67,8 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 
 	let ws:WarpState=warpState(rig,bodyAt(BIRTH_DATE));writeWarpUniforms(warpU,ws);
 	let fxMap=new Map<number,ResolvedFx>(),pickers:(T.Mesh|undefined)[]=[],rest:(Float32Array|undefined)[]=[],pendingFly:T.Box3|null=null,forceChange=false;
-	let last:{date:string;visible:SystemId[]|null;isolate:string|null}={date:'',visible:null,isolate:null},direction:-1|0|1=0,ctx:FxContext|null=null,remerge=false;
+	// applied = the date whose body / fx are in the uniforms and texture; seen = the last frame's date (they differ while a throttled date is pending).
+	let applied='',seen='',lastVis:SystemId[]|null=null,lastIso:string|null=null,direction:-1|0|1=0,ctx:FxContext|null=null,remerge=false;
 	/** Scripts whose layer failed to build: their fx lose `visible` (a hide only makes sense when the layer draws the replacement). */
 	const noLayer=new Set<string>();
 	const layers:{script:IssueScript;layer:CustomLayer}[]=[],layerMaterials:T.Material[]=[],restGeoms=new Map<number,T.BufferGeometry>();
@@ -135,6 +138,7 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 		return m;
 	};
 	const settle=()=>{
+		if(seen&&(seen!==applied||remerge)){applyDate(seen);if(lastVis)writeVisibility(lastVis,lastIso);forceChange=true;}
 		const p:Vec3=[0,0,0],nn:Vec3=[0,0,0],q:Vec3=[0,0,0],moved=changedSegments(settledWs,ws);let count=0;
 		pickers.forEach((mesh,i)=>{
 			const r=rest[i];if(!mesh||!r)return;const fi=fxMap.get(i);
@@ -149,6 +153,49 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 		settledWs=ws;unsettled=false;return count;
 	};
 
+	/** Recompute the body, warp uniforms and merged fx for `date` (the heavy part of a date change). */
+	const applyDate=(date:string)=>{
+		if(applied&&date!==applied)direction=date>applied?1:-1;remerge=false;unsettled=true;applied=date;perf.applies++;
+		const body=bodyAt(date);ws=warpState(rig,body);writeWarpUniforms(warpU,ws);ctx={body,date};const c=ctx;
+		const list:PartFx[]=[];for(const s of SCRIPTS){try{const l=s.fxAt(dayOf(s,date),c);list.push(...(noLayer.has(s.id)?l.map(({visible:_,...r})=>r):l));}catch(e){console.warn(`AnyHealth timeline: ${s.id} fxAt failed`,e);}}
+		list.push(...growthFx(body),...eruptionFx(body));fxMap=mergeFx(list,indicesOf,restCenter);
+	};
+	/** Write the fx texture: the merged fx × the switches / Isolate visibility. */
+	const writeVisibility=(visible:SystemId[],isolate:string|null)=>{
+		const vis=visibilityFor(atlas.parts,visible,isolatedParts(isolate)),out=new Map(fxMap);
+		for(let i=0;i<n;i++)if(vis[i]<1){const r=out.get(i)??identityFx(restCenters[i]);out.set(i,{...r,visible:r.visible*vis[i]});}
+		writeFx(fx,out);
+	};
+
+	// Performance fallback: software GL renders at pixel ratio 1 from the start. During play (a frame whose date differs from the last frame's), an exponential
+	// average of the frame time below 30 fps for 2 s drops to pixel ratio 1 (tier 1); 2 s more below 30 fps throttles date applies to one per 100 ms (tier 2), and a pending date always applies on pause or settle.
+	const SLOW_MS=1000/30,SLOW_FOR=2000,THROTTLE_MS=100,EMA=0.1;
+	const perf={tier:0 as 0|1|2,lowRes:false,applies:0,ema:-1,prevNow:-1,slowSince:-1,lastApply:-Infinity};
+	const lowResNow=()=>{if(perf.lowRes)return;perf.lowRes=true;o.renderer?.setPixelRatio(1);};
+	const perfTick=(now:number,play:boolean)=>{
+		const dt=perf.prevNow<0?0:Math.min(250,now-perf.prevNow);perf.prevNow=now;
+		if(!play||dt<=0){if(!play)perf.slowSince=-1;return;}
+		perf.ema=perf.ema<0?dt:perf.ema+EMA*(dt-perf.ema);
+		if(perf.ema<=SLOW_MS){perf.slowSince=-1;return;}
+		if(perf.slowSince<0)perf.slowSince=now;else if(now-perf.slowSince>=SLOW_FOR&&perf.tier<2){perf.tier=perf.tier===0?1:2;perf.slowSince=now;if(perf.tier===1)lowResNow();}
+	};
+	const update=(f:EngineFrame)=>{
+		const play=!!f.date&&f.date!==seen;if(f.date)seen=f.date;perfTick(f.now,play);
+		const want=seen,isoChanged=f.isolate!==lastIso,visChanged=f.visible!==lastVis;
+		const doDate=!!want&&(want!==applied||remerge)&&!(perf.tier>=2&&play&&f.now-perf.lastApply<THROTTLE_MS);
+		if(doDate){applyDate(want);perf.lastApply=f.now;}
+		let changed=doDate||isoChanged||visChanged||forceChange;forceChange=false;
+		if(doDate||isoChanged||visChanged)writeVisibility(f.visible,f.isolate);
+		let animating=false;
+		if(ctx)for(const {script,layer} of layers){
+			const own=f.isolate===script.id,r=layer.update(dayOf(script,ctx.date),{systemVisible:f.isolate?()=>own:s=>f.visible.includes(s),hiddenByIsolate:!!f.isolate&&!own,now:f.now,direction,ctx});
+			changed||=r.changed;animating||=r.animating;
+		}
+		let fly=pendingFly;pendingFly=null;if(isoChanged&&f.isolate)fly=isolateBox(f.isolate)??fly;
+		lastVis=f.visible;lastIso=f.isolate;
+		return {changed,animating,fly};
+	};
+
 	const isolateBox=(id:string)=>{
 		const s=scriptFor(id);if(!s)return null;if(unsettled)settle();const box=new T.Box3();s.parts.forEach(name=>indicesOf(name).forEach(i=>box.union(bounds[i])));
 		const lb=layers.find(l=>l.script.id===id)?.layer.box();if(lb&&!lb.isEmpty())box.union(warpBox(lb));
@@ -157,7 +204,7 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 
 	return {
 		patchMaterial,segAttribute,isolateBox,
-		partVisible:i=>fx.data[i*4],restCenter,
+		partVisible:i=>fx.data[i*4],restCenter,stats:()=>({tier:perf.tier,lowRes:perf.lowRes,applies:perf.applies}),
 		ready(p){
 			pickers=p;rest=p.map(m=>(m?.geometry.getAttribute('position').array as Float32Array|undefined)?.slice());
 			// Default pivots from the decoded vertices (atlas.json bounds carry stray vertices for a few parts).
@@ -165,31 +212,10 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 			rest.forEach((r,i)=>{if(!r||!r.length)return;const lo=[Infinity,Infinity,Infinity],hi=[-Infinity,-Infinity,-Infinity];for(let k=0;k<r.length;k+=3)for(let j=0;j<3;j++){const v=r[k+j];if(v<lo[j])lo[j]=v;if(v>hi[j])hi[j]=v;}restCenters[i]=[(lo[0]+hi[0])/2,(lo[1]+hi[1])/2,(lo[2]+hi[2])/2];});
 			for(const s of SCRIPTS){if(!s.layer)continue;let ok=false;try{const layer=s.layer();ok=layer.init(layerCtx);if(ok)layers.push({script:s,layer});else layer.dispose();}catch(e){console.warn(`AnyHealth timeline: layer ${s.id} failed`,e);}if(!ok)noLayer.add(s.id);}
 			forceChange=true;remerge=true;
+			// Software GL (SwiftShader, llvmpipe): pixel ratio 1 from the start.
+			if(o.renderer)try{const gl=o.renderer.getContext(),ext=gl.getExtension('WEBGL_debug_renderer_info') as {UNMASKED_RENDERER_WEBGL:number}|null,name=String(gl.getParameter(ext?ext.UNMASKED_RENDERER_WEBGL:0x1f01/* RENDERER */));if(/SwiftShader|llvmpipe/i.test(name))lowResNow();}catch{/* no GPU info: keep the ratio */}
 		},
-		update(f){
-			const dateChanged=!!f.date&&f.date!==last.date,isoChanged=f.isolate!==last.isolate,visChanged=f.visible!==last.visible;
-			const date=f.date||last.date,remerged=remerge&&!!date;
-			if(dateChanged||remerged){
-				if(dateChanged&&last.date)direction=f.date>last.date?1:-1;remerge=false;unsettled=true;
-				const body=bodyAt(date);ws=warpState(rig,body);writeWarpUniforms(warpU,ws);ctx={body,date};const c=ctx;
-				const list:PartFx[]=[];for(const s of SCRIPTS){try{const l=s.fxAt(dayOf(s,date),c);list.push(...(noLayer.has(s.id)?l.map(({visible:_,...r})=>r):l));}catch(e){console.warn(`AnyHealth timeline: ${s.id} fxAt failed`,e);}}
-				list.push(...growthFx(body),...eruptionFx(body));fxMap=mergeFx(list,indicesOf,restCenter);
-			}
-			let changed=dateChanged||isoChanged||visChanged||forceChange;forceChange=false;
-			if(dateChanged||remerged||isoChanged||visChanged){
-				const vis=visibilityFor(atlas.parts,f.visible,isolatedParts(f.isolate)),out=new Map(fxMap);
-				for(let i=0;i<n;i++)if(vis[i]<1){const r=out.get(i)??identityFx(restCenters[i]);out.set(i,{...r,visible:r.visible*vis[i]});}
-				writeFx(fx,out);
-			}
-			let animating=false;
-			if(ctx)for(const {script,layer} of layers){
-				const own=f.isolate===script.id,r=layer.update(dayOf(script,ctx.date),{systemVisible:f.isolate?()=>own:s=>f.visible.includes(s),hiddenByIsolate:!!f.isolate&&!own,now:f.now,direction,ctx});
-				changed||=r.changed;animating||=r.animating;
-			}
-			let fly=pendingFly;pendingFly=null;if(isoChanged&&f.isolate)fly=isolateBox(f.isolate)??fly;
-			last={date:f.date||last.date,visible:f.visible,isolate:f.isolate};
-			return {changed,animating,fly};
-		},
+		update,
 		settle,
 		dispose(){
 			layers.forEach(l=>l.layer.dispose());layers.length=0;layerMaterials.forEach(m=>m.dispose());restGeoms.forEach(g=>g.dispose());restGeoms.clear();fx.texture.dispose();pickers=[];rest=[];

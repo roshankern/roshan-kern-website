@@ -43,7 +43,7 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
   const width=T.MathUtils.ceilPowerOfTwo(atlas.parts.length),data=new Float32Array(width*4),partTexture=new T.DataTexture(data,width,1,T.RGBAFormat,T.FloatType);partTexture.needsUpdate=true;
   const materials:T.Material[]=[],geometries:T.BufferGeometry[]=[],pickers:(T.Mesh|undefined)[]=[];
   const bounds=atlas.parts.map(p=>new T.Box3(new T.Vector3().fromArray(p.bounds[0]),new T.Vector3().fromArray(p.bounds[1])));
-  const engine=timeline&&rig&&segments?createEngine({atlas,scene,bounds,rig,segments}):null;
+  const engine=timeline&&rig&&segments?createEngine({atlas,scene,bounds,rig,segments,renderer}):null;
   // Timeline mode: picking treats a part as visible by the engine's final fx visibility (switches, Isolate and issue effects such as a hidden fractured bone or an unerupted tooth).
   let lastIsolate:string|null=null,seenDate='',dateAt=0,settled=true;const shown=(i:number)=>(engine?engine.partVisible(i):data[i*4+3])>.5;
   const materialFor=(system:string)=>{
@@ -127,7 +127,7 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
    return {target:fitCenter.clone(),position:probe.position.clone(),ox:(x0+x1)/2-(left+right)/2,oy:(y0+y1)/2-(top+bottom)/2};
   };
   const fit=()=>applyPose(defaultPose());
-  const resize=()=>{cssW=el.clientWidth;cssH=el.clientHeight;renderer.setPixelRatio(Math.min(devicePixelRatio,el.clientWidth<768||el.clientHeight<600?1.5:2));camera.aspect=el.clientWidth/el.clientHeight;camera.updateProjectionMatrix();renderer.setSize(el.clientWidth,el.clientHeight);fit();};const observer=new ResizeObserver(resize);observer.observe(el);
+  const resize=()=>{cssW=el.clientWidth;cssH=el.clientHeight;renderer.setPixelRatio(engine?.stats().lowRes?1:Math.min(devicePixelRatio,el.clientWidth<768||el.clientHeight<600?1.5:2));camera.aspect=el.clientWidth/el.clientHeight;camera.updateProjectionMatrix();renderer.setSize(el.clientWidth,el.clientHeight);fit();};const observer=new ResizeObserver(resize);observer.observe(el);
   const raycaster=new T.Raycaster(),pointer=new T.Vector2(),tap=new PointerTap(),hitPoint=new T.Vector3(),plane=new T.Plane(),forward=new T.Vector3();
   // Nearest visible part under a screen point (the translucent body surface only counts when nothing solid is showing). setFromCamera uses the camera's view offset, matching the rendered image.
   const pick=(clientX:number,clientY:number):{index:number;point:T.Vector3|null}=>{

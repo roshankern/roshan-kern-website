@@ -75,4 +75,19 @@ export const checks:Check[]=[
 		const {scene}=nodeEngine(g);let marks=0;scene.traverse(o=>{const a=(o as import('three').Mesh).geometry?.getAttribute?.('seg');if(!a)return;marks++;c.assert(a.array instanceof Float32Array,'layer seg is float');let w=0;for(let v=2;v<a.array.length;v+=3)w=Math.max(w,a.array[v]);c.assert(w>0&&w<=1,`layer weights 0..1 (max ${w})`);});
 		c.assert(marks>0,'some layer carries a per-vertex seg');
 	}},
+	{name:'performance fallback: software GL gets pixel ratio 1 on ready; slow play drops to ratio 1 after 2 s, then throttles fx/uniform writes to 100 ms (applied on pause and settle)',async run(c){
+		const g=await c.geometry(),fake=(gpu:string)=>{const ratios:number[]=[];return {ratios,renderer:{getContext:()=>({getExtension:(n:string)=>n==='WEBGL_debug_renderer_info'?{UNMASKED_RENDERER_WEBGL:0x9246}:null,getParameter:(p:number)=>p===0x9246?gpu:'WebKit WebGL'}),setPixelRatio:(r:number)=>{ratios.push(r);}}};};
+		const sw=fake('ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)), SwiftShader driver)');const A=nodeEngine(g,{renderer:sw.renderer}).engine;c.assert(sw.ratios[0]===1&&A.stats().lowRes,'SwiftShader: ratio 1 on ready');
+		const hw=fake('ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)'),B=nodeEngine(g,{renderer:hw.renderer}).engine;c.assert(!hw.ratios.length&&!B.stats().lowRes,'hardware GPU: ratio untouched');
+		// Fast play (60 fps) never degrades.
+		let day=toDays('2008-01-01'),now=0;for(let k=0;k<400;k++){now+=16;B.update(frame(fromDays(day++),now));}c.assert(B.stats().tier===0,`60 fps: tier ${B.stats().tier}`);
+		// Slow play (20 fps): tier 1 (ratio 1) after 2 s of play, tier 2 (throttled) after 2 s more.
+		const C=nodeEngine(g,{renderer:hw.renderer}).engine;day=toDays('2008-01-01');now=0;const tierAt:number[]=[];
+		for(let k=0;k<120;k++){now+=50;C.update(frame(fromDays(day++),now));tierAt.push(C.stats().tier);}
+		const t1=tierAt.indexOf(1)*50,t2=tierAt.indexOf(2)*50;c.assert(t1>=2000&&t1<=2600,`tier 1 at ${t1} ms`);c.assert(hw.ratios.includes(1),'tier 1 sets pixel ratio 1');c.assert(t2>=t1+2000&&t2<=t1+2600,`tier 2 at ${t2} ms`);
+		const a0=C.stats().applies;for(let k=0;k<20;k++){now+=50;C.update(frame(fromDays(day++),now));}const n=C.stats().applies-a0;c.assert(n>=9&&n<=11,`throttled: ${n} applies in 20 frames of 50 ms`);
+		// Pause: the pending date applies on the next frame without a date change, whatever the time since the last apply.
+		const tooth=g.indicesOf('Left upper first secondary molar tooth')[0];now+=50;C.update(frame('2005-06-22',now));now+=1;C.update(frame('2005-06-22',now));c.assert(C.partVisible(tooth)===0,'pause applies the pending date');
+		now+=50;C.update(frame('2020-06-22',now));const pending=C.partVisible(tooth);C.settle();c.assert(C.partVisible(tooth)===1,`settle applies the pending date (before: ${pending})`);
+	}},
 ];
