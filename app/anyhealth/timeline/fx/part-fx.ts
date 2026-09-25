@@ -21,7 +21,14 @@ export function createFxTexture(partCount:number):FxTexture{
 
 const qmul=(a:Quat,b:Quat):Quat=>[a[3]*b[0]+a[0]*b[3]+a[1]*b[2]-a[2]*b[1],a[3]*b[1]-a[0]*b[2]+a[1]*b[3]+a[2]*b[0],a[3]*b[2]+a[0]*b[1]-a[1]*b[0]+a[2]*b[3],a[3]*b[3]-a[0]*b[0]-a[1]*b[1]-a[2]*b[2]];
 
-/** Merge every PartFx into one ResolvedFx per part index. visible = product; swell = sum; tint = the highest amount; scale = componentwise product; rotate = quaternion product in list order, composed so the first listed rotation is applied first (types.ts: "applied in script order"), i.e. q = qN·…·q2·q1; translate = sum; pivot = first specified, else `restCenter(i)`; swellBand = first specified. */
+const warnedBands=new Set<string>();
+/** Dev-only, once per part and band pair: two effects on one part carry different swell bands (both are kept as their union). */
+function bandWarn(part:string,a:[number,number],b:[number,number]){
+	if(process.env.NODE_ENV==='production')return;const k=`${part}|${a}|${b}`;if(warnedBands.has(k))return;warnedBands.add(k);
+	console.warn(`AnyHealth timeline: ${part} has two different swellBand values ([${a}] and [${b}]) on one date; using their union.`);
+}
+
+/** Merge every PartFx into one ResolvedFx per part index. visible = product; swell = sum; tint = the highest amount; scale = componentwise product; rotate = quaternion product in list order, composed so the first listed rotation is applied first (types.ts: "applied in script order"), i.e. q = qN·…·q2·q1; translate = sum; pivot = first specified, else `restCenter(i)`; swellBand = the union of every specified band (min y0, max y1; a dev warning when two differ). */
 export function mergeFx(list:PartFx[],indicesOf:(name:string)=>number[],restCenter:(i:number)=>Vec3):Map<number,ResolvedFx>{
 	const out=new Map<number,ResolvedFx>(),pivotSet=new Set<number>();
 	for(const f of list)for(const i of indicesOf(f.part)){
@@ -33,7 +40,7 @@ export function mergeFx(list:PartFx[],indicesOf:(name:string)=>number[],restCent
 		if(f.rotate)r.rotate=qmul(f.rotate,r.rotate);
 		if(f.translate)r.translate=[r.translate[0]+f.translate[0],r.translate[1]+f.translate[1],r.translate[2]+f.translate[2]];
 		if(f.pivot&&!pivotSet.has(i)){pivotSet.add(i);r.pivot=[...f.pivot];}
-		if(f.swellBand&&!r.swellBand)r.swellBand=[...f.swellBand];
+		if(f.swellBand){const b=r.swellBand;if(!b)r.swellBand=[...f.swellBand];else if(b[0]!==f.swellBand[0]||b[1]!==f.swellBand[1]){bandWarn(f.part,b,f.swellBand);r.swellBand=[Math.min(b[0],f.swellBand[0]),Math.max(b[1],f.swellBand[1])];}}
 	}
 	return out;
 }

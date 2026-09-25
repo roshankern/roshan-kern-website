@@ -2,7 +2,16 @@
 import type {Check} from './harness';
 import {DEFAULT_VISIBLE} from '../../atlas/anatomy';
 import {nodeEngine} from './engine-node';
+import {SCRIPTS} from '../issues';
+import {bodyAt} from '../growth/proportions';
+import {toDays,fromDays} from '../../health/dates';
+import {mergeFx} from '../fx/part-fx';
+import {LEAD_DAYS as boneLead} from '../issues/catalog/bones';
+import {LEAD_DAYS as airwayLead} from '../issues/catalog/airway';
+import {LEAD_DAYS as digestiveLead} from '../issues/catalog/digestive';
+import {LEAD_DAYS as skinLead} from '../issues/catalog/skin';
 
+const LEAD:Record<string,number>={...boneLead,...airwayLead,...digestiveLead,...skinLead},TODAY='2026-09-25';
 const frame=(date:string,now=0,isolate:string|null=null)=>({date,visible:DEFAULT_VISIBLE,isolate,now});
 
 export const checks:Check[]=[
@@ -28,5 +37,19 @@ export const checks:Check[]=[
 	{name:'a layer whose init fails drops its script\'s visible:0 fx (the humerus stays when the fracture layer cannot build)',async run(c){
 		const g=await c.geometry(),hum=g.indicesOf('Left humerus').find(i=>g.atlas.parts[i].system==='skeletal')!;
 		const {engine}=nodeEngine(g,{skip:['Left humerus']});engine.update(frame('2009-09-10'));c.assert(engine.partVisible(hum)===1,`humerus visible ${engine.partVisible(hum)} with no fracture layer`);
+	}},
+	{name:'swellBand overlaps: scripts carrying different bands on one part on the same date are listed, and the merge keeps the union',async run(c){
+		// Every script sampled every 6 h from its lead to 30 days past resolve (today when chronic); bands grouped by sample time and part.
+		const STEP=0.25,at=new Map<number,{id:string;part:string;band:[number,number]}[]>(),bodies=new Map<string,ReturnType<typeof bodyAt>>();
+		for(const s of SCRIPTS){const o=toDays(s.onset),a=o-(LEAD[s.id]??0)-2,b=toDays(s.chronic||!s.resolve?TODAY:s.resolve)+30;
+			for(let t=Math.floor(a/STEP)*STEP;t<=b;t+=STEP){const date=fromDays(Math.floor(t));let body=bodies.get(date);if(!body){body=bodyAt(date);bodies.set(date,body);}
+				for(const f of s.fxAt(t-o,{body,date}))if(f.swellBand){const l=at.get(t)??[];l.push({id:s.id,part:f.part,band:f.swellBand});at.set(t,l);}}}
+		const pairs=new Map<string,{from:number;to:number;merged:[number,number]}>();
+		for(const [t,l] of at)for(let i=0;i<l.length;i++)for(let j=i+1;j<l.length;j++){const x=l[i],y=l[j];if(x.id===y.id||x.part!==y.part||(x.band[0]===y.band[0]&&x.band[1]===y.band[1]))continue;
+			const warn=console.warn;console.warn=()=>{};let m;try{m=mergeFx([{part:x.part,swell:1e-3,swellBand:x.band},{part:y.part,swell:1e-3,swellBand:y.band}],()=>[0],()=>[0,0,0]).get(0)!.swellBand!;}finally{console.warn=warn;}
+			c.assert(m[0]===Math.min(x.band[0],y.band[0])&&m[1]===Math.max(x.band[1],y.band[1]),`${x.id} + ${y.id}: merged band ${m} is not the union`);
+			const k=`${x.id} + ${y.id} on ${x.part}`,p=pairs.get(k);pairs.set(k,{from:Math.min(p?.from??t,t),to:Math.max(p?.to??t,t),merged:m});}
+		console.log(`     scripts carrying a swellBand: ${[...new Set([...at.values()].flat().map(e=>`${e.id} [${e.band.map(v=>v.toFixed(4))}]`))].join("; ")}`);console.log(`     swellBand overlapping pairs: ${pairs.size?'':'none'}`);
+		for(const [k,p] of pairs)console.log(`       ${k}: ${fromDays(Math.floor(p.from))} .. ${fromDays(Math.floor(p.to))}, merged band [${p.merged.map(v=>v.toFixed(4)).join(', ')}]`);
 	}},
 ];

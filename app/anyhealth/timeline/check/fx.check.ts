@@ -6,10 +6,11 @@ export const checks:Check[]=[
 	{name:'mergeFx combines by the documented rules',run(c){
 		const idx=(n:string)=>n==='A'?[0]:[];const m=mergeFx([{part:'A',visible:0.5,swell:0.001,scale:[2,1,1],tint:[1,0,0,0.3]},{part:'A',visible:0.5,swell:0.002,scale:[1.5,1,1],tint:[0,0,1,0.6],translate:[0,0.01,0]}],idx,()=>[0,0,0]).get(0)!;
 		c.near(m.visible,0.25,1e-9,'visible');c.near(m.swell,0.003,1e-9,'swell');c.near(m.scale[0],3,1e-9,'scale');c.near(m.tint[2],1,1e-9,'tint winner');c.near(m.translate[1],0.01,1e-9,'translate');
-		// pivot: first specified, else the rest centre; swellBand: first specified; rotate: quaternion product in list order (90° about z, then 90° about x).
-		const s=Math.SQRT1_2,qz:Quat=[0,0,s,s],qx:Quat=[s,0,0,s];
-		const m2=mergeFx([{part:'A',swell:0.001},{part:'A',pivot:[1,2,3],swellBand:[0.1,0.2],rotate:qz},{part:'A',pivot:[9,9,9],swellBand:[0.5,0.6],rotate:qx}],idx,()=>[7,7,7]).get(0)!;
-		near3(c,m2.pivot,[1,2,3],1e-12,'pivot');c.assert(m2.swellBand?.[0]===0.1&&m2.swellBand[1]===0.2,'swellBand first');
+		// pivot: first specified, else the rest centre; swellBand: the union (min y0, max y1) of every band, with a dev warning when they differ (Task 14); rotate: quaternion product in list order (90° about z, then 90° about x).
+		const s=Math.SQRT1_2,qz:Quat=[0,0,s,s],qx:Quat=[s,0,0,s],warn=console.warn,warned:string[]=[];console.warn=(...a:unknown[])=>{warned.push(a.join(' '));};
+		let m2;try{m2=mergeFx([{part:'A',swell:0.001},{part:'A',pivot:[1,2,3],swellBand:[0.1,0.2],rotate:qz},{part:'A',pivot:[9,9,9],swellBand:[0.05,0.15],rotate:qx}],idx,()=>[7,7,7]).get(0)!;}finally{console.warn=warn;}
+		near3(c,m2.pivot,[1,2,3],1e-12,'pivot');c.assert(m2.swellBand?.[0]===0.05&&m2.swellBand[1]===0.2,`swellBand union: ${m2.swellBand}`);c.assert(warned.some(w=>w.includes('swellBand')),'differing bands warn');
+		const same=mergeFx([{part:'A',swellBand:[0.1,0.2]},{part:'A',swellBand:[0.1,0.2]}],idx,()=>[0,0,0]).get(0)!;c.assert(same.swellBand?.[0]===0.1&&same.swellBand[1]===0.2,'equal bands kept');
 		const r=applyFxPoint({...identityFx([0,0,0]),rotate:m2.rotate},[1,0,0],[0,0,1],[0,0,0]);near3(c,r,[0,0,1],1e-9,'qx·qz: qz first (listed first), then qx');
 		c.near(mergeFx([{part:'A',swell:0.001}],idx,()=>[7,7,7]).get(0)!.pivot[0],7,1e-12,'pivot default = rest centre');c.assert(mergeFx([{part:'B',swell:1}],idx,()=>[0,0,0]).size===0,'unknown part ignored');
 	}},

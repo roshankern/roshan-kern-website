@@ -55,7 +55,7 @@ export interface PartFx {
 	translate?:Vec3;
 	/** Rest-space pivot. Default: the part's rest bounds centre. The first specified wins. */
 	pivot?:Vec3;
-	/** Swell weighting: only vertices with y in [y0,y1] (rest space) swell, with a 5 mm smooth edge. Used for local narrowing (subglottis). */
+	/** Swell weighting: only vertices with y in [y0,y1] (rest space) swell, with a 5 mm smooth edge. Used for local narrowing (subglottis). Different bands on one part merge to their union (min y0, max y1). */
 	swellBand?:[number,number];
 }
 
