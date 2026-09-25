@@ -78,6 +78,12 @@ The atlas is one adult male reference model (BodyParts3D), so some anatomy the t
 - **Tint is per part.** GERD's "distal esophagus" tint colours the whole `Esophagus`, because PartFx has no banded tint (`swellBand` only weights swell).
 - **LPR fade is shorter than the evidence.** LPR fades over 12 weeks (the brief's upper bound), but laryngoscopic findings usually resolve over 6 months or more (Belafsky 2001).
 
+### systemic
+
+- **No blood, mucosa or immune tissue to animate.** Red-cell size, IgE sensitisation and mucosal edema have no mesh. Thalassemia is shown as a tint on the 426 arterial part names (639 parts) and, for each CBC, on the heart walls and aorta. Food allergy is a tint on `Tongue` and `Lip`. Rhinitis is a swell of the inferior nasal conchae (bony parts standing in for their mucosa).
+- **No subglottic lumen.** Anaphylactic subglottic narrowing is a banded negative swell on the top ~25 mm of the `Trachea` mesh (rest y 1.449–1.474 m), just below the cricoid. It adds to the airway area's croup/subglottitis narrowing of the same part.
+- **Immunotherapy start is uncertain.** The record prepared shot extracts in 2022, but a December 2023 note still lists immunotherapy as only being considered. The model uses the 2022-08-01 start.
+
 ## Illustrative effects
 
 Effects that are stylized rather than literal anatomy (`illustrative: true` on the issue script, shown with an "Illustrative" tag in the tracker). Filled in by each area's agent as scripts are written:
@@ -119,3 +125,13 @@ Effects that are stylized rather than literal anatomy (`illustrative: true` on t
 - **Silent reflux (LPR)** — `illustrative: true`. A red tint and an upper-band swell on the esophagus stand in for laryngeal findings.
 - **GERD 2026** — `illustrative: true`. Non-erosive reflux, so no mucosal change would actually be visible. The tint on the whole esophagus and the mild tint on the stomach are symbolic.
 - **Famotidine nightly** — `illustrative: true`. A very low residual tint, marking reflux that is being controlled.
+
+### systemic
+
+Every systemic script is illustrative (see [systemic.md](systemic.md)):
+
+- **Beta-thalassemia minor** (chronic from 2004-07-01): a pale, orange-shifted tint on every arterial part for small, hypochromic red cells. It steps up slightly at the 2024-05-20 confirmation, which marks certainty, not worsening.
+- **CBC / hematology / Function Health visits:** 30-day windows with a stronger tint on the heart walls and aorta, rising and falling over 7 days.
+- **Food allergy** (chronic from 2003-12-22): a faint red on the tongue and lip. The 2004 workup and the 2016 IgE panel add a 14-day glow (the panel also on the nasal conchae), and so does the 2022 re-evaluation (conchae).
+- **Egg anaphylaxis 2005 / walnut exposure 2026:** stylized angioedema: tongue and lip enlarge, the pharyngeal constrictors and epiglottis swell, and the subglottic trachea narrows. Egg peaks in ~30 min and clears by day 2. Walnut is the same pattern at 40%, gone by day 1. The magnitudes are visible stand-ins, not measurements.
+- **Allergic rhinitis** (chronic from 2016-07-11): the inferior conchae swell with a perennial base plus spring and late-summer pollen pulses, as a pure function of the calendar date. Immunotherapy halves the pulse linearly over 2022-08-01 → 2025-08-01.
