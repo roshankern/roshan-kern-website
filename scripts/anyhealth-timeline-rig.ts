@@ -1,19 +1,23 @@
 // Builds the AnyHealth timeline rig and per-vertex segment weights from the rest-pose atlas: npx tsx scripts/anyhealth-timeline-rig.ts
 // Writes app/anyhealth/timeline/growth/rig.json (a Rig) and public/anyhealth/models/segments.bin
-// (per atlas part in order, vertexCount × 3 bytes: byte0 = segA | segB<<4, byte1 = round(weightA*255), byte2 = round(dBone / 0.5 mm), the rest distance to the nearest bone point, capped at 255).
-// Weights (Task 14a): parent/child blends are centred on their joint plane (smoothstep over ±PLANE_B along the child axis), fading to the nearest-bone weight where one bone clearly owns the tissue (dB − dA from FADE[0] to FADE[1]).
+// (per atlas part in order, vertexCount × 3 bytes: byte0 = segA | segB<<4, byte1 = round(weightA*255), byte2 = round(dBone / 0.5 mm), the rest distance to the nearest bone (distance field), capped at 255).
+// Weights (Task 14a): per joint, a child-side indicator centred on the joint plane, faded into the nearest-bone side where one bone clearly owns the tissue; the indicators combine into a tree partition of unity (see WEIGHTS below).
 import fs from 'node:fs';
 import {loadAtlasNode} from '../app/anyhealth/timeline/check/node-atlas';
 import {boneSegment} from '../app/anyhealth/timeline/growth/segment-map';
-import {SEGMENTS,type Rig,type SegmentId,type Vec3} from '../app/anyhealth/timeline/types';
+import {SEGMENTS,type Rig,type Segment,type SegmentId,type Vec3} from '../app/anyhealth/timeline/types';
 
 const RIG_OUT='app/anyhealth/timeline/growth/rig.json',BIN_OUT='public/anyhealth/models/segments.bin';
 /** Contact radius for joints, widened step by step if two bones never come that close. */
 const CONTACT=[0.006,0.008,0.010,0.012];
-/** Weights (Task 14a). GRID: voxel size of the per-segment distance fields. Per joint, the child-side indicator is smoothstep(−ANG, ANG, cos of the angle from the child axis at the joint) (the joint plane, scale-free),
- * faded (FADE on |r|) into smoothstep(−RQ, RQ, r), r = (d_parent − d_child subtree)/(sum), the nearest-bone ratio; SQ gates siblings apart. Overridable for sweeps via ANYHEALTH_<NAME> (FADE as "lo,hi"). */
-const env=(k:string,d:number)=>Number(process.env[`ANYHEALTH_${k}`]??d);
-const GRID=env('GRID',0.005),ANG=env('ANG',0.5),RQ=env('RQ',0.5),SQ=env('SQ',0.3),FADE=(process.env.ANYHEALTH_FADE??'0.3,0.6').split(',').map(Number);
+/** Weights (Task 14a, Ruling 15). Distances come from per-segment distance fields (GRID voxels, trilinear). For the joint of each child segment C with parent P (d_P = distance to P's bones, d_C = to C's subtree):
+ *   plane = smoothstep(−PLANE_B, PLANE_B, (p − J_C)·a_C); nearest = smoothstep(−BLEND, BLEND, d_P − d_C); c_C = mix(plane, nearest, smoothstep(FADE[0], FADE[1], |d_P − d_C|));
+ *   siblings (trunk's children) gate each other apart: c_C ×= smoothstep(0, q, (d_M − d_C)/(d_M + d_C)) per sibling M, q = SIB·(1 − smoothstep(SIB_FAR[0], SIB_FAR[1], (d_P − d_C)/(d_P + d_C)))
+ *     (a smooth hand-over to the trunk at the crotch / shoulders, a sharp one where the trunk is far, e.g. between the knees, where no tissue crosses the midline);
+ *   w_s = (Π c along the path root → s) · (1 − Σ c over s's children); the two heaviest adjacent segments are kept.
+ * Chosen by a sweep (see the Task 14a report); overridable as ANYHEALTH_<NAME> (pairs as "lo,hi"). */
+const env=(k:string,d:number)=>Number(process.env[`ANYHEALTH_${k}`]??d),pair=(k:string,d:string)=>(process.env[`ANYHEALTH_${k}`]??d).split(',').map(Number);
+const GRID=env('GRID',0.005),PLANE_B=env('PLANE_B',0.05),BLEND=env('BLEND',0.02),FADE=pair('FADE','0.02,0.06'),SIB=env('SIB',0.3),SIB_FAR=pair('SIB_FAR','0.1,0.4');
 /** dBone byte unit (metres); matches D_UNIT in growth/warp.ts. */
 const D_UNIT=0.0005;
 const NS=SEGMENTS.length,SEG=(id:SegmentId)=>SEGMENTS.indexOf(id);
@@ -126,14 +130,13 @@ async function main(){
 		for(let i=0;i<nv;i++){
 			const x=v[3*i],y=v[3*i+1],z=v[3*i+2];sample(x,y,z,D);
 			for(let s=0;s<NS;s++){let m=Infinity;for(const t of SUBTREE[s])m=Math.min(m,D[t]);DS[s]=m;}
-			// Child-side indicator per joint: the joint plane (scale-free: the cosine of the angle from the child axis at the joint), faded into the nearest-bone ratio where one side clearly owns the tissue.
+			// Child-side indicator per joint (WEIGHTS above).
 			c[0]=1;
 			for(let s=1;s<NS;s++){
-				const P=PAR[s],r=(D[P]-DS[s])/(D[P]+DS[s]+EPS),J=segments[s].joint,a=segments[s].axis,dx=x-J[0],dy=y-J[1],dz=z-J[2],dl=Math.hypot(dx,dy,dz)+EPS;
-				const sa=smoothstep(-ANG,ANG,(dx*a[0]+dy*a[1]+dz*a[2])/dl),sr=smoothstep(-RQ,RQ,r),f=smoothstep(FADE[0],FADE[1],Math.abs(r));
-				let cs=sa+(sr-sa)*f;
-				// Siblings never overlap: the side nearer another sibling's subtree fades this one out (they meet at the crotch midline, the shoulders / neck).
-				for(const m of KIDS[P])if(m!==s)cs*=smoothstep(0,SQ,(DS[m]-DS[s])/(DS[m]+DS[s]+EPS));
+				const P=PAR[s],r=(D[P]-DS[s])/(D[P]+DS[s]+EPS),J=segments[s].joint,a=segments[s].axis,e=D[P]-DS[s];
+				const plane=smoothstep(-PLANE_B,PLANE_B,(x-J[0])*a[0]+(y-J[1])*a[1]+(z-J[2])*a[2]),near=smoothstep(-BLEND,BLEND,e);
+				let cs=plane+(near-plane)*smoothstep(FADE[0],FADE[1],Math.abs(e));
+				const q=Math.max(1e-3,SIB*(1-smoothstep(SIB_FAR[0],SIB_FAR[1],r)));for(const m of KIDS[P])if(m!==s)cs*=smoothstep(0,q,(DS[m]-DS[s])/(DS[m]+DS[s]+EPS));
 				c[s]=cs;
 			}
 			// Tree partition of unity: w_s = (Π of c along the path to s) × (1 − Σ c over s's children).
