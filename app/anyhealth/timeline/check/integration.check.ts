@@ -72,13 +72,13 @@ export const checks:Check[]=[
 		A.bounds.forEach((b,i)=>{for(const key of ['min','max'] as const)for(const ax of ['x','y','z'] as const)c.near(b[key][ax],B.bounds[i][key][ax],1e-9,`${g.atlas.parts[i].name} ${key}.${ax}`);});
 		A.engine.update(frame('2012-01-01'));c.assert(A.engine.settle()>n*0.9,'a child date re-warps nearly everything');
 	}},
-	{name:'seg attribute is 3 bytes per vertex (segA, segB, weightA·255, not normalized); layers still get a float seg (weightA 0..1)',async run(c){
+	{name:'seg attribute is the 4 segments.bin bytes per vertex (segA | segB<<4, weightA·255, dBone uint16; not normalized); layers get a float seg (weightA 0..1) and segD (metres)',async run(c){
 		const g=await c.geometry(),{engine}=nodeEngine(g),fs=await import('node:fs'),bin=fs.readFileSync('public/anyhealth/models/segments.bin');let off=0,bytes=0;
-		g.atlas.parts.forEach((p,i)=>{const a=engine.segAttribute(i);bytes+=a.array.byteLength;c.assert(a.array instanceof Uint8Array&&a.itemSize===3&&!a.normalized,`${p.name}: ${a.array.constructor.name}×${a.itemSize}`);
-			if(i%97===0)for(let k=0;k<p.vertexCount*SEG_STRIDE;k+=13){c.assert(a.array[k]===bin[off+k],`${p.name} byte ${k}`);}off+=p.vertexCount*SEG_STRIDE;});
-		c.assert(bytes===off/2*3,`seg bytes ${bytes}`);
-		// The skin marks layers copy the nearest Skin vertex's seg from ctx.restGeometry(skin): it must still be float with weightA in 0..1.
-		const {scene}=nodeEngine(g);let marks=0;scene.traverse(o=>{const a=(o as import('three').Mesh).geometry?.getAttribute?.('seg');if(!a)return;marks++;c.assert(a.array instanceof Float32Array,'layer seg is float');let w=0;for(let v=2;v<a.array.length;v+=3)w=Math.max(w,a.array[v]);c.assert(w>0&&w<=1,`layer weights 0..1 (max ${w})`);});
+		g.atlas.parts.forEach((p,i)=>{const a=engine.segAttribute(i);bytes+=a.array.byteLength;c.assert(a.array instanceof Uint8Array&&a.itemSize===SEG_STRIDE&&!a.normalized,`${p.name}: ${a.array.constructor.name}×${a.itemSize}`);
+			for(let k=i%97===0?0:p.vertexCount*SEG_STRIDE;k<p.vertexCount*SEG_STRIDE;k+=13){c.assert(a.array[k]===bin[off+k],`${p.name} byte ${k}`);}off+=p.vertexCount*SEG_STRIDE;});
+		c.assert(bytes===off&&off===bin.length,`seg bytes ${bytes} of ${bin.length}`);
+		// The skin marks layers copy the nearest Skin vertex's seg and segD from ctx.restGeometry(skin): float, weightA in 0..1, bone distance in metres (Skin sits millimetres to centimetres off the bone).
+		const {scene}=nodeEngine(g);let marks=0;scene.traverse(o=>{const a=(o as import('three').Mesh).geometry?.getAttribute?.('seg');if(!a)return;marks++;c.assert(a.array instanceof Float32Array,'layer seg is float');let w=0;for(let v=2;v<a.array.length;v+=3)w=Math.max(w,a.array[v]);c.assert(w>0&&w<=1,`layer weights 0..1 (max ${w})`);const d=(o as import('three').Mesh).geometry.getAttribute('segD');c.assert(!!d&&d.array instanceof Float32Array&&d.count===a.count,'layer segD is float, one per vertex');let dm=0;for(let v=0;v<d.count;v++)dm=Math.max(dm,d.getX(v));c.assert(dm>0.001&&dm<0.14,`layer bone distances in metres (max ${dm})`);});
 		c.assert(marks>0,'some layer carries a per-vertex seg');
 	}},
 	{name:'performance fallback: software GL gets pixel ratio 1 on ready; slow play drops to ratio 1 after 2 s, then throttles fx/uniform writes to 100 ms (applied on pause and settle)',async run(c){
