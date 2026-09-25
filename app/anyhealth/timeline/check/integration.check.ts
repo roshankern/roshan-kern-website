@@ -17,4 +17,16 @@ export const checks:Check[]=[
 		engine.update({...frame('2012-01-01'),visible:['skeletal']});c.assert(engine.partVisible(heart)===0,'cardiac switched off');
 		engine.update(frame('2009-09-10'));c.assert(engine.partVisible(hum)===0,'fracture hides the atlas humerus (its layer draws the fragments)');
 	}},
+	{name:'default pivots (restCenter) come from the decoded vertices: every part\'s lies inside its decoded bounds',async run(c){
+		const g=await c.geometry(),{engine}=nodeEngine(g),bad:string[]=[];
+		g.parts.forEach((d,i)=>{const lo=[Infinity,Infinity,Infinity],hi=[-Infinity,-Infinity,-Infinity];for(let k=0;k<d.position.length;k+=3)for(let j=0;j<3;j++){lo[j]=Math.min(lo[j],d.position[k+j]);hi[j]=Math.max(hi[j],d.position[k+j]);}
+			const r=engine.restCenter(i);if(!r.every((v,j)=>v>=lo[j]-1e-6&&v<=hi[j]+1e-6))bad.push(g.atlas.parts[i].name);});
+		c.assert(!bad.length,`${bad.length} rest centres outside their decoded bounds: ${bad.slice(0,6).join(', ')}`);
+		for(const name of ['Right cornea','Right sclera','Suspensory ligament of right lens']){const i=g.indicesOf(name)[0],d=g.parts[i],ctr=[0,1,2].map(j=>{let lo=Infinity,hi=-Infinity;for(let k=j;k<d.position.length;k+=3){lo=Math.min(lo,d.position[k]);hi=Math.max(hi,d.position[k]);}return (lo+hi)/2;});
+			engine.restCenter(i).forEach((v,j)=>c.near(v,ctr[j],1e-6,`${name} centre axis ${j}`));}
+	}},
+	{name:'a layer whose init fails drops its script\'s visible:0 fx (the humerus stays when the fracture layer cannot build)',async run(c){
+		const g=await c.geometry(),hum=g.indicesOf('Left humerus').find(i=>g.atlas.parts[i].system==='skeletal')!;
+		const {engine}=nodeEngine(g,{skip:['Left humerus']});engine.update(frame('2009-09-10'));c.assert(engine.partVisible(hum)===1,`humerus visible ${engine.partVisible(hum)} with no fracture layer`);
+	}},
 ];
