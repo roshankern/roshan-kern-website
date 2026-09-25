@@ -65,7 +65,15 @@ export const checks:Check[]=[
 		c.assert(visOf(eruptionFx(bodyAt(ageDate(0.2))),'Right upper central secondary incisor tooth')===0,'no teeth at 2 months');
 		const up=eruptionFx(bodyAt(ageDate(7.8))).find(f=>f.part==='Left upper central secondary incisor tooth'),lo=eruptionFx(bodyAt(ageDate(6.8))).find(f=>f.part==='Left lower central secondary incisor tooth');
 		c.assert(!!up&&up.translate![1]>0&&(up.visible??1)===1,'upper incisor erupts downward (starts above, +y)');c.assert(!!lo&&lo.translate![1]<0&&(lo.visible??1)===1,'lower incisor erupts upward (starts below, -y)');
-		c.assert(visOf(eruptionFx(bodyAt(ageDate(7.1))),'Left upper central secondary incisor tooth')===0,'gap during exfoliation');
+		const uc='Left upper central secondary incisor tooth';
+		c.assert(visOf(eruptionFx(bodyAt(ageDate(7-20/365.25))),uc)===0,'toothless 20 days before the upper central emerges');c.assert(visOf(eruptionFx(bodyAt(ageDate(7+1/365.25))),uc)===1,'visible from emergence');
+	}},
+	{name:'eyes-teeth: exfoliation gaps (neither tooth visible) never exceed the cited toothless period',run(c){
+		const days=Array.from({length:Math.round(8*365.25)+1},(_,k)=>eruptionFx(bodyAt(fromDays(toDays(ageDate(5))+k))));
+		for(const t of TEETH.filter(t=>t.primary)){
+			let run=0,longest=0;for(const l of days){run=visOf(l,t.part)===0?run+1:0;longest=Math.max(longest,run);}
+			c.assert(longest>0,`${t.part}: has an exfoliation gap`);c.assert(longest<=t.gap!+1,`${t.part}: ${longest} toothless days > cited ${t.gap}`);
+		}
 	}},
 	// (b) exotropia
 	{name:'eyes-teeth: exotropia turns the left globe outward, straight again by 2004-03-22',run(c){

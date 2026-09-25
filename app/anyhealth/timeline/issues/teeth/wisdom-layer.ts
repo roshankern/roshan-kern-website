@@ -51,9 +51,10 @@ export function wisdomLayer(onset:string):CustomLayer{
 			return true;
 		},
 		update(day:number,frame:LayerFrame){
-			const age=(toDays(onset)+day-toDays(BIRTH_DATE))/365.25,show=day<0&&!frame.hiddenByIsolate&&frame.systemVisible('skeletal');
+			// Visible from gingival emergence (the start of the window) until the extraction (day 0).
+			const age=(toDays(onset)+day-toDays(BIRTH_DATE))/365.25,show=day<0&&age>=WISDOM_ERUPT[0]&&!frame.hiddenByIsolate&&frame.systemVisible('skeletal');
 			const ps=teeth.map(t=>Math.min(t.cap,progress(age,WISDOM_ERUPT))),key=`${show}|${ps.map(p=>p.toFixed(4)).join(',')}`;if(key===last)return {changed:false,animating:false};last=key;
-			teeth.forEach((t,i)=>{const p=ps[i];t.mesh.visible=show&&p>=0.5;if(t.mesh.visible)place(t,p);});
+			teeth.forEach((t,i)=>{t.mesh.visible=show;if(show)place(t,ps[i]);});
 			return {changed:true,animating:false};
 		},
 		box(){const b=new T.Box3();teeth.forEach(t=>b.union(new T.Box3().setFromArray(t.rest)));return b.isEmpty()?null:b;},
