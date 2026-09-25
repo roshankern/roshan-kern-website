@@ -5,6 +5,7 @@ import {OrbitControls} from 'three/examples/jsm/controls/OrbitControls.js';
 import {RoomEnvironment} from 'three/examples/jsm/environments/RoomEnvironment.js';
 import {mergeGeometries} from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import {MeshoptDecoder} from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+import {decodePart} from './decode';
 import {PointerTap} from './pointer-tap';
 import {SYSTEMS,type Atlas,type SceneState} from './anatomy';
 import IssueDots,{type DotsHandle} from '../health/issue-dots';
@@ -55,12 +56,7 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
    const groups=new Map<string,T.BufferGeometry[]>();
    atlas.parts.forEach((p,i)=>{
     if(p.chunk!==ci)return;
-    // Meshopt-encoded: 12-byte vertices (uint16 position within the part's bounds, int8 normal). See scripts/encode-anyhealth-atlas.mjs.
-    const packed=new Uint8Array(p.vertexCount*12),index=new Uint32Array(p.indexCount);
-    MeshoptDecoder.decodeVertexBuffer(packed,p.vertexCount,12,new Uint8Array(buffer,p.vertices,p.vertexBytes));
-    MeshoptDecoder.decodeIndexBuffer(new Uint8Array(index.buffer),p.indexCount,4,new Uint8Array(buffer,p.indices,p.indexBytes));
-    const q=new Uint16Array(packed.buffer),n=new Int8Array(packed.buffer),position=new Float32Array(p.vertexCount*3),normal=new Int8Array(p.vertexCount*3),[lo,hi]=p.bounds;
-    for(let v=0;v<p.vertexCount;v++)for(let k=0;k<3;k++){position[v*3+k]=lo[k]+q[v*6+k]/65535*(hi[k]-lo[k]);normal[v*3+k]=n[v*12+8+k];}
+    const {position,normal,index}=decodePart(buffer,p,MeshoptDecoder);
     const g=new T.BufferGeometry();g.setAttribute('position',new T.BufferAttribute(position,3));
     // GPU normalized signed-byte normals keep the complete atlas compact in memory.
     g.setAttribute('normal',new T.BufferAttribute(normal,3,true));g.setIndex(new T.BufferAttribute(index,1));
