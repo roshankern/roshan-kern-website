@@ -2,14 +2,15 @@
 // Compiles FX_PARS + WARP_PARS / FX_APPLY + WARP_APPLY (wired exactly as engine.ts patchMaterial wires them) in a WebGL2 program under
 // headless Chromium (SwiftShader), pushes 64 test points through it as gl.POINTS (one per pixel of an RGBA32F target), reads the warped
 // positions and normals back and compares them with applyFxPoint + warpPoint / warpNormal in node. Not a screenshot check.
-// Also compiles the custom-layer variant (`#define TW_FIXED_SEG 3`, no seg attribute, no part fx) and checks it against warpPoint with segment 3.
+// The atlas variant feeds `seg` as 3 unnormalized bytes (segA, segB, weightA·255) with `#define TW_SEG_BYTES`, as scene.tsx / engine.segAttribute do.
+// Also compiles two custom-layer variants (no part fx): `#define TW_FIXED_SEG 3` with no seg attribute (checked against warpPoint with segment 3), and a float per-vertex `seg`.
 // Needs playwright-core, kept OUTSIDE the repo (no new dependency): mkdir -p <dir> && cd <dir> && npm i playwright-core, then run with
 // ANYHEALTH_PLAYWRIGHT=<dir>. Chromium: ANYHEALTH_CHROME=<binary>, else the newest cached ~/Library/Caches/ms-playwright/chromium-* build.
 import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {createRequire} from 'node:module';
 import rigJson from '../app/anyhealth/timeline/growth/rig.json';
 import {SEGMENTS,type Body,type Quat,type Rig,type SegmentId,type Vec3} from '../app/anyhealth/timeline/types';
 import {warpState,warpPoint,warpNormal} from '../app/anyhealth/timeline/growth/warp';
-import {WARP_PARS,WARP_APPLY,warpUniforms,writeWarpUniforms} from '../app/anyhealth/timeline/growth/warp-glsl';
+import {WARP_PARS,WARP_APPLY,TW_SEG,warpUniforms,writeWarpUniforms} from '../app/anyhealth/timeline/growth/warp-glsl';
 import {FX_ROWS,createFxTexture,writeFx,applyFxPoint,identityFx,type ResolvedFx} from '../app/anyhealth/timeline/fx/part-fx';
 import {FX_PARS,FX_APPLY} from '../app/anyhealth/timeline/fx/part-fx-glsl';
 
@@ -63,10 +64,11 @@ function testPoints(){
 	return {pos,nrm,seg,part};
 }
 
-// ── The shaders, wired as engine.ts patchMaterial wires them (tfxRow and the twSeg lines copied verbatim from there) ──
-/** Atlas parts: partFx + warp with the seg attribute. Custom layers (`fixedSeg`): warp only, `#define TW_FIXED_SEG`, no seg attribute. */
-const vsFor=(fixedSeg:number|null)=>{const fx=fixedSeg===null;return `#version 300 es
-${fx?'':`#define TW_FIXED_SEG ${fixedSeg}\n`}precision highp float;precision highp int;precision highp sampler2D;
+// ── The shaders, wired as engine.ts patchMaterial wires them (tfxRow copied verbatim from there; twSeg from TW_SEG) ──
+type Kind='atlas'|'fixed'|'float';
+/** Atlas parts: partFx + warp with the byte seg attribute (TW_SEG_BYTES). Custom layers: warp only, either `#define TW_FIXED_SEG` with no seg attribute, or a float seg attribute. */
+const vsFor=(kind:Kind)=>{const fx=kind==='atlas';return `#version 300 es
+${kind==='fixed'?`#define TW_FIXED_SEG ${FIXED}\n`:''}${kind==='atlas'?'#define TW_SEG_BYTES\n':''}precision highp float;precision highp int;precision highp sampler2D;
 #define attribute in
 #define varying out
 #define texture2D texture
@@ -85,25 +87,21 @@ void main(){
 	vec3 transformed = vec3(position);
 	{
 ${fx?`tfxVisible = tfxRow(0.0).x; tfxTint = tfxRow(1.0);\n${FX_APPLY}`:''}
-#ifdef TW_FIXED_SEG
-vec3 twSeg = vec3(float(TW_FIXED_SEG), float(TW_FIXED_SEG), 1.0);
-#else
-vec3 twSeg = seg;
-#endif
+${TW_SEG}
 ${WARP_APPLY}
 	}
 	vOut = outMode < 0.5 ? transformed : objectNormal;
 	gl_PointSize = 1.0;
 	gl_Position = vec4((float(gl_VertexID) + 0.5) / ${N}.0 * 2.0 - 1.0, 0.0, 0.0, 1.0);
 }`;};
-const fsFor=(fixedSeg:number|null)=>`#version 300 es
+const fsFor=(kind:Kind)=>`#version 300 es
 precision highp float;
-in vec3 vOut;${fixedSeg===null?'in float tfxVisible;in vec4 tfxTint;':''}out vec4 fragOut;
-void main(){ fragOut = vec4(vOut, ${fixedSeg===null?'tfxVisible + tfxTint.a * 0.0':'1.0'}); }`;
+in vec3 vOut;${kind==='atlas'?'in float tfxVisible;in vec4 tfxTint;':''}out vec4 fragOut;
+void main(){ fragOut = vec4(vOut, ${kind==='atlas'?'tfxVisible + tfxTint.a * 0.0':'1.0'}); }`;
 /** The custom-layer variant's fixed segment (lForearm). */
 const FIXED=3;
 
-interface GpuIn {vs:string;fs:string;n:number;pos:number[];nrm:number[];seg:number[];part:number[];tex:number[];texW:number;rows:number;u:Record<string,number[]>}
+interface GpuIn {vs:string;fs:string;n:number;pos:number[];nrm:number[];seg:number[];segBytes:boolean;part:number[];tex:number[];texW:number;rows:number;u:Record<string,number[]>}
 /** Runs in the page: compile, draw 4 passes (soft 0/1 × position/normal), read back. */
 function gpu(a:GpuIn):{error:string}|{out:number[][]}{
 	const cv=document.createElement('canvas');cv.width=a.n;cv.height=1;const gl=cv.getContext('webgl2');if(!gl)return {error:'no WebGL2 context'};
@@ -113,7 +111,8 @@ function gpu(a:GpuIn):{error:string}|{out:number[][]}{
 	try{prog=gl.createProgram()!;gl.attachShader(prog,sh(gl.VERTEX_SHADER,a.vs,'vertex'));gl.attachShader(prog,sh(gl.FRAGMENT_SHADER,a.fs,'fragment'));gl.linkProgram(prog);if(!gl.getProgramParameter(prog,gl.LINK_STATUS))throw new Error(`link:\n${gl.getProgramInfoLog(prog)}`);}catch(e){return {error:String(e instanceof Error?e.message:e)};}
 	gl.useProgram(prog);
 	const attr=(name:string,data:number[],size:number)=>{const loc=gl.getAttribLocation(prog,name);if(loc<0)return;const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(data),gl.STATIC_DRAW);gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,size,gl.FLOAT,false,0,0);};
-	attr('position',a.pos,3);attr('normal',a.nrm,3);attr('seg',a.seg,3);attr('partIndex',a.part,1);
+	attr('position',a.pos,3);attr('normal',a.nrm,3);attr('partIndex',a.part,1);
+	if(a.segBytes){const loc=gl.getAttribLocation(prog,'seg');if(loc>=0){const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.bufferData(gl.ARRAY_BUFFER,new Uint8Array(a.seg),gl.STATIC_DRAW);gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,3,gl.UNSIGNED_BYTE,false,0,0);}}else attr('seg',a.seg,3);
 	const tex=gl.createTexture();gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,tex);gl.pixelStorei(gl.UNPACK_ALIGNMENT,1);
 	gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA32F,a.texW,a.rows,0,gl.RGBA,gl.FLOAT,new Float32Array(a.tex));
 	for(const p of [gl.TEXTURE_MIN_FILTER,gl.TEXTURE_MAG_FILTER])gl.texParameteri(gl.TEXTURE_2D,p,gl.NEAREST);
@@ -146,11 +145,11 @@ async function main(){
 	const tex=createFxTexture(FX.length);writeFx(tex,new Map(FX.map((f,i)=>[i,f])));
 	const {pos,nrm,seg,part}=testPoints();
 
-	// Node reference (the TS mirror): applyFxPoint, then warpPoint / warpNormal; the custom-layer variant is warp only, on segment FIXED with weight 1.
-	const reference=(fixed:boolean)=>[0,1].map(soft=>{const P:number[]=[],M:number[]=[];for(let i=0;i<N;i++){
+	// Node reference (the TS mirror): applyFxPoint, then warpPoint / warpNormal; the custom-layer variants are warp only (on segment FIXED with weight 1, or the point's seg).
+	const reference=(kind:Kind)=>[0,1].map(soft=>{const P:number[]=[],M:number[]=[];for(let i=0;i<N;i++){
 		const p:Vec3=[pos[i*3],pos[i*3+1],pos[i*3+2]],n:Vec3=[nrm[i*3],nrm[i*3+1],nrm[i*3+2]],m:Vec3=[0,0,0],q:Vec3=[0,0,0];
-		const [a,b,w]=fixed?[FIXED,FIXED,1]:[seg[i*3],seg[i*3+1],seg[i*3+2]];
-		if(fixed){q[0]=p[0];q[1]=p[1];q[2]=p[2];m[0]=n[0];m[1]=n[1];m[2]=n[2];}else applyFxPoint(FX[part[i]],p,n,q,m);
+		const [a,b,w]=kind==='fixed'?[FIXED,FIXED,1]:[seg[i*3],seg[i*3+1],seg[i*3+2]];
+		if(kind!=='atlas'){q[0]=p[0];q[1]=p[1];q[2]=p[2];m[0]=n[0];m[1]=n[1];m[2]=n[2];}else applyFxPoint(FX[part[i]],p,n,q,m);
 		warpPoint(ws,q,a,b,w,!!soft,q);warpNormal(ws,m,a,b,w,!!soft,m);P.push(...q);M.push(...m);
 	}return [P,M];}).flat();
 
@@ -159,12 +158,14 @@ async function main(){
 		const page=await browser.newPage();
 		await page.evaluate('globalThis.__name=(f)=>f'); // tsx (esbuild keepNames) wraps nested functions in __name(), which the page doesn't have
 		let failed=false;
-		for(const [label,fixed] of [['atlas parts (part fx + seg attribute)',null],[`custom layer (TW_FIXED_SEG ${FIXED})`,FIXED]] as const){
-			const want=reference(fixed!==null);
-			const r=await page.evaluate(gpu,{vs:vsFor(fixed),fs:fsFor(fixed),n:N,pos:[...pos],nrm:[...nrm],seg:[...seg],part:[...part],tex:[...tex.data],texW:tex.width,rows:FX_ROWS,u:{twJ:flat('twJ'),twA:flat('twA'),twN:flat('twN'),twS:flat('twS'),twGround:[ws.ground]}});
+		// The byte seg the atlas uploads: (segA, segB, round(weightA·255)); the test weights are multiples of 1/255, so the reference weights are exact.
+		const bytes=[...seg].map((v,i)=>i%3===2?Math.round(v*255):v);
+		for(const [label,kind] of [['atlas parts (part fx + byte seg attribute)','atlas'],[`custom layer (TW_FIXED_SEG ${FIXED})`,'fixed'],['custom layer (float seg attribute)','float']] as const){
+			const want=reference(kind);
+			const r=await page.evaluate(gpu,{vs:vsFor(kind),fs:fsFor(kind),n:N,pos:[...pos],nrm:[...nrm],seg:kind==='atlas'?bytes:[...seg],segBytes:kind==='atlas',part:[...part],tex:[...tex.data],texW:tex.width,rows:FX_ROWS,u:{twJ:flat('twJ'),twA:flat('twA'),twN:flat('twN'),twS:flat('twS'),twGround:[ws.ground]}});
 			if('error' in r){console.error(`GLSL check failed (${label}):\n${r.error}`);process.exit(1);}
 			let posErr=0,nrmErr=0,worst='';
-			r.out.forEach((px,pass)=>{const ref=want[pass],isPos=pass%2===0;for(let i=0;i<N;i++)for(let k=0;k<3;k++){const e=Math.abs(px[i*4+k]-ref[i*3+k]);if(isPos&&e>posErr){posErr=e;worst=`point ${i} (${fixed===null?`part ${part[i]}, seg ${seg[i*3]}/${seg[i*3+1]} w ${seg[i*3+2].toFixed(3)}`:`seg ${fixed}`}, soft ${pass>>1})`;}if(!isPos)nrmErr=Math.max(nrmErr,e);}});
+			r.out.forEach((px,pass)=>{const ref=want[pass],isPos=pass%2===0;for(let i=0;i<N;i++)for(let k=0;k<3;k++){const e=Math.abs(px[i*4+k]-ref[i*3+k]);if(isPos&&e>posErr){posErr=e;worst=`point ${i} (${kind==='fixed'?`seg ${FIXED}`:`part ${part[i]}, seg ${seg[i*3]}/${seg[i*3+1]} w ${seg[i*3+2].toFixed(3)}`}, soft ${pass>>1})`;}if(!isPos)nrmErr=Math.max(nrmErr,e);}});
 			const moved=Math.max(...want[0].map((v,i)=>Math.abs(v-pos[i])));
 			console.log(`${label}: compile ok · parity max err ${posErr.toExponential(2)} m (positions, worst ${worst}) · ${nrmErr.toExponential(2)} (normals) · largest displacement tested ${moved.toFixed(3)} m`);
 			if(!(posErr<POS_TOL)||!(nrmErr<NRM_TOL)){console.error(`FAIL (${label}): tolerance ${POS_TOL} m (positions), ${NRM_TOL} (normals)`);failed=true;}

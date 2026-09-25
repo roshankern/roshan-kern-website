@@ -3,7 +3,7 @@
  * Contract with engine.ts (patchMaterial):
  * - WARP_PARS is injected after `#include <common>` in the vertex shader. It declares the uniforms `twJ`, `twA`, `twN`, `twS` (vec4[15]), `twGround` and `twSoft` (float), and any functions. It must NOT declare `seg`: the engine does.
  * - WARP_APPLY is injected right after FX_APPLY, at a point where both `transformed` (vec3, starts as `position`) and `objectNormal` (vec3) are live and nothing has read them yet. It rewrites both in place.
- * - When WARP_APPLY is non-empty the engine declares `attribute vec3 seg;` and defines a local `vec3 twSeg` (segA, segB, weightA 0..1) just before WARP_APPLY; read `twSeg`, not `seg` (custom layers with a fixed segment get `twSeg` from a define, with no attribute).
+ * - When WARP_APPLY is non-empty the engine declares `attribute vec3 seg;` and defines a local `vec3 twSeg` (segA, segB, weightA 0..1) just before WARP_APPLY with TW_SEG; read `twSeg`, not `seg` (atlas parts carry `seg` as 3 unnormalized bytes, custom layers a float seg or a fixed-segment define with no attribute).
  * - `objectTangent` is NOT warped: the atlas materials use no normal maps, so no tangent is needed. Add a tangent warp here if one ever is.
  * - `twSoft` is bound per material (1 for muscular / integumentary / connective, and for custom layers created with `soft`); every other uniform comes from warpUniforms() and is shared by every material. */
 import * as T from 'three';
@@ -31,6 +31,14 @@ vec3 twNormal(int i, vec3 n){
 	return (1.0 / twS[i].x) * t * ax + (1.0 / twGirth(i)) * (n - t * ax);
 }
 `;
+/** GLSL that defines the local `vec3 twSeg` (segA, segB, weightA 0..1) just before WARP_APPLY, from (in order): the material's `TW_FIXED_SEG` define (custom layers with one segment); the atlas's packed byte attribute `seg` = (segA, segB, round(weightA·255)), not normalized, when `TW_SEG_BYTES` is defined (atlas parts, 3 bytes per vertex); else a float `seg` with weightA in 0..1 (custom layers with per-vertex weights). */
+export const TW_SEG=`#if defined(TW_FIXED_SEG)
+vec3 twSeg = vec3(float(TW_FIXED_SEG), float(TW_FIXED_SEG), 1.0);
+#elif defined(TW_SEG_BYTES)
+vec3 twSeg = vec3(seg.xy, seg.z * (1.0 / 255.0));
+#else
+vec3 twSeg = seg;
+#endif`;
 /** GLSL that rewrites `transformed` and `objectNormal` (rest space → this date's body), reading the engine's `vec3 twSeg` = (segA, segB, weightA). */
 export const WARP_APPLY=`
 {

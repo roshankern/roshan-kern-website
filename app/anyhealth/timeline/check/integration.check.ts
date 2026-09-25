@@ -66,4 +66,13 @@ export const checks:Check[]=[
 		A.bounds.forEach((b,i)=>{for(const key of ['min','max'] as const)for(const ax of ['x','y','z'] as const)c.near(b[key][ax],B.bounds[i][key][ax],1e-9,`${g.atlas.parts[i].name} ${key}.${ax}`);});
 		A.engine.update(frame('2012-01-01'));c.assert(A.engine.settle()>n*0.9,'a child date re-warps nearly everything');
 	}},
+	{name:'seg attribute is 3 bytes per vertex (segA, segB, weightA·255, not normalized); layers still get a float seg (weightA 0..1)',async run(c){
+		const g=await c.geometry(),{engine}=nodeEngine(g),fs=await import('node:fs'),bin=fs.readFileSync('public/anyhealth/models/segments.bin');let off=0,bytes=0;
+		g.atlas.parts.forEach((p,i)=>{const a=engine.segAttribute(i);bytes+=a.array.byteLength;c.assert(a.array instanceof Uint8Array&&a.itemSize===3&&!a.normalized,`${p.name}: ${a.array.constructor.name}×${a.itemSize}`);
+			if(i%97===0)for(let v=0;v<p.vertexCount;v+=13){c.assert(a.array[v*3]===(bin[off+v*2]&15)&&a.array[v*3+1]===bin[off+v*2]>>4&&a.array[v*3+2]===bin[off+v*2+1],`${p.name} vertex ${v}`);}off+=p.vertexCount*2;});
+		c.assert(bytes===off/2*3,`seg bytes ${bytes}`);
+		// The skin marks layers copy the nearest Skin vertex's seg from ctx.restGeometry(skin): it must still be float with weightA in 0..1.
+		const {scene}=nodeEngine(g);let marks=0;scene.traverse(o=>{const a=(o as import('three').Mesh).geometry?.getAttribute?.('seg');if(!a)return;marks++;c.assert(a.array instanceof Float32Array,'layer seg is float');let w=0;for(let v=2;v<a.array.length;v+=3)w=Math.max(w,a.array[v]);c.assert(w>0&&w<=1,`layer weights 0..1 (max ${w})`);});
+		c.assert(marks>0,'some layer carries a per-vertex seg');
+	}},
 ];

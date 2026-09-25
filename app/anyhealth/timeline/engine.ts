@@ -1,8 +1,8 @@
 /** The AnyHealth timeline engine: turns a date into the body's growth warp, every issue script's part effects and custom layers, on top of the atlas scene (see docs/superpowers/specs/2026-09-25-anyhealth-timeline-design.md). scene.tsx creates it only in timeline mode.
  *
  * Shader injection (patchMaterial), on top of scene.tsx's own onBeforeCompile (which it chains):
- * - Vertex, after `#include <common>`: when partFx, `varying float tfxVisible; varying vec4 tfxTint; uniform sampler2D tfxState; uniform float tfxWidth; vec4 tfxRow(float row)` (this vertex's part texel, rows as in fx/part-fx.ts), then FX_PARS; when WARP_APPLY is non-empty, `attribute vec3 seg;` (unless the material defines TW_FIXED_SEG), then WARP_PARS.
- * - Vertex, main: `#include <begin_vertex>` is hoisted to just after `#include <beginnormal_vertex>`, so `transformed` (= position, rest space) and `objectNormal` are both live before defaultnormal_vertex reads the normal. Right after it, in one `{ }` block: when partFx, `tfxVisible = tfxRow(0.).x; tfxTint = tfxRow(1.);` then FX_APPLY; when WARP_APPLY is non-empty, `vec3 twSeg` (segA, segB, weightA; from `seg`, or `vec3(TW_FIXED_SEG, TW_FIXED_SEG, 1)`) then WARP_APPLY.
+ * - Vertex, after `#include <common>`: when partFx, `varying float tfxVisible; varying vec4 tfxTint; uniform sampler2D tfxState; uniform float tfxWidth; vec4 tfxRow(float row)` (this vertex's part texel, rows as in fx/part-fx.ts), then FX_PARS; when WARP_APPLY is non-empty, `#define TW_SEG_BYTES` (partFx materials: the atlas `seg` is 3 unnormalized bytes per vertex), `attribute vec3 seg;` (unless the material defines TW_FIXED_SEG), then WARP_PARS.
+ * - Vertex, main: `#include <begin_vertex>` is hoisted to just after `#include <beginnormal_vertex>`, so `transformed` (= position, rest space) and `objectNormal` are both live before defaultnormal_vertex reads the normal. Right after it, in one `{ }` block: when partFx, `tfxVisible = tfxRow(0.).x; tfxTint = tfxRow(1.);` then FX_APPLY; when WARP_APPLY is non-empty, TW_SEG (warp-glsl.ts: `vec3 twSeg` = segA, segB, weightA 0..1, from TW_FIXED_SEG, the byte `seg`, or a float `seg`) then WARP_APPLY.
  * - Fragment, when partFx: `if (tfxVisible < 0.5) discard;` after `#include <clipping_planes_fragment>` and `diffuseColor.rgb = mix(diffuseColor.rgb, tfxTint.rgb, tfxTint.a);` after `#include <color_fragment>`.
  * - Uniforms: warpUniforms() (shared by every material), `twSoft` per material, and `tfxState` / `tfxWidth` when partFx.
  * Visibility in timeline mode goes through here only: scene.tsx keeps partState at 1 and the engine writes fx row 0 `visible` = visibilityFor(...) × the merged PartFx visibility. */
@@ -14,7 +14,7 @@ import {bodyAt} from './growth/proportions';
 import {growthFx} from './growth/organs';
 import {eruptionFx} from './issues/teeth/eruption';
 import {warpState,warpPoint,type WarpState} from './growth/warp';
-import {WARP_PARS,WARP_APPLY,warpUniforms,writeWarpUniforms} from './growth/warp-glsl';
+import {WARP_PARS,WARP_APPLY,TW_SEG,warpUniforms,writeWarpUniforms} from './growth/warp-glsl';
 import {FX_ROWS,createFxTexture,mergeFx,writeFx,applyFxPoint,identityFx,type ResolvedFx} from './fx/part-fx';
 import {FX_PARS,FX_APPLY} from './fx/part-fx-glsl';
 import {BIRTH_DATE} from '../health/types';
@@ -86,11 +86,11 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 			if(partFx)Object.assign(shader.uniforms,{tfxState:{value:fx.texture},tfxWidth:{value:fx.width}});
 			const pars=[
 				partFx?`varying float tfxVisible; varying vec4 tfxTint; uniform sampler2D tfxState; uniform float tfxWidth;\nvec4 tfxRow(float row){ return texture2D(tfxState, vec2((partIndex + 0.5) / tfxWidth, (row + 0.5) / ${FX_ROWS}.0)); }\n${FX_PARS}`:'',
-				warpOn?`#ifndef TW_FIXED_SEG\nattribute vec3 seg;\n#endif\n${WARP_PARS}`:'',
+				warpOn?`${partFx?'#define TW_SEG_BYTES\n':''}#ifndef TW_FIXED_SEG\nattribute vec3 seg;\n#endif\n${WARP_PARS}`:'',
 			].join('\n');
 			const apply=[
 				partFx?`tfxVisible = tfxRow(0.0).x; tfxTint = tfxRow(1.0);\n${FX_APPLY}`:'',
-				warpOn?`#ifdef TW_FIXED_SEG\nvec3 twSeg = vec3(float(TW_FIXED_SEG), float(TW_FIXED_SEG), 1.0);\n#else\nvec3 twSeg = seg;\n#endif\n${WARP_APPLY}`:'',
+				warpOn?`${TW_SEG}\n${WARP_APPLY}`:'',
 			].join('\n');
 			shader.vertexShader=shader.vertexShader.replace('#include <common>',()=>`#include <common>\n${pars}`).replace('#include <begin_vertex>',()=>'').replace('#include <beginnormal_vertex>',()=>`#include <beginnormal_vertex>\n#include <begin_vertex>\n{\n${apply}\n}`);
 			if(partFx)shader.fragmentShader=shader.fragmentShader.replace('#include <common>',()=>'#include <common>\nvarying float tfxVisible; varying vec4 tfxTint;')
@@ -100,18 +100,21 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 		m.customProgramCacheKey=()=>`${prevKey()}|timeline:${partFx?1:0}${warpOn?1:0}`;m.needsUpdate=true;
 	};
 
+	/** Atlas parts: (segA, segB, round(weightA·255)) as 3 unnormalized bytes per vertex (the shader reads it with TW_SEG_BYTES); a part missing from segments.bin rides the trunk. */
 	const segAttribute=(i:number)=>{
-		const vc=atlas.parts[i].vertexCount,a=new Float32Array(vc*3),o0=segOffset[i];
-		if(o0+vc*2<=segBytes.length)for(let v=0;v<vc;v++){const b0=segBytes[o0+v*2];a[v*3]=b0&15;a[v*3+1]=b0>>4;a[v*3+2]=segBytes[o0+v*2+1]/255;}
-		else for(let v=0;v<vc;v++)a[v*3+2]=1;
-		return new T.BufferAttribute(a,3);
+		const vc=atlas.parts[i].vertexCount,a=new Uint8Array(vc*3),o0=segOffset[i];
+		if(o0+vc*2<=segBytes.length)for(let v=0;v<vc;v++){const b0=segBytes[o0+v*2];a[v*3]=b0&15;a[v*3+1]=b0>>4;a[v*3+2]=segBytes[o0+v*2+1];}
+		else for(let v=0;v<vc;v++)a[v*3+2]=255;
+		return new T.BufferAttribute(a,3,false);
 	};
+	/** The float seg custom layers read from restGeometry (types.ts: segA, segB, weightA 0..1). */
+	const floatSeg=(i:number)=>{const b=segAttribute(i).array as Uint8Array,a=new Float32Array(b.length);for(let k=0;k<b.length;k+=3){a[k]=b[k];a[k+1]=b[k+1];a[k+2]=b[k+2]/255;}return new T.BufferAttribute(a,3);};
 
 	const layerCtx:LayerContext={
 		scene,atlas,indicesOf,
 		restGeometry(i){
 			const r=rest[i],g=pickers[i]?.geometry;if(!r||!g)return undefined;let rg=restGeoms.get(i);
-			if(!rg){rg=new T.BufferGeometry();rg.setAttribute('position',new T.BufferAttribute(r,3));for(const k of ['normal','seg']){const a=g.getAttribute(k);if(a)rg.setAttribute(k,a);}rg.setIndex(g.getIndex());rg.boundingBox=new T.Box3().setFromArray(r);rg.computeBoundingSphere();restGeoms.set(i,rg);}
+			if(!rg){rg=new T.BufferGeometry();rg.setAttribute('position',new T.BufferAttribute(r,3));const nm=g.getAttribute('normal');if(nm)rg.setAttribute('normal',nm);rg.setAttribute('seg',floatSeg(i));rg.setIndex(g.getIndex());rg.boundingBox=new T.Box3().setFromArray(r);rg.computeBoundingSphere();restGeoms.set(i,rg);}
 			return rg;
 		},
 		material(m){
@@ -136,10 +139,10 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 		pickers.forEach((mesh,i)=>{
 			const r=rest[i];if(!mesh||!r)return;const fi=fxMap.get(i);
 			if(settledWs&&!(segMask[i]&moved)&&sameFx(settledFx[i],fi))return;settledFx[i]=fi;count++;
-			const g=mesh.geometry,pos=g.getAttribute('position') as T.BufferAttribute,arr=pos.array as Float32Array,nrm=g.getAttribute('normal').array as Int8Array,sg=g.getAttribute('seg')?.array as Float32Array|undefined,f=fi??identityFx(restCenters[i]);
+			const g=mesh.geometry,pos=g.getAttribute('position') as T.BufferAttribute,arr=pos.array as Float32Array,nrm=g.getAttribute('normal').array as Int8Array,sg=g.getAttribute('seg')?.array as Uint8Array|undefined,f=fi??identityFx(restCenters[i]);
 			for(let v=0,k=0;v<r.length/3;v++,k+=3){
 				p[0]=r[k];p[1]=r[k+1];p[2]=r[k+2];nn[0]=nrm[k]/127;nn[1]=nrm[k+1]/127;nn[2]=nrm[k+2]/127;
-				applyFxPoint(f,p,nn,q);warpPoint(ws,q,sg?sg[k]:0,sg?sg[k+1]:0,sg?sg[k+2]:1,soft[i],q);arr[k]=q[0];arr[k+1]=q[1];arr[k+2]=q[2];
+				applyFxPoint(f,p,nn,q);warpPoint(ws,q,sg?sg[k]:0,sg?sg[k+1]:0,sg?sg[k+2]/255:1,soft[i],q);arr[k]=q[0];arr[k+1]=q[1];arr[k+2]=q[2];
 			}
 			pos.needsUpdate=true;bounds[i].setFromBufferAttribute(pos);g.boundingBox=bounds[i].clone();g.computeBoundingSphere();
 		});
