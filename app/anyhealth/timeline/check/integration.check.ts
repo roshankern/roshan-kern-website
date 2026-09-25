@@ -6,6 +6,8 @@ import {SCRIPTS} from '../issues';
 import {bodyAt} from '../growth/proportions';
 import {toDays,fromDays} from '../../health/dates';
 import {mergeFx} from '../fx/part-fx';
+import {pacing} from '../issues/pacing';
+import {CROUP_EPISODES} from '../issues/airway/croup';
 import {LEAD_DAYS as boneLead} from '../issues/catalog/bones';
 import {LEAD_DAYS as airwayLead} from '../issues/catalog/airway';
 import {LEAD_DAYS as digestiveLead} from '../issues/catalog/digestive';
@@ -89,5 +91,10 @@ export const checks:Check[]=[
 		// Pause: the pending date applies on the next frame without a date change, whatever the time since the last apply.
 		const tooth=g.indicesOf('Left upper first secondary molar tooth')[0];now+=50;C.update(frame('2005-06-22',now));now+=1;C.update(frame('2005-06-22',now));c.assert(C.partVisible(tooth)===0,'pause applies the pending date');
 		now+=50;C.update(frame('2020-06-22',now));const pending=C.partVisible(tooth);C.settle();c.assert(C.partVisible(tooth)===1,`settle applies the pending date (before: ${pending})`);
+	}},
+	{name:'pacing slows play through every croup episode, the 2016 ER/PICU, the lacerations and the anaphylaxis reactions',run(c){
+		const d=pacing(TODAY),slow=(date:string)=>d.some(r=>r.from<=date&&date<r.to&&r.k>1);
+		const miss=[...CROUP_EPISODES.map(e=>`croup ${e.date}`),'sky-ridge-er-airway-2016 2016-11-02','chco-picu-subglottitis-2016 2016-11-03','chin-laceration-er-2010 2010-04-10','forehead-laceration-2011 2011-03-14','right-shin-laceration-2014 2014-01-27','egg-anaphylaxis-daycare 2005-05-02','walnut-accidental-exposure-2026 2026-03-01'].filter(x=>!slow(x.split(' ')[1]));
+		c.assert(!miss.length,`not slowed: ${miss.join(', ')}`);
 	}},
 ];

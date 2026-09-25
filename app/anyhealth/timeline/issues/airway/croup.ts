@@ -53,6 +53,11 @@ const START=CROUP_EPISODES.map(e=>toDays(e.date));
 /** 0..1 severity of an episode `x` days after its date: ramps in over the pre-roll, holds the plateau, eases to 0 at `len`. */
 export const episodeCourse=(e:CroupEpisode,x:number)=>smoothstep(-PRE_ROLL,0,x)*(1-smoothstep(e.plateau,e.len,x));
 
+/** Timeline pacing (presentation, not a medical value): how many times slower than quiet time play runs through a croup episode, and through the 2016 ER / PICU stay. */
+export const CROUP_PACE=12,PICU_PACE=30;
+/** `acute` ranges (days relative to `onset`) for the owner's episodes: from the pre-roll to the end of each course. */
+export const croupAcute=(owner:CroupEpisode['owner'],onset:string,k:number)=>CROUP_EPISODES.filter(e=>e.owner===owner).map(e=>{const d=toDays(e.date)-toDays(onset);return {from:d-PRE_ROLL,to:d+e.len,k};});
+
 /** Croup red. */
 export const CROUP_TINT:[number,number,number]=[0.85,0.2,0.18];
 const TINT_MAX=0.55;

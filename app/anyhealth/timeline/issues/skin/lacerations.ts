@@ -73,6 +73,11 @@ export const LACERATION_MARKS:Record<string,MarksSpec>=Object.fromEntries(CUTS.m
 /** Sutures showing (surface ticks plus buried absorbable ones) on day `d` since a laceration's onset. */
 export function sutureCount(id:string,d:number){const m=LACERATION_MARKS[id];if(!m)return 0;const st=m.state(d);return m.marks.filter((x,i)=>(x.tag==='suture'||x.tag==='buried')&&st[i].alpha>0).length;}
 
+/** Timeline pacing (presentation, not a medical value): how many times slower play runs from the injury until the sutures come out. */
+export const LACERATION_PACE=8;
+/** `acute` range for a laceration script: from the injury (its lead before the record date) to suture removal. */
+export function lacerationAcute(id:string):{from:number;to:number;k:number}[]{const c=CUTS.find(x=>x.id===id);return c?[{from:-(c.lead??0),to:c.surface.removeDay,k:LACERATION_PACE}]:[];}
+
 /** Tracker status line for a laceration. */
 export function lacerationStatus(id:string,d:number):string|null{
 	const c=CUTS.find(x=>x.id===id),age=d+(c?.lead??0);if(!c||age<0)return null;const n=sutureCount(id,d);

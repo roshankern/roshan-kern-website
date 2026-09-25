@@ -1,7 +1,7 @@
 /** Issue scripts, area `skin`: every skin issue draws small meshes on the Skin through the shared marks layer (issues/skin/marks-layer.ts). Medical basis: docs/anyhealth/timeline-medical-basis/skin.md. */
 import type {IssueScript} from '../../types';
 import {marksLayer,type MarksSpec} from '../skin/marks-layer';
-import {LACERATION_MARKS,LACERATION_LEAD,lacerationStatus} from '../skin/lacerations';
+import {LACERATION_MARKS,LACERATION_LEAD,lacerationStatus,lacerationAcute} from '../skin/lacerations';
 import {NEONATAL_ID,NEONATAL_ONSET,NEONATAL_RESOLVE,NEONATAL_MARKS,neonatalFx,neonatalStatus} from '../skin/neonatal';
 import {ECZEMA_ID,ECZEMA_ONSET,ECZEMA_MARKS,eczemaStatus} from '../skin/eczema';
 import {WARTS_ID,WARTS_ONSET,WARTS_RESOLVE,WARTS_MARKS,wartsStatus} from '../skin/warts';
@@ -15,7 +15,7 @@ export const SKIN_MARKS:Record<string,MarksSpec>={
 export const LEAD_DAYS:Record<string,number>={...LACERATION_LEAD};
 
 const layer=(id:string)=>()=>marksLayer(SKIN_MARKS[id]);
-const cut=(id:string,onset:string,illustrative=false):IssueScript=>({id,parts:['Skin'],onset,chronic:true,illustrative,fxAt:()=>[],layer:layer(id),status:d=>lacerationStatus(id,d)});
+const cut=(id:string,onset:string,illustrative=false):IssueScript=>({id,parts:['Skin'],onset,chronic:true,illustrative,acute:lacerationAcute(id),fxAt:()=>[],layer:layer(id),status:d=>lacerationStatus(id,d)});
 
 export const SCRIPTS:IssueScript[]=[
 	{id:NEONATAL_ID,parts:['Skin','Hair of head'],onset:NEONATAL_ONSET,resolve:NEONATAL_RESOLVE,fxAt:d=>neonatalFx(d),layer:layer(NEONATAL_ID),status:neonatalStatus},

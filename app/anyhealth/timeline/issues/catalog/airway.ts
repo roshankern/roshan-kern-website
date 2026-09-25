@@ -3,7 +3,7 @@ import type {IssueScript,PartFx,Quat} from '../../types';
 import {toDays,fromDays} from '../../../health/dates';
 import {BIRTH_DATE} from '../../../health/types';
 import {smoothstep,dayHighlight,prng,PRE_ROLL} from '../airway/shape';
-import {croupFx,activeEpisode,CROUP_TINT} from '../airway/croup';
+import {croupFx,activeEpisode,croupAcute,CROUP_TINT,CROUP_PACE,PICU_PACE} from '../airway/croup';
 import {BRONCHIAL_TREES,MAIN_BRONCHI,SEGMENTAL_TREES,VOCAL_FOLDS,EPIGLOTTIS_BASE} from '../airway/parts';
 
 const HIGHLIGHT:[number,number,number]=[0.55,0.8,1];
@@ -55,13 +55,13 @@ const COVID_PATCH:{part:string;a:number}[]=(()=>{const r=prng(20200828),pool=[..
 export const SCRIPTS:IssueScript[]=[
 	{id:'infant-laryngomalacia-2003',parts:['Epiglottis'],onset:LM_ONSET,resolve:'2004-09-22',fxAt:d=>laryngomalacia(d), // basis: airway#laryngomalacia-course
 		status:d=>{const a=ageDays(LM_ONSET,d);return a<LM_START||a>=LM_END?null:a<LM_PEAK[1]?'Floppy epiglottis · peak':'Outgrowing it';}},
-	{id:'infant-croup-neck-xray-2003',parts:['Trachea'],onset:'2003-09-08',resolve:'2003-09-12',fxAt:d=>croupFx('infant-croup-neck-xray-2003',abs('2003-09-08',d)), // basis: airway#croup-course
+	{id:'infant-croup-neck-xray-2003',parts:['Trachea'],onset:'2003-09-08',resolve:'2003-09-12',acute:croupAcute('infant-croup-neck-xray-2003','2003-09-08',CROUP_PACE),fxAt:d=>croupFx('infant-croup-neck-xray-2003',abs('2003-09-08',d)), // basis: airway#croup-course
 		status:d=>d>=0&&d<4?`Subglottic narrowing · day ${Math.floor(d)+1}`:null},
-	{id:'recurrent-croup-childhood',parts:['Trachea'],onset:'2004-01-15',resolve:'2016-12-15',fxAt:d=>croupFx('recurrent-croup-childhood',abs('2004-01-15',d)),
+	{id:'recurrent-croup-childhood',parts:['Trachea'],onset:'2004-01-15',resolve:'2016-12-15',acute:croupAcute('recurrent-croup-childhood','2004-01-15',CROUP_PACE),fxAt:d=>croupFx('recurrent-croup-childhood',abs('2004-01-15',d)),
 		status:croupStatus('recurrent-croup-childhood','2004-01-15')},
-	{id:'sky-ridge-er-airway-2016',parts:['Trachea','Epiglottis',...VOCAL_FOLDS],onset:'2016-11-02',resolve:'2016-11-03',fxAt:d=>tinted(['Epiglottis',...VOCAL_FOLDS],CROUP_TINT,0.6*dayHighlight(d)), // basis: airway#er-2016
+	{id:'sky-ridge-er-airway-2016',parts:['Trachea','Epiglottis',...VOCAL_FOLDS],onset:'2016-11-02',resolve:'2016-11-03',acute:[{from:-PRE_ROLL,to:1,k:PICU_PACE}],fxAt:d=>tinted(['Epiglottis',...VOCAL_FOLDS],CROUP_TINT,0.6*dayHighlight(d)), // basis: airway#er-2016
 		status:d=>d>=0&&d<1?'Stridor, blue lips · epinephrine':null},
-	{id:'chco-picu-subglottitis-2016',parts:['Trachea',...VOCAL_FOLDS],onset:'2016-11-02',resolve:'2016-11-04',fxAt:d=>{const fx=croupFx('chco-picu-subglottitis-2016',abs('2016-11-02',d));return fx.length?[...fx,...tinted(VOCAL_FOLDS,CROUP_TINT,fx[0].tint![3])]:[];}, // basis: airway#picu-2016
+	{id:'chco-picu-subglottitis-2016',parts:['Trachea',...VOCAL_FOLDS],onset:'2016-11-02',resolve:'2016-11-04',acute:croupAcute('chco-picu-subglottitis-2016','2016-11-02',PICU_PACE),fxAt:d=>{const fx=croupFx('chco-picu-subglottitis-2016',abs('2016-11-02',d));return fx.length?[...fx,...tinted(VOCAL_FOLDS,CROUP_TINT,fx[0].tint![3])]:[];}, // basis: airway#picu-2016
 		status:d=>d>=0&&d<3?`PICU · day ${Math.floor(d)+1}`:null},
 	{id:'microlaryngoscopy-bronchoscopy-2016',parts:['Epiglottis','Trachea',...MAIN_BRONCHI],onset:'2016-12-15',resolve:'2016-12-16',fxAt:d=>tinted(['Epiglottis','Trachea',...MAIN_BRONCHI],HIGHLIGHT,0.5*dayHighlight(d))}, // basis: airway#bronchoscopy-2016
 	{id:'asthma-diagnosis-chronic',parts:[...BRONCHIAL_TREES],onset:ASTHMA_ONSET,chronic:true,fxAt:d=>asthma(d),
