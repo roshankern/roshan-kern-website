@@ -1,6 +1,6 @@
 import { type JSX } from "react";
 import type { Metadata } from "next";
-import AtlasApp from "../atlas/atlas-app";
+import TimelineApp from "./timeline-app";
 
 /** AnyHealth timeline: growth and every health issue animated on the atlas (see app/anyhealth/timeline). Not indexed while in progress. */
 export const metadata: Metadata = {
@@ -10,5 +10,5 @@ export const metadata: Metadata = {
 };
 
 export default function AnyHealthTimelinePage(): JSX.Element {
-	return <AtlasApp mode="timeline" />;
+	return <TimelineApp />;
 }

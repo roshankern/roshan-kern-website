@@ -12,12 +12,12 @@ import IssueDots,{type DotsHandle} from '../health/issue-dots';
 import type {Anchor} from '../health/anchors';
 import type {Issue} from '../health/types';
 import {createFracture,type FractureHandle} from '../fracture/fracture-scene';
-import {createEngine} from '../timeline/engine';
+import type {createEngine as CreateEngine} from '../timeline/engine';
 import type {Rig} from '../timeline/types';
-interface Props {atlas:Atlas;state:SceneState;onProgress:(n:number)=>void;onError:(s:string)=>void;issues:Issue[];selectedIssue:string|null;onSelectIssue:(id:string|null)=>void;date?:string;fracture?:boolean;timeline?:{date:string;isolate:string|null;onFly?:()=>void};segments?:ArrayBuffer;rig?:Rig;onApi?:(api:{focusBox(b:T.Box3):void})=>void}
+interface Props {atlas:Atlas;state:SceneState;onProgress:(n:number)=>void;onError:(s:string)=>void;issues:Issue[];selectedIssue:string|null;onSelectIssue:(id:string|null)=>void;date?:string;fracture?:boolean;timeline?:{date:string;isolate:string|null;onFly?:()=>void};segments?:ArrayBuffer;rig?:Rig;/** Timeline mode: the engine factory, passed in so the default page never bundles the engine (atlas-app.tsx imports it dynamically). */createEngine?:typeof CreateEngine;onApi?:(api:{focusBox(b:T.Box3):void})=>void}
 /** `date` + `fracture` (the /anyhealth/test page) draw the 2009 humerus fracture as of the timeline date; off by default.
- *  `timeline` + `rig` + `segments` (the /anyhealth/timeline page, read at mount) hand the body to the timeline engine (app/anyhealth/timeline/engine.ts): growth warp, issue effects, Isolate. Visibility then goes through the engine only. Off by default. */
-export default function AnatomyScene({atlas,state,onProgress,onError,issues,selectedIssue,onSelectIssue,date,fracture=false,timeline,segments,rig,onApi}:Props){
+ *  `timeline` + `rig` + `segments` + `createEngine` (the /anyhealth/timeline page, read at mount) hand the body to the timeline engine (app/anyhealth/timeline/engine.ts): growth warp, issue effects, Isolate. Visibility then goes through the engine only. Off by default. */
+export default function AnatomyScene({atlas,state,onProgress,onError,issues,selectedIssue,onSelectIssue,date,fracture=false,timeline,segments,rig,createEngine,onApi}:Props){
  const host=useRef<HTMLDivElement>(null),latest=useRef(state),dots=useRef<DotsHandle|null>(null);
  latest.current=state;
  const latestDate=useRef({date,fracture});latestDate.current={date,fracture};
@@ -43,7 +43,7 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
   const width=T.MathUtils.ceilPowerOfTwo(atlas.parts.length),data=new Float32Array(width*4),partTexture=new T.DataTexture(data,width,1,T.RGBAFormat,T.FloatType);partTexture.needsUpdate=true;
   const materials:T.Material[]=[],geometries:T.BufferGeometry[]=[],pickers:(T.Mesh|undefined)[]=[];
   const bounds=atlas.parts.map(p=>new T.Box3(new T.Vector3().fromArray(p.bounds[0]),new T.Vector3().fromArray(p.bounds[1])));
-  const engine=timeline&&rig&&segments?createEngine({atlas,scene,bounds,rig,segments,renderer}):null;
+  const engine=timeline&&rig&&segments&&createEngine?createEngine({atlas,scene,bounds,rig,segments,renderer}):null;
   // Timeline mode: picking treats a part as visible by the engine's final fx visibility (switches, Isolate and issue effects such as a hidden fractured bone or an unerupted tooth).
   let lastIsolate:string|null=null,seenDate='',dateAt=0,settled=true;const shown=(i:number)=>(engine?engine.partVisible(i):data[i*4+3])>.5;
   const materialFor=(system:string)=>{

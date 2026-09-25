@@ -15,18 +15,16 @@ import BodyStats from '../health/body-stats';
 import IssuePanel from '../health/issue-panel';
 import {todayISO} from '../health/dates';
 import {FRACTURE_PART,TIMELINE_DENSITY,fractureAt} from '../fracture/model';
-import IssueTracker from '../timeline/tracker/issue-tracker';
-import {pacing} from '../timeline/issues/pacing';
 import {parseDateParam} from '../timeline/url-date';
-import rigData from '../timeline/growth/rig.json';
-import type {Rig} from '../timeline/types';
 const initial:SceneState={visible:DEFAULT_VISIBLE};
 const ISSUES=[...(issuesData as Issue[])].sort((a,b)=>a.date.localeCompare(b.date)),GROWTH=growthData as GrowthPoint[];
-const RIG=rigData as Rig,noSelect=()=>{};
+const noSelect=()=>{};
+/** The timeline runtime (engine, catalog, pacing, tracker, rig), passed in by the timeline page's client entry (timeline/timeline-app.tsx) so the default page never bundles it. */
+type TimelineKit=typeof import('../timeline/runtime');
 /** `fracture` (the /anyhealth/test page): draws the 2009 humerus fracture, warps the timeline around it and reads ?date=YYYY-MM-DD.
- *  `mode="timeline"` (the /anyhealth/timeline page): the body's growth and every issue animated by the timeline engine, with the Issue tracker in place of the issue panel; reads ?date= too. */
-export default function AtlasApp({fracture=false,mode='default'}:{fracture?:boolean;mode?:'default'|'timeline'}){
- const timeline=mode==='timeline';
+ *  `mode="timeline"` + `kit` (the /anyhealth/timeline page, via timeline/timeline-app.tsx): the body's growth and every issue animated by the timeline engine, with the Issue tracker in place of the issue panel; reads ?date= too. */
+export default function AtlasApp({fracture=false,mode='default',kit=null}:{fracture?:boolean;mode?:'default'|'timeline';kit?:TimelineKit|null}){
+ const timeline=mode==='timeline'&&!!kit;
  const [atlas,setAtlas]=useState<Atlas|null>(null),[state,setState]=useState(initial),[progress,setProgress]=useState(0),[error,setError]=useState(''),[panel,setPanel]=useState<'layers'|null>(null),[about,setAbout]=useState(false),[date,setDate]=useState(''),[selectedIssue,setSelectedIssue]=useState<string|null>(null),[isolate,setIsolate]=useState<string|null>(null),[segments,setSegments]=useState<ArrayBuffer|null>(null);
  // Starts at birth; set after mount so the timeline (which reads today's date) renders client-only.
  useEffect(()=>{
@@ -44,7 +42,7 @@ export default function AtlasApp({fracture=false,mode='default'}:{fracture?:bool
  const toggle=(id:SystemId)=>setVisible(v=>v.includes(id)?v.filter(x=>x!==id):[...v,id]);
  const openPanel=(next:'layers')=>{setPanel(p=>p===next?null:next);};
  return <main className={timeline?'studio timeline':'studio'}>
-  {atlas&&(!timeline||segments&&date)&&<AnatomyScene atlas={atlas} state={state} {...fracture?{date,fracture}:{}} {...timeline&&segments?{timeline:{date,isolate},rig:RIG,segments}:{}} issues={ISSUES} selectedIssue={selectedIssue} onSelectIssue={setSelectedIssue} onProgress={n=>{setProgress(n);if(n===100)setError('');}} onError={setError}/>}
+  {atlas&&(!timeline||segments&&date&&kit)&&<AnatomyScene atlas={atlas} state={state} {...fracture?{date,fracture}:{}} {...timeline&&segments&&kit?{timeline:{date,isolate},rig:kit.RIG,segments,createEngine:kit.createEngine}:{}} issues={ISSUES} selectedIssue={selectedIssue} onSelectIssue={setSelectedIssue} onProgress={n=>{setProgress(n);if(n===100)setError('');}} onError={setError}/>}
   <div className="vignette"/>
   <header className="identity"><h1>AnyHealth</h1><div className="identity-meta">Roshan Kern</div></header>
   <section className={`layers-panel glass ${panel==='layers'?'mobile-open':''}`} aria-label="Anatomical layers">
@@ -59,8 +57,8 @@ export default function AtlasApp({fracture=false,mode='default'}:{fracture?:bool
   {error&&<div className="loading glass error" role="alert"><p>{error}</p><Button variant="ghost" onClick={()=>location.reload()}>Reload viewer</Button></div>}
   {/* Before BodyStats and sharing its class, so the scene's openArea() frames the body above this line too. */}
   {date&&fracture&&<div className="body-stats fracture-status" aria-live="off">{healing?`${FRACTURE_PART} · ${healing.phase} · day ${Math.floor(healing.day)}`:'\u00a0'}</div>}
-  {date&&<><BodyStats date={date} growth={GROWTH}/>{timeline?<TimelineBar issues={[]} date={date} onDate={setDate} selected={null} onSelect={noSelect} warp={pacing(todayISO())}/>:<TimelineBar issues={ISSUES} date={date} onDate={setDate} selected={selectedIssue} onSelect={setSelectedIssue} warp={fracture?TIMELINE_DENSITY:undefined}/>}</>}
-  {timeline?date&&<IssueTracker date={date} today={todayISO()} isolated={isolate} onIsolate={setIsolate}/>:<IssuePanel issue={issue} onClose={closeIssue}/>}
+  {date&&<><BodyStats date={date} growth={GROWTH}/>{timeline?kit&&<TimelineBar issues={[]} date={date} onDate={setDate} selected={null} onSelect={noSelect} warp={kit.pacing(todayISO())}/>:<TimelineBar issues={ISSUES} date={date} onDate={setDate} selected={selectedIssue} onSelect={setSelectedIssue} warp={fracture?TIMELINE_DENSITY:undefined}/>}</>}
+  {timeline?date&&kit&&<kit.IssueTracker date={date} today={todayISO()} isolated={isolate} onIsolate={setIsolate}/>:<IssuePanel issue={issue} onClose={closeIssue}/>}
   <Sheet open={about} onOpenChange={setAbout}><SheetContent className="about-sheet glass"><div className="eyebrow">SOURCE & SCOPE</div><SheetTitle className="structure-title">A body, revealed.</SheetTitle><SheetDescription>Explore the adult male reference anatomy from BodyParts3D.</SheetDescription><div className="about-copy"><p><strong>Male · BodyParts3D</strong><br/>2,234 individual meshes and 3,432 named concepts from an adult male reference anatomy.</p><p>This reference does not contain every human structure or variation. Named concepts can contain multiple pieces; each source mesh is rendered once.</p><p>Colors and system groupings are designed for exploration. The geometry is simplified for the web, and short explanations provide general educational context. This is an anatomical reference, not a diagnostic or surgical tool.</p><h3>Source</h3><p>BodyParts3D, © The Database Center for Life Science licensed under CC Attribution 4.0 International.</p><a href="https://dbarchive.biosciencedbc.jp/en/bodyparts3d/lic.html" target="_blank" rel="noreferrer">Dataset license <ArrowUpRight size={14}/></a><a href="https://dbarchive.biosciencedbc.jp/en/bodyparts3d/download.html" target="_blank" rel="noreferrer">Original geometry & metadata <ArrowUpRight size={14}/></a><a href="https://academic.oup.com/nar/article/37/suppl_1/D782/1000752" target="_blank" rel="noreferrer">Read the source publication <ArrowUpRight size={14}/></a></div></SheetContent></Sheet>
  </main>;
 }
