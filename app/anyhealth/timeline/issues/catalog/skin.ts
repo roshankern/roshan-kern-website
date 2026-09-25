@@ -1,7 +1,7 @@
 /** Issue scripts, area `skin`: every skin issue draws small meshes on the Skin through the shared marks layer (issues/skin/marks-layer.ts). Medical basis: docs/anyhealth/timeline-medical-basis/skin.md. */
 import type {IssueScript} from '../../types';
 import {marksLayer,type MarksSpec} from '../skin/marks-layer';
-import {LACERATION_MARKS,lacerationStatus} from '../skin/lacerations';
+import {LACERATION_MARKS,LACERATION_LEAD,lacerationStatus} from '../skin/lacerations';
 import {NEONATAL_ID,NEONATAL_ONSET,NEONATAL_RESOLVE,NEONATAL_MARKS,neonatalFx,neonatalStatus} from '../skin/neonatal';
 import {ECZEMA_ID,ECZEMA_ONSET,ECZEMA_MARKS,eczemaStatus} from '../skin/eczema';
 import {WARTS_ID,WARTS_ONSET,WARTS_RESOLVE,WARTS_MARKS,wartsStatus} from '../skin/warts';
@@ -11,6 +11,9 @@ import {ACNE_ID,ACNE_ONSET,ISO_ID,ISO_ONSET,ISO_END,ACNE_MARKS,ISO_MARKS,isoFx,a
 export const SKIN_MARKS:Record<string,MarksSpec>={
 	[NEONATAL_ID]:NEONATAL_MARKS,[ECZEMA_ID]:ECZEMA_MARKS,...LACERATION_MARKS,[WARTS_ID]:WARTS_MARKS,[ACNE_ID]:ACNE_MARKS,[ISO_ID]:ISO_MARKS,
 };
+/** Scripts whose issue starts before the record date (the chin wound is a few days old at the follow-up call): days of lead, per the LEAD_DAYS ruling. */
+export const LEAD_DAYS:Record<string,number>={...LACERATION_LEAD};
+
 const layer=(id:string)=>()=>marksLayer(SKIN_MARKS[id]);
 const cut=(id:string,onset:string,illustrative=false):IssueScript=>({id,parts:['Skin'],onset,chronic:true,illustrative,fxAt:()=>[],layer:layer(id),status:d=>lacerationStatus(id,d)});
 

@@ -12,7 +12,8 @@ const ageDay=(d:number)=>d+toDays(NEONATAL_ONSET)-toDays(BIRTH_DATE);
 
 const PAPULES=16; // basis: skin#neonatal-papules
 const CLEAR_AGE_DAYS=90; // basis: skin#neonatal-acne-course
-const CAP_RAMP=14,CAP_HOLD_UNTIL=toDays('2003-10-22')-toDays(NEONATAL_ONSET),CAP_GONE=toDays('2003-11-22')-toDays(NEONATAL_ONSET); // basis: skin#cradle-cap-course
+// First noted at the 2-month visit (2003-08-22): it builds over the two weeks before, so it is there when noted.
+const CAP_NOTED=toDays('2003-08-22')-toDays(NEONATAL_ONSET),CAP_RAMP=14,CAP_HOLD_UNTIL=toDays('2003-10-22')-toDays(NEONATAL_ONSET),CAP_GONE=toDays('2003-11-22')-toDays(NEONATAL_ONSET); // basis: skin#cradle-cap-course
 /** Resolve date: cradle cap gone (about 5 months of age). */
 export const NEONATAL_RESOLVE='2003-11-22';
 const SCALE=0xe2c577,SCALE_TINT:[number,number,number]=[.89,.78,.48],CAP_TINT=.25; // basis: skin#cradle-cap-course
@@ -27,7 +28,7 @@ spread(10,.05,seed+7).forEach((uv,i)=>{const r=rng(seed+300+i)();marks.push({at:
 
 const papRank=ranks(PAPULES,seed+9),firstClear=14,lastClear=CLEAR_AGE_DAYS-(toDays(NEONATAL_ONSET)-toDays(BIRTH_DATE));
 /** Cradle cap strength 0..1 on day `d` since onset. */
-const cap=(d:number)=>d<0?0:smooth(0,CAP_RAMP,d)*(1-smooth(CAP_HOLD_UNTIL,CAP_GONE,d));
+const cap=(d:number)=>d<0?0:smooth(CAP_NOTED-CAP_RAMP,CAP_NOTED,d)*(1-smooth(CAP_HOLD_UNTIL,CAP_GONE,d));
 
 function state(d:number):MarkState[]{
 	let p=0;
@@ -43,4 +44,4 @@ export const NEONATAL_MARKS:MarksSpec={marks,state};
 /** Cradle cap also tints the scalp hair faintly yellow while it lasts. */
 export const neonatalFx=(d:number):PartFx[]=>{const a=CAP_TINT*cap(d);return a>0?[{part:'Hair of head',tint:[...SCALE_TINT,a]}]:[];};
 /** Tracker status line. */
-export const neonatalStatus=(d:number)=>d<0?null:ageDay(d)<CLEAR_AGE_DAYS?'Cheek papules · scalp scale':cap(d)>0?'Cradle cap':'Cleared';
+export const neonatalStatus=(d:number)=>d<0?null:ageDay(d)<CLEAR_AGE_DAYS?(cap(d)>0?'Cheek papules · cradle cap':'Cheek papules'):cap(d)>0?'Cradle cap':'Cleared';

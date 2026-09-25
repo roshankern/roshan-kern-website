@@ -3,10 +3,12 @@
  * - Placement (init, rest space): each mark's hint is projected to the closest point on the Skin mesh; the mark's (rest-space) offset is taken in that point's tangent frame (t1 = the body's up, projected; t2 = normal × t1) and projected again, and every mark vertex is projected too, so a mark hugs the surface. Vertices sit MARK_LIFT (0.3 mm) out along the local normal, or `depth` when a mark is buried under the translucent skin.
  * - Segments: every mark vertex carries the `seg` (segA, segB, weightA) of the Skin vertex nearest it (segOfVertex, read from ctx.restGeometry(skin).getAttribute('seg'), i.e. segments.bin), and the material leaves `segment` unset, so marks follow the blended body warp exactly like the skin under them.
  * - Look (update): the script's pure `state(day)` gives each mark an alpha and colour; the layer rewrites its RGBA vertex colours only when that changes. The Skin part is drawn at opacity 0.1, so marks use their own material (vertex colours, alphaTest) and draw after it.
- * - One mesh per layer, frustumCulled off (the warp moves it far from its rest bounds). */
+ * - Size: a mark's physical size is divided by the local warp scale at its segment on `scaleDate` (localScale), so it is life-size on that date.
+ * - One mesh per layer, frustumCulled off (the warp moves it far from its rest bounds). Depth test is strict (LessDepth): where two layers draw the same mark (acne and isotretinoin), the second copy is rejected instead of blending twice. */
 import * as T from 'three';
-import type {CustomLayer,LayerContext,LayerFrame,Vec3} from '../../types';
+import {SEGMENTS,type Body,type CustomLayer,type LayerContext,type LayerFrame,type Rig,type Vec3} from '../../types';
 import {bodyAt} from '../../growth/proportions';
+import rigJson from '../../growth/rig.json';
 import {skinSurface,type SkinSurface,type SurfaceHit} from './surface';
 import {MARK_LIFT,rng,type MarkDef,type MarkState} from './marks';
 
@@ -30,6 +32,13 @@ function frame(n:Vec3):[Vec3,Vec3]{
 	return [t1,cross(n,t1)];
 }
 
+const AXES=SEGMENTS.map(id=>(rigJson as Rig).segments.find(s=>s.id===id)?.axis??[0,1,0] as Vec3);
+/** Local life/rest size ratio at a Skin point on a body, in direction `dir` (unit): body scale × the segment's length factor along its axis and soft-girth factor across it, blended over the point's two segments like the warp. Divide a physical size by it to get the rest size. */
+export function localScale(body:Body,seg:Vec3,dir:Vec3):number{
+	const f=(i:number)=>{const id=SEGMENTS[i]??'trunk',a=AXES[i]??[0,1,0],c=Math.min(1,Math.abs(dir[0]*a[0]+dir[1]*a[1]+dir[2]*a[2]));return Math.hypot(body.length[id]*c,body.softGirth[id]*Math.sqrt(1-c*c));};
+	return body.scale*(seg[2]*f(seg[0])+(1-seg[2])*f(seg[1]));
+}
+
 /** Local mark outline: [a (along), b (across), h (height fraction 0..1)] points and triangles, in units of the half-length / half-width. */
 function outline(def:MarkDef):{pts:[number,number,number][];tris:number[]}{
 	const r=rng(def.seed),pts:[number,number,number][]=[],tris:number[]=[];
@@ -49,12 +58,15 @@ function outline(def:MarkDef):{pts:[number,number,number][];tris:number[]}{
 
 /** Builds the mesh data for a list of marks on a Skin surface. Exported for the node checks. */
 export function buildMarks(surface:SkinSurface,marks:MarkDef[]):{position:Float32Array;seg:Float32Array;index:number[];placed:PlacedMark[]}{
-	const pos:number[]=[],seg:number[]=[],index:number[]=[],placed:PlacedMark[]=[],anchors=new Map<string,SurfaceHit>();
+	const pos:number[]=[],seg:number[]=[],index:number[]=[],placed:PlacedMark[]=[],anchors=new Map<string,SurfaceHit>(),bodies=new Map<string,Body>();
 	for(const def of marks){
-		const k=1/bodyAt(def.scaleDate).scale,key=def.at.join(',');let ah=anchors.get(key);if(!ah){ah=surface.closest(def.at);anchors.set(key,ah);}
-		const [a1,a2]=frame(ah.normal),[u,v]=def.uv??[0,0],hit=surface.closest(add(add(ah.point,a1,u),a2,v)),n=hit.normal,[t1,t2]=frame(n);
+		let body=bodies.get(def.scaleDate);if(!body){body=bodyAt(def.scaleDate);bodies.set(def.scaleDate,body);}
+		const key=def.at.join(',');let ah=anchors.get(key);if(!ah){ah=surface.closest(def.at);anchors.set(key,ah);}
+		const [a1,a2]=frame(ah.normal),[u,v]=def.uv??[0,0];let off=add(a1.map(x=>x*u) as Vec3,a2,v);
+		if(def.uvPhysical){const l=Math.hypot(...off);if(l>0)off=off.map(x=>x/localScale(body!,surface.segOfVertex(ah!.vertex),norm(off))) as Vec3;}
+		const hit=surface.closest(add(ah.point,off)),n=hit.normal,[t1,t2]=frame(n),sg=surface.segOfVertex(hit.vertex);
 		const ang=def.angle??0,dir=norm(add(t1.map(x=>x*Math.cos(ang)) as Vec3,t2,Math.sin(ang))),perp=cross(n,dir);
-		const hl=def.size[0]*k/2,hw=def.size[1]*k/2,hh=def.size[2]*k,lift=def.depth??MARK_LIFT,{pts,tris}=outline(def),start=pos.length/3;
+		const hl=def.size[0]/localScale(body,sg,dir)/2,hw=def.size[1]/localScale(body,sg,perp)/2,hh=def.size[2]/localScale(body,sg,n),lift=def.depth??MARK_LIFT,{pts,tris}=outline(def),start=pos.length/3;
 		// Project each vertex for anything wider than ~3 mm in rest space; small marks sit flat on the centre's tangent plane.
 		const project=Math.max(hl,hw)>.0015;
 		for(const [a,b,h] of pts){
@@ -84,7 +96,7 @@ export function marksLayer(spec:MarksSpec):MarksLayer{
 			const b=buildMarks(surfaceOf(rg),spec.marks);placed=b.placed;
 			const g=new T.BufferGeometry();g.setAttribute('position',new T.BufferAttribute(b.position,3));g.setAttribute('seg',new T.BufferAttribute(b.seg,3));
 			colors=new T.BufferAttribute(new Float32Array(b.position.length/3*4),4);g.setAttribute('color',colors);g.setIndex(b.index);g.computeVertexNormals();g.computeBoundingBox();g.computeBoundingSphere();
-			const mat=ctx.material({color:0xffffff,soft:true,transparent:true,depthWrite:true});mat.vertexColors=true;mat.alphaTest=.01;mat.roughness=.75;mat.needsUpdate=true;
+			const mat=ctx.material({color:0xffffff,soft:true,transparent:true,depthWrite:true});mat.vertexColors=true;mat.alphaTest=.01;mat.roughness=.75;mat.depthFunc=T.LessDepth;mat.needsUpdate=true;
 			mesh=new T.Mesh(g,mat);mesh.frustumCulled=false;mesh.renderOrder=2;mesh.visible=false;mesh.matrixAutoUpdate=false;scene=ctx.scene;scene.add(mesh);
 			return true;
 		},

@@ -1,6 +1,6 @@
 /** Facial acne (diagnosed 2021-08-25: comedonal + inflammatory, with scarring and PIH) and the isotretinoin course that cleared it (2022-01-03 → 06-28).
  *
- * Both scripts draw the same seeded lesion set: the acne layer draws the lesions before isotretinoin starts plus the permanent scars and fading PIH; the isotretinoin layer draws the lesions during the course, so isolating it shows them clearing. Lesion i shows while the remaining fraction for its group exceeds its seeded threshold, so the count follows the cited response curves. */
+ * Both scripts draw the same seeded marks (lesions, scars, PIH) with the same look: the acne layer throughout, the isotretinoin layer during its course. Isolating either one shows the lesions clearing; when neither is isolated the two copies coincide (the marks layer's strict depth test drops the second). Lesion i shows while the remaining fraction for its group exceeds its seeded threshold, so the count follows the cited response curves. */
 import type {PartFx,Vec3} from '../../types';
 import {anchorFor} from '../../../health/anchors';
 import {toDays} from '../../../health/dates';
@@ -46,13 +46,16 @@ const lesionOn=(d:number,i:number)=>remaining(d,isInfl[i])>thr[i];
 /** Active acne lesions (comedones + inflammatory) on a date, whichever layer draws them. */
 export const acneLesionCount=(date:string)=>{const d=toDays(date)-toDays(ACNE_ONSET);return lesions.filter((_,i)=>lesionOn(d,i)).length;};
 
-/** Acne layer: lesions until isotretinoin starts; scars forever; PIH fading over a year after the course. */
-export const ACNE_MARKS:MarksSpec={marks:[...lesions,...scars],state:d=>[
-	...lesions.map((_,i):MarkState=>({alpha:d<ISO_START&&lesionOn(d,i)?1:0})),
+const marks=[...lesions,...scars];
+/** Every acne mark on acne day `d`: lesions per the response curves, scars forever, PIH fading over a year after the course. */
+const acneState=(d:number):MarkState[]=>[
+	...lesions.map((_,i):MarkState=>({alpha:lesionOn(d,i)?1:0})),
 	...scars.map((m):MarkState=>d<0?{alpha:0}:m.tag==='scar'?{alpha:.55}:{alpha:.45*(1-smooth(ISO_START+ISO_DAYS,ISO_START+ISO_DAYS+PIH_FADE,d))}),
-]};
-/** Isotretinoin layer: the same lesions during the course (day = days since 2022-01-03). */
-export const ISO_MARKS:MarksSpec={marks:lesions,state:e=>lesions.map((_,i)=>({alpha:e>=0&&e<=ISO_DAYS&&lesionOn(e+ISO_START,i)?1:0}))};
+];
+/** Acne layer: every acne mark, throughout. */
+export const ACNE_MARKS:MarksSpec={marks,state:acneState};
+/** Isotretinoin layer: the same marks and look during the course (day = days since 2022-01-03), nothing outside it. */
+export const ISO_MARKS:MarksSpec={marks,state:e=>e>=0&&e<=ISO_DAYS?acneState(e+ISO_START):marks.map(()=>({alpha:0}))};
 
 /** Isotretinoin cheilitis (lip dryness), illustrative: in within two weeks, gone two weeks after stopping. */
 export const isoFx=(e:number):PartFx[]=>{const a=e<0?0:LIP_AMOUNT*smooth(0,CHEILITIS_RAMP,e)*(1-smooth(ISO_DAYS,ISO_DAYS+CHEILITIS_CLEAR,e));return a>0?[{part:'Lip',tint:[...LIP_DRY,a]}]:[];};

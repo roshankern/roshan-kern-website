@@ -3,14 +3,17 @@ import * as T from 'three';
 import type {Check} from './harness';
 import type {NodeAtlas} from './node-atlas';
 import type {LayerContext,PartFx} from '../types';
-import {SCRIPTS as AREA,SKIN_MARKS} from '../issues/catalog/skin';
+import {SCRIPTS as AREA,SKIN_MARKS,LEAD_DAYS} from '../issues/catalog/skin';
 import {bodyAt} from '../growth/proportions';
 import {toDays} from '../../health/dates';
 import {skinSurface} from '../issues/skin/surface';
-import {buildMarks,type MarksLayer} from '../issues/skin/marks-layer';
+import {buildMarks,localScale,type MarksLayer} from '../issues/skin/marks-layer';
 import {sutureCount} from '../issues/skin/lacerations';
 import {acneLesionCount} from '../issues/skin/acne';
-import {SEGMENTS} from '../types';
+import {SEGMENTS,type Body,type SegmentId} from '../types';
+
+/** Day just before a script's effects may start (the LEAD_DAYS ruling). */
+const before=(id:string)=>-(LEAD_DAYS[id]??0)-1;
 
 const at=(id:string,d:number,date='2016-01-01')=>AREA.find(s=>s.id===id)!.fxAt(d,{body:bodyAt(date),date});
 const quiet=(f:PartFx)=>(f.swell??0)===0&&(f.tint?.[3]??0)===0&&(f.scale??[1,1,1]).every(v=>v===1)&&(f.visible??1)===1&&!f.translate&&!f.rotate;
@@ -35,7 +38,7 @@ function fakeCtx(na:NodeAtlas):LayerContext{
 const skinOf=(na:NodeAtlas)=>{const i=na.indicesOf('Skin')[0],p=na.parts[i];return {i,surface:skinSurface(p.position,v=>[p.normal[v*3]/127,p.normal[v*3+1]/127,p.normal[v*3+2]/127],p.index,segFor(na,i))};};
 
 export const checks:Check[]=[
-	{name:'skin: no effect before onset',run(c){AREA.forEach(s=>c.assert(s.fxAt(-1,{body:bodyAt(s.onset),date:s.onset}).every(quiet),`${s.id} before onset`));}},
+	{name:'skin: no effect before onset',run(c){AREA.forEach(s=>c.assert(s.fxAt(before(s.id),{body:bodyAt(s.onset),date:s.onset}).every(quiet),`${s.id} before onset`));}},
 	{name:'skin: resolved non-chronic issues return to baseline',run(c){AREA.filter(s=>!s.chronic&&!s.layer).forEach(s=>{const d=toDays(s.resolve!)-toDays(s.onset)+60;c.assert(s.fxAt(d,{body:bodyAt(s.resolve!),date:s.resolve!}).every(f=>(f.swell??0)===0&&(f.tint?.[3]??0)===0),`${s.id} after resolve`);});}},
 	{name:'skin: effects ramp (no step > 25% of peak between adjacent hours in the first 3 days)',run(c){
 		AREA.forEach(s=>{
@@ -48,7 +51,7 @@ export const checks:Check[]=[
 	{name:'skin: every skin script has a marks spec, and state() is pure and sized to its marks',run(c){
 		AREA.forEach(s=>{const m=SKIN_MARKS[s.id];c.assert(!!m&&!!s.layer,`${s.id}: no marks layer`);if(!m)return;c.assert(m.marks.length>0,`${s.id}: no marks`);
 			for(const d of [-1,0,.5,3,8,30,100,400,4000]){const a=JSON.stringify(m.state(d));c.assert(a===JSON.stringify(m.state(d)),`${s.id} state impure at ${d}`);c.assert(m.state(d).length===m.marks.length,`${s.id} state length at ${d}`);}
-			c.assert(m.state(-1).every(x=>x.alpha===0),`${s.id}: marks drawn before onset`);});
+			c.assert(m.state(before(s.id)).every(x=>x.alpha===0),`${s.id}: marks drawn before onset`);});
 	}},
 	{name:'skin: the marks layer places every anchor and mark vertex within 3 mm of the Skin surface (rest)',async run(c){
 		const na=await c.geometry(),ctx=fakeCtx(na),{surface}=skinOf(na);
@@ -82,12 +85,28 @@ export const checks:Check[]=[
 	{name:'skin: laceration scars are permanent and pale (25% opacity) after a year',run(c){
 		['chin-laceration-er-2010','forehead-laceration-2011','right-shin-laceration-2014'].forEach(id=>{const s=AREA.find(x=>x.id===id)!,m=SKIN_MARKS[id],st=m.state(400),line=m.marks.findIndex(x=>x.tag==='cut');c.assert(s.chronic===true,`${id} chronic`);c.assert(Math.abs(st[line].alpha-.25)<1e-9,`${id} scar alpha ${st[line].alpha}`);c.assert(m.state(3)[line].alpha===1,`${id} open wound`);});
 	}},
+	{name:'skin: isolating acne or isotretinoin at 2022-03-01 shows active lesions, and both draw the same marks during the course',run(c){
+		const lesionsOn=(id:string,date:string)=>{const m=SKIN_MARKS[id],d=toDays(date)-toDays(AREA.find(x=>x.id===id)!.onset),st=m.state(d);return m.marks.filter((x,i)=>(x.tag==='comedone'||x.tag==='inflammatory')&&st[i].alpha>0).length;};
+		c.assert(lesionsOn('acne-diagnosis-topical-treatment','2022-03-01')>0,'acne isolated');c.assert(lesionsOn('isotretinoin-accutane-course','2022-03-01')>0,'isotretinoin isolated');
+		const a=SKIN_MARKS['acne-diagnosis-topical-treatment'],b=SKIN_MARKS['isotretinoin-accutane-course'];c.assert(JSON.stringify(a.marks)===JSON.stringify(b.marks),'same marks');
+		for(const date of ['2022-01-03','2022-03-01','2022-06-28'])c.assert(JSON.stringify(a.state(toDays(date)-toDays('2021-08-25')))===JSON.stringify(b.state(toDays(date)-toDays('2022-01-03'))),`same look on ${date}`);
+		c.assert(b.state(toDays('2022-08-01')-toDays('2022-01-03')).every(x=>x.alpha===0),'isotretinoin layer empty after the course');
+	}},
+	{name:'skin: the chin wound is already a few days old on the follow-up call (lead)',run(c){
+		const m=SKIN_MARKS['chin-laceration-er-2010'],cut=m.marks.findIndex(x=>x.tag==='cut'),lead=LEAD_DAYS['chin-laceration-er-2010'];
+		c.assert(lead>0&&lead<=7,`lead ${lead}`);c.assert(m.state(-lead)[cut].alpha===1&&m.state(-lead-1)[cut].alpha===0,'wound starts lead days before onset');c.assert(sutureCount('chin-laceration-er-2010',0)===4,'sutured on the call date');
+	}},
+	{name:'skin: mark sizes follow the local segment scale (length along the axis, girth across)',run(c){
+		const f=(v:number)=>Object.fromEntries(SEGMENTS.map(s=>[s,v])) as Record<SegmentId,number>,body:Body={...bodyAt('2016-01-01'),scale:.5,length:{...f(1),rShank:2},softGirth:f(1.5)};
+		const r=SEGMENTS.indexOf('rShank');c.near(localScale(body,[r,r,1],[0,-1,0]),.5*2,.05,'along the shank');c.near(localScale(body,[r,r,1],[1,0,0]),.5*1.5,.01,'across the shank');
+	}},
 	{name:'skin: acne marks at 2022-06-28 < 20% of their 2021-12-31 count',run(c){
 		const a=acneLesionCount('2021-12-31'),b=acneLesionCount('2022-06-28');c.assert(a>=30,`2021-12-31: ${a} lesions`);c.assert(b<.2*a,`2022-06-28: ${b} vs ${a}`);c.assert(acneLesionCount('2021-08-24')===0,'none before diagnosis');
 	}},
 	{name:'skin: neonatal acne papules 12–20, cleared by 3 months of age; cradle cap gone by resolve',run(c){
 		const m=SKIN_MARKS['neonatal-acne-cradle-cap'],s=AREA.find(x=>x.id==='neonatal-acne-cradle-cap')!,pap=m.marks.map((x,i)=>x.tag==='papule'?i:-1).filter(i=>i>=0);
-		c.assert(pap.length>=12&&pap.length<=20,`${pap.length} papules`);c.assert(pap.every(i=>m.state(0)[i].alpha>0),'all papules at the 1-month visit');
+		c.assert(pap.length>=12&&pap.length<=20,`${pap.length} papules`);c.assert(pap.every(i=>m.state(0)[i].alpha>0),'all papules at the 1-month visit');const sc=m.marks.map((x,i)=>x.tag==='scale'?i:-1).filter(i=>i>=0),two=toDays('2003-08-22')-toDays(s.onset);
+		c.assert(sc.every(i=>m.state(0)[i].alpha===0),'no cradle cap before the 2-month visit ramp');c.assert(sc.every(i=>m.state(two)[i].alpha>.8),'cradle cap at the 2-month visit');
 		const d3=toDays('2003-09-22')-toDays(s.onset);c.assert(pap.every(i=>m.state(d3)[i].alpha===0),'papules gone by 3 months of age');
 		const end=toDays(s.resolve!)-toDays(s.onset);c.assert(m.state(end).every(x=>x.alpha===0),'all clear at resolve');c.assert(at('neonatal-acne-cradle-cap',end).every(quiet),'scalp tint gone at resolve');
 	}},
@@ -100,7 +119,8 @@ export const checks:Check[]=[
 		const m=SKIN_MARKS['childhood-atopic-dyshidrotic-eczema'],s=AREA.find(x=>x.id==='childhood-atopic-dyshidrotic-eczema')!,d=(date:string)=>toDays(date)-toDays(s.onset);
 		const burden=(from:string,to:string)=>{let t=0;for(let x=d(from);x<d(to);x+=3)t+=m.state(x).reduce((a,y)=>a+y.alpha,0);return t;};
 		const early=burden('2005-06-22','2008-06-22'),late=burden('2012-06-22','2015-06-22');c.assert(early>0&&late<.6*early,`burden ${early.toFixed(1)} → ${late.toFixed(1)}`);
-		c.assert(burden('2022-01-01','2024-01-01')>0,'still flares (dyshidrotic, 2022)');c.assert(s.chronic===true,'chronic');
+		c.assert(burden('2022-01-01','2024-01-01')>0,'still flares (dyshidrotic, 2022)');c.assert(burden('2050-01-01','2052-01-01')>0,'never goes silent');
+		c.assert(m.marks.filter(x=>x.tag==='patch'&&Math.abs(x.at[0])>.07&&x.at[1]>1.55).length>=2,'ear patches');c.assert(s.chronic===true,'chronic');
 		const palm=m.marks.filter(x=>x.tag==='vesicle');c.assert(palm.length>0&&palm.every(x=>x.at[0]<0),'vesicles on the right palm (−x)');
 	}},
 	{name:'skin: isotretinoin lip dryness is illustrative and ramps in, then clears after the course',run(c){

@@ -5,12 +5,14 @@ import {toDays} from '../../../health/dates';
 /** Mark shapes. `dome`: raised papule / vesicle. `rough`: jittered dome (wart). `disc`: flat macule or patch. `line`: tapered ribbon (a cut). `bar`: untapered ribbon (a suture across a cut). */
 export type MarkShape='dome'|'rough'|'disc'|'line'|'bar';
 
-/** One small mesh on the skin. `size` is physical metres on the body at `scaleDate` (the layer divides by that date's body scale, so a mark grows with the body afterwards); `uv` is rest-space metres, because where a mark sits is anatomy-relative. */
+/** One small mesh on the skin. `size` is physical metres on the body at `scaleDate`: the layer divides it by the local warp scale there (body scale × the segment's length factor along its axis and soft-girth factor across it), so the mark is life-size on that date and grows with the body afterwards. `uv` is rest-space metres (where a mark sits is anatomy-relative) unless `uvPhysical`. */
 export interface MarkDef {
 	/** Rest-space hint the mark's cluster is projected from (usually from health/anchors.ts). */
 	at:Vec3;
-	/** Rest-space offset from the projected hint in its tangent frame (t1 = the body's up, projected; t2 = normal × t1), metres. */
+	/** Offset from the projected hint in its tangent frame (t1 = the body's up, projected; t2 = normal × t1), metres: rest space, or physical when `uvPhysical`. */
 	uv?:[number,number];
+	/** `uv` is physical at `scaleDate` (e.g. sutures along a cut of recorded length) and is scaled like `size`. */
+	uvPhysical?:boolean;
 	shape:MarkShape;
 	/** [length along the mark's direction, width, height], metres. */
 	size:Vec3;
@@ -20,7 +22,7 @@ export interface MarkDef {
 	depth?:number;
 	/** Base colour (sRGB hex). */
 	color:number;
-	/** Date whose body scale converts `size` to rest space. */
+	/** Date whose body converts `size` (and a physical `uv`) to rest space. */
 	scaleDate:string;
 	/** Seed for shape jitter. */
 	seed:number;
