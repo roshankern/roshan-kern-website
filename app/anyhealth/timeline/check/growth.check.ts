@@ -5,6 +5,9 @@ import {growthFx,GLOBE_CENTRE} from '../growth/organs';
 import {toDays,fromDays} from '../../health/dates';
 import growth from '../../health/growth.json';
 import rigJson from '../growth/rig.json';
+import {warpState,warpPoint} from '../growth/warp';
+import {SOFT_SYSTEMS} from '../engine';
+import type {Vec3} from '../types';
 
 const R=rigJson as Rig,seg=(id:string)=>R.segments.find(s=>s.id===id)!;
 const thighRest=seg('lThigh').length,shankRest=seg('lShank').length;
@@ -15,6 +18,15 @@ const fxOf=(d:string,part:string)=>growthFx(bodyAt(d)).find(x=>x.part===part)?.s
 export const checks:Check[]=[
 	{name:'atlas decodes with the documented rest stature',async run(c){const g=await c.geometry();let top=-Infinity,bottom=Infinity;g.parts.forEach(p=>{for(let i=1;i<p.position.length;i+=3){top=Math.max(top,p.position[i]);bottom=Math.min(bottom,p.position[i]);}});c.near(bottom,0,0.002,'floor');c.near(top,1.7297,0.002,'vertex');}},
 	{name:'bodyAt reproduces every measurement within 0.5%',run(c){for(const g of growth as {date:string;heightCm?:number;weightKg?:number}[]){const b=bodyAt(g.date);if(g.heightCm)c.near(b.statureM*100,g.heightCm,g.heightCm*0.005,`height ${g.date}`);if(g.weightKg)c.near(b.weightKg,g.weightKg,g.weightKg*0.005,`weight ${g.date}`);}}},
+	{name:'warped stature (highest warped vertex, floor = the warp ground) matches every measured height within 0.02%',async run(c){
+		// Task 14: stricter than the 0.1% asked for; renormalise solves on the real warp (warpState / warpPoint), so only a change of which vertex is highest can leave an error.
+		const g=await c.geometry(),fs=await import('node:fs'),bin=fs.readFileSync('public/anyhealth/models/segments.bin'),top:{p:Vec3;a:number;b:number;w:number;soft:boolean}[]=[];let off=0;
+		g.parts.forEach((part,i)=>{const n=part.position.length/3,soft=SOFT_SYSTEMS.includes(g.atlas.parts[i].system);for(let v=0;v<n;v++)if(part.position[v*3+1]>1.70)top.push({p:[part.position[v*3],part.position[v*3+1],part.position[v*3+2]],a:bin[off+v*2]&15,b:bin[off+v*2]>>4,w:bin[off+v*2+1]/255,soft});off+=n*2;});
+		let worst=0,at='';const q:Vec3=[0,0,0];
+		for(const m of growth as {date:string;heightCm?:number}[]){if(!m.heightCm)continue;const b=bodyAt(m.date),ws=warpState(R,b);let hi=-Infinity;for(const t of top){warpPoint(ws,t.p,t.a,t.b,t.w,t.soft,q);hi=Math.max(hi,q[1]);}
+			const e=Math.abs(hi/(m.heightCm/100)-1);if(e>worst){worst=e;at=m.date;}}
+		c.assert(worst<=0.0002,`worst warped stature error ${(worst*100).toFixed(4)}% at ${at}`);
+	}},
 	{name:'bodyAt clamps before birth and after the last measurement',run(c){c.near(bodyAt('2000-01-01').statureM,bodyAt('2003-06-22').statureM,1e-9,'before birth');c.near(bodyAt('2030-01-01').statureM,bodyAt('2026-01-02').statureM,1e-9,'future');c.assert(LAST_MEASURED==='2026-01-02','last measurement date');c.near(bodyAt('2030-01-01').length.head,bodyAt('2026-01-02').length.head,1e-12,'future proportions');}},
 	{name:'head ratio: ~1/4 of stature at birth, ~1/8 adult',async run(c){const headRest=await headRestOf(c);c.near(headRest,0.23,0.01,'model head height');const head=(d:string)=>{const b=bodyAt(d);return b.length.head*b.scale*headRest/b.statureM;};c.near(head('2003-06-22'),0.25,0.02,'birth');c.near(head('2026-01-02'),headRest/1.7297,0.005,'adult = model');}},
 	{name:'leg ratio grows from ~0.32 at birth to adult',run(c){const leg=(d:string)=>{const b=bodyAt(d);return (b.length.lThigh*thighRest+b.length.lShank*shankRest)*b.scale/b.statureM;};c.near(leg('2003-06-22'),0.32,0.03,'birth');c.near(leg('2026-01-02'),(thighRest+shankRest)/R.stature,0.01,'adult = model');c.assert(leg('2003-06-22')<leg('2008-06-22')&&leg('2008-06-22')<leg('2014-06-22'),'legs lengthen relative to stature');}},

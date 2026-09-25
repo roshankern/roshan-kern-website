@@ -2,9 +2,10 @@
  *
  * Every reference table is a ratio to stature by age (years). A segment's factor is its reference ratio at that age over the same ratio at 18 y
  * (the adult reference), so the adult body reproduces the model's own proportions exactly (every factor 1 from 18 y on), and a child's segment
- * is longer or shorter than the model's by the same proportion the reference child's is. The vertical chain is then renormalised so the warped
- * floor-to-vertex height equals the measured stature exactly. */
-import {SEGMENTS,type Body,type Rig,type Segment,type SegmentId,type Vec3} from '../types';
+ * is longer or shorter than the model's by the same proportion the reference child's is. The vertical chain is then renormalised on the real warp
+ * (growth/warp.ts) so the warped floor-to-crown height equals the measured stature. */
+import {SEGMENTS,type Body,type Rig,type SegmentId,type Vec3} from '../types';
+import {warpState,warpPoint} from './warp';
 import {BIRTH_DATE,type GrowthPoint} from '../../health/types';
 import {toDays,fromDays} from '../../health/dates';
 import {makeGrowth} from '../../health/growth';
@@ -82,22 +83,16 @@ export const BMI_REF=monotone([[0,13.41],[1/12,14.91],[2/12,16.32],[0.25,16.90],
 /** Soft-tissue girth moves with BMI deviation at half rate: at fixed stature, cross-section area ∝ mass, so girth ∝ √BMI and d(girth)/girth ≈ ½ d(BMI)/BMI. */
 const K_SOFT=0.5; // basis: growth#girth-soft
 
-const add=(a:Vec3,b:Vec3):Vec3=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]];
-/** Floor-to-vertex height of the rest rig under the Task 6 warp at scale 1 (bone girth), measured over one foot. Mirrors warp.ts: new joints chain from the trunk, T_i(p) = newJoint + ℓ(d·a)a + γ(d − (d·a)a). */
-function heightOver(foot:'lFoot'|'rFoot',len:Record<SegmentId,number>,girth:Record<SegmentId,number>):number{
-	const nj=new Map<SegmentId,Vec3>(),by=new Map(rig.segments.map(s=>[s.id,s]));
-	const T=(s:Segment,p:Vec3):Vec3=>{const J=s.joint,a=s.axis,d:Vec3=[p[0]-J[0],p[1]-J[1],p[2]-J[2]],t=d[0]*a[0]+d[1]*a[1]+d[2]*a[2],l=len[s.id],g=girth[s.id];
-		return add(nj.get(s.id)!,[l*t*a[0]+g*(d[0]-t*a[0]),l*t*a[1]+g*(d[1]-t*a[1]),l*t*a[2]+g*(d[2]-t*a[2])]);};
-	for(const id of ['trunk','neck','head',foot==='lFoot'?'lThigh':'rThigh',foot==='lFoot'?'lShank':'rShank',foot] as SegmentId[]){const s=by.get(id)!;nj.set(id,s.parent?T(by.get(s.parent)!,s.joint):s.joint);}
-	const h=by.get('head')!,ft=by.get(foot)!;
-	return T(h,[h.joint[0],rig.stature,h.joint[2]])[1]-T(ft,[ft.joint[0],0,ft.joint[2]])[1];
-}
-/** Known gap (deferred to Task 14, which will call warpState/warpPoint directly after merge): this mirrors the warp with one sole point per foot and bone girth for the vertex, while warp.ts grounds on four sole points and the skin vertex uses soft girth. Review measured the resulting stature error at +0.06% at 3 y.
- * Scale the vertical segments by one common factor so the warped floor-to-vertex height is exactly the rig stature (× body.scale = statureM). The height is affine in that factor, per foot; the lower foot sets the floor. */
-function renormalise(len:Record<SegmentId,number>,girth:Record<SegmentId,number>):void{
-	const at=(foot:'lFoot'|'rFoot',k:number)=>{const l={...len};for(const s of VERTICAL)l[s]*=k;return heightOver(foot,l,girth);};
-	const k=Math.min(...(['lFoot','rFoot'] as const).map(ft=>{const h0=at(ft,0),h1=at(ft,1);return (rig.stature-h0)/(h1-h0);}));
-	for(const s of VERTICAL)len[s]*=k;
+/** The atlas's highest rest vertex (the crown, 'Hair of head': soft tissue, head segment at weight 1). Its warped y, with the warp's ground shift, is the body's floor-to-vertex height; the growth check verifies it is still the highest vertex after the warp. */
+const CROWN:Vec3=[-0.0035697,1.7296910,-0.0118096],HEAD_SEG=SEGMENTS.indexOf('head');
+/** Scale the vertical segments by one common factor k so the warped crown height (warpState / warpPoint, ground included) equals `statureM` (to the crown's 5 ppm offset from rig.stature). The height is piecewise affine in k (the ground is a min over the sole points), so a few secant steps converge to float precision. */
+function renormalise(b:Body):void{
+	// Target: the crown at statureM × its rest share of rig.stature (1.729691 of 1.7297 m, 5 ppm), so the adult body stays exactly the model (k = 1).
+	const base={...b.length},q:Vec3=[0,0,0],target=b.scale*CROWN[1];
+	const at=(k:number)=>{for(const s of VERTICAL)b.length[s]=base[s]*k;return warpPoint(warpState(rig,b),CROWN,HEAD_SEG,HEAD_SEG,1,true,q)[1]-target;};
+	// Converged at 1 µm (WarpState is float32, so finer is noise); k = 1 is kept when it already is (the adult body).
+	const TOL=1e-6;let k0=1,e0=at(k0);if(Math.abs(e0)<TOL)return;let k1=1.01,e1=at(k1);
+	for(let i=0;i<12&&Math.abs(e1)>TOL&&e1!==e0;i++){const k2=k1-e1*(k1-k0)/(e1-e0);k0=k1;e0=e1;k1=k2;e1=at(k1);}
 }
 
 const bmiAt=(iso:string)=>{const h=(growth.heightAt(iso)??0)/100,w=growth.weightAt(iso)??0;return w/(h*h);};
@@ -111,6 +106,6 @@ export function bodyAt(date:string):Body{
 	const length={} as Record<SegmentId,number>,boneGirth={} as Record<SegmentId,number>,softGirth={} as Record<SegmentId,number>;
 	const soft=Math.min(1.25,Math.max(0.85,softK(iso,age)/SOFT_ADULT)); // basis: growth#girth-soft
 	for(const s of SEGMENTS){length[s]=LEN[s](age)/LEN[s](ADULT_AGE);boneGirth[s]=GIRTH[s](age);softGirth[s]=boneGirth[s]*soft;}
-	renormalise(length,boneGirth);
-	return {date,ageYears:age,statureM,weightKg,scale:statureM/rig.stature,length,boneGirth,softGirth};
+	const body:Body={date,ageYears:age,statureM,weightKg,scale:statureM/rig.stature,length,boneGirth,softGirth};
+	renormalise(body);return body;
 }
