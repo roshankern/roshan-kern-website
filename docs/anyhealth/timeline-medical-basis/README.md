@@ -50,6 +50,15 @@ The atlas is one adult male reference model (BodyParts3D), so some anatomy the t
 - **Asthma and COVID live on the bronchial trees**, since there is no lung parenchyma. Asthma swells and tints all 22 respiratory `/bronch/i` names (100 parts). Small-airway disease below the segmental level is not modelled.
 - **Recurrent croup dates.** The record gives counts, not dates, for most episodes ("about 3 each winter"). Those episodes are spread with a seeded PRNG across October–March. Documented episodes with only a month use the 15th. See `airway.md#croup-winter`.
 
+### eyes-teeth
+
+- **Tooth eruption over growth** (`issues/teeth/eruption.ts`, `eruptionFx`): each of the 28 atlas permanent teeth is hidden until it (or, at incisor, canine and premolar sites, its primary predecessor) erupts. The primary teeth are the permanent meshes at 0.7 scale, with the primary first and second molars standing in at the premolar sites, although real primary molars are wider than premolars. Every eruption is a 6 mm occlusal rise plus a 0.6 → 1 scale, visible from emergence (the start of the ADA window). The stand-in is shed the mean toothless period before its successor emerges (Nyström & Peck: 2 weeks to 4 months for incisors and canines, days for premolars), without the large individual variation.
+- **Third molars** are clones of the second molars (0.9 scale), set one tooth-width + 1 mm distal along the arch. They are not real third-molar anatomy. #1's partial impaction is shown as a crown stopped at 60% eruption. The clones ride the `head` segment as one rigid piece.
+- **Fillings** tint the whole tooth. The atlas has no per-surface mesh, so an occlusal, buccal or DO/MO restoration can't be localised.
+- **Socket healing** tints the whole upper and lower gingiva (one mesh per jaw), not four socket sites.
+- **Myopia** is a z-only (front-to-back) scale of every globe part about the globe centre. The lens and cornea are stretched with it, although real axial myopia is mostly vitreous-chamber elongation. The model's globe is 27.2 mm long (a real adult eye is ~23–24 mm), and the 0.35 mm is added in model space.
+- **Exotropia** turns the whole left globe rigidly about its centre. The extraocular muscles and optic nerve do not follow.
+
 ## Illustrative effects
 
 Effects that are stylized rather than literal anatomy (`illustrative: true` on the issue script, shown with an "Illustrative" tag in the tracker). Filled in by each area's agent as scripts are written:
@@ -68,3 +77,9 @@ Effects that are stylized rather than literal anatomy (`illustrative: true` on t
   - The seeded winter croup dates (the counts come from the record, the days do not).
   - The laryngomalacia curl angle.
   - The blue highlight tints marking the bronchoscopy, spirometry, re-evaluation and budesonide windows.
+
+### eyes-teeth
+
+- `first-cavity-filling-tooth-3`, `fillings-teeth-30-31-composite`, `city-creek-fillings-30-31`: a whole-tooth composite tint (slightly whiter and bluish), not the filled surfaces. The 2024 refill tints #30 and #31 brighter.
+- `wisdom-teeth-extraction`: the third molars are cloned, scaled second molars (the atlas has none), and the socket healing is a 6-week tint on the whole gingiva.
+- Tooth eruption (`eruptionFx`, not a script): the primary teeth are 0.7-scale stand-ins, and the rise-and-grow animation is stylised.
