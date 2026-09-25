@@ -55,7 +55,7 @@ checks.push(
 		// seamDefects: flipped faces, edges longer than rest × max segment scale + 1 mm, edge ratios outside [0.2, 5] × max segment scale.
 		const g=await c.geometry(),fs=await import('node:fs'),bin=fs.readFileSync(SEG_BIN);
 		const uniform=unitBody();uniform.scale=0.75;uniform.statureM=R.stature*0.75;
-		for(const [label,body] of [['uniform scale 0.75',uniform],[`perturbed ±${(0.8*SEAM_X*100).toFixed(3)}% (0.8 × the measured zero-defect limit)`,perturbedBody(0.8*SEAM_X)],['bodyAt 2006-06-22',bodyAt('2006-06-22')],['bodyAt 2012-01-01',bodyAt('2012-01-01')]] as const){
+		for(const [label,body] of [['uniform scale 0.75',uniform],[`perturbed ±${(0.8*SEAM_X*100).toFixed(3)}% (0.8 × the measured zero-defect limit)`,perturbedBody(0.8*SEAM_X)],['bodyAt 2026-01-02 (adult)',bodyAt('2026-01-02')]] as const){
 			const d=seamDefects(warpState(R,body),g,bin);c.assert(d.triangles>0,'no mixed-weight triangles found');
 			c.assert(d.flipped===0&&d.torn===0&&d.ratioOut===0,`${label}: ${d.flipped} flipped, ${d.torn} torn, ${d.ratioOut} out-of-ratio of ${d.triangles} triangles (e.g. ${d.worst})`);
 		}
@@ -65,10 +65,11 @@ checks.push(
 		const g=await c.geometry(),fs=await import('node:fs'),d=seamDefects(warpState(R,perturbedBody(0.02)),g,fs.readFileSync(SEG_BIN));
 		c.assert(d.flipped<=RATCHET_2PCT.flipped&&d.torn<=RATCHET_2PCT.torn&&d.ratioOut<=RATCHET_2PCT.ratioOut,`±2%: ${d.flipped} flipped, ${d.torn} torn, ${d.ratioOut} out-of-ratio (ratchet ${JSON.stringify(RATCHET_2PCT)})`);
 	}},
-	{name:'KNOWN(seam rework): infant-proportion body folds',async run(){
+	{name:'KNOWN(seam rework): infant-proportion and real child bodies fold',async run(){
 		// Reports only; the integration seam rework turns this into a hard assertion (and moves the hand-built child into the check above).
 		const g=await loadAtlasNode(),fs=await import('node:fs'),bin=fs.readFileSync(SEG_BIN);
-		const bodies:[string,Body][]=[['hand-built child (S .75, head 1.2, legs .9)',childBody()]];
+		// Task 14: with the real bodyAt merged, every child date folds too (e.g. 3 y: ~2000 flipped / ~5500 torn), so the real bodies report here until the seam rework (Task 14a) makes them hard.
+		const bodies:[string,Body][]=[['hand-built child (S .75, head 1.2, legs .9)',childBody()],...['2003-06-22','2006-06-22','2012-01-01','2020-01-01'].map(d=>[`bodyAt ${d}`,bodyAt(d)] as [string,Body])];
 		for(const legs of [0.7,0.8]){const b=oddBody();for(const s of ['lThigh','lShank','lFoot','rThigh','rShank','rFoot'] as const)b.length[s]=legs;bodies.push([`infant (S .3, head 2, legs ${legs})`,b]);}
 		for(const [label,b] of bodies){const d=seamDefects(warpState(R,b),g,bin),top=[...d.byPart].sort((x,y)=>y[1]-x[1]).slice(0,4).map(([n,k])=>`${n} ${k}`).join(', ');
 			console.log(`     KNOWN ${label}: ${d.flipped} flipped, ${d.torn} torn, ${d.ratioOut} out-of-ratio of ${d.triangles} mixed-weight triangles; most in ${top}`);}
