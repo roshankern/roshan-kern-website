@@ -12,6 +12,7 @@ import {SEGMENTS,type CustomLayer,type FxContext,type IssueScript,type LayerCont
 import {SCRIPTS,scriptFor,dayOf} from './issues';
 import {bodyAt} from './growth/proportions';
 import {growthFx} from './growth/organs';
+import {eruptionFx} from './issues/teeth/eruption';
 import {warpState,warpPoint,type WarpState} from './growth/warp';
 import {WARP_PARS,WARP_APPLY,warpUniforms,writeWarpUniforms} from './growth/warp-glsl';
 import {FX_ROWS,createFxTexture,mergeFx,writeFx,applyFxPoint,identityFx,type ResolvedFx} from './fx/part-fx';
@@ -30,6 +31,8 @@ export interface Engine {
 	settle():void;
 	/** Warped union box of an issue's parts and layer, for Isolate. */
 	isolateBox(id:string):T.Box3|null;
+	/** Final fx row-0 visibility of atlas part `i` (switches × Isolate × merged PartFx visible), as the shader sees it: picking treats < 0.5 as hidden. */
+	partVisible(i:number):number;
 	dispose():void;
 }
 
@@ -45,7 +48,10 @@ export function visibilityFor(parts:{name:string;system:SystemId}[],visible:Syst
 /** The atlas part names an isolated script shows, or null when nothing is isolated. */
 export const isolatedParts=(id:string|null)=>id?new Set(scriptFor(id)?.parts??[]):null;
 
-export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Rig;segments:ArrayBuffer}):Engine{
+/** What the engine needs of the renderer (performance fallback): the GL context for WEBGL_debug_renderer_info, and the pixel ratio. */
+export interface EngineRenderer {getContext():{getExtension(name:string):unknown;getParameter(p:number):unknown};setPixelRatio(r:number):void}
+
+export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Rig;segments:ArrayBuffer;renderer?:EngineRenderer}):Engine{
 	const {atlas,scene,bounds,rig}=o,n=atlas.parts.length;
 	const warpU=warpUniforms(),fx=createFxTexture(n),warpOn=!!WARP_APPLY.trim();
 	const restCenters=bounds.map(b=>b.getCenter(new T.Vector3()).toArray() as Vec3),soft=atlas.parts.map(p=>SOFT_SYSTEMS.includes(p.system));
@@ -120,6 +126,7 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 
 	return {
 		patchMaterial,segAttribute,isolateBox,
+		partVisible:i=>fx.data[i*4],
 		ready(p){
 			pickers=p;rest=p.map(m=>(m?.geometry.getAttribute('position').array as Float32Array|undefined)?.slice());
 			for(const s of SCRIPTS){if(!s.layer)continue;try{const layer=s.layer();if(layer.init(layerCtx))layers.push({script:s,layer});else layer.dispose();}catch(e){console.warn(`AnyHealth timeline: layer ${s.id} failed`,e);}}
@@ -131,7 +138,7 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 				if(last.date)direction=f.date>last.date?1:-1;
 				const body=bodyAt(f.date);ws=warpState(rig,body);writeWarpUniforms(warpU,ws);ctx={body,date:f.date};const c=ctx;
 				const list:PartFx[]=[];for(const s of SCRIPTS){try{list.push(...s.fxAt(dayOf(s,f.date),c));}catch(e){console.warn(`AnyHealth timeline: ${s.id} fxAt failed`,e);}}
-				list.push(...growthFx(body));fxMap=mergeFx(list,indicesOf,restCenter);
+				list.push(...growthFx(body),...eruptionFx(body));fxMap=mergeFx(list,indicesOf,restCenter);
 			}
 			let changed=dateChanged||isoChanged||visChanged||forceChange;forceChange=false;
 			if(dateChanged||isoChanged||visChanged){

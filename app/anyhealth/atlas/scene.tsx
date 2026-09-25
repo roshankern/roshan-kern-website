@@ -12,7 +12,7 @@ import IssueDots,{type DotsHandle} from '../health/issue-dots';
 import type {Anchor} from '../health/anchors';
 import type {Issue} from '../health/types';
 import {createFracture,type FractureHandle} from '../fracture/fracture-scene';
-import {createEngine,isolatedParts,visibilityFor} from '../timeline/engine';
+import {createEngine} from '../timeline/engine';
 import type {Rig} from '../timeline/types';
 interface Props {atlas:Atlas;state:SceneState;onProgress:(n:number)=>void;onError:(s:string)=>void;issues:Issue[];selectedIssue:string|null;onSelectIssue:(id:string|null)=>void;date?:string;fracture?:boolean;timeline?:{date:string;isolate:string|null;onFly?:()=>void};segments?:ArrayBuffer;rig?:Rig;onApi?:(api:{focusBox(b:T.Box3):void})=>void}
 /** `date` + `fracture` (the /anyhealth/test page) draw the 2009 humerus fracture as of the timeline date; off by default.
@@ -44,8 +44,8 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
   const materials:T.Material[]=[],geometries:T.BufferGeometry[]=[],pickers:(T.Mesh|undefined)[]=[];
   const bounds=atlas.parts.map(p=>new T.Box3(new T.Vector3().fromArray(p.bounds[0]),new T.Vector3().fromArray(p.bounds[1])));
   const engine=timeline&&rig&&segments?createEngine({atlas,scene,bounds,rig,segments}):null;
-  // Timeline mode: what picking treats as visible (the switches or Isolate); null keeps the partState texture.
-  let pickVisible:Float32Array|null=null,lastIsolate:string|null=null,seenDate='',dateAt=0,settled=true;const shown=(i:number)=>(pickVisible?pickVisible[i]:data[i*4+3])>.5;
+  // Timeline mode: picking treats a part as visible by the engine's final fx visibility (switches, Isolate and issue effects such as a hidden fractured bone or an unerupted tooth).
+  let lastIsolate:string|null=null,seenDate='',dateAt=0,settled=true;const shown=(i:number)=>(engine?engine.partVisible(i):data[i*4+3])>.5;
   const materialFor=(system:string)=>{
    const m=new T.MeshStandardMaterial({color:SYSTEMS.find(s=>s.id===system)?.mesh??'#aebbb8',metalness:.08,roughness:.53,side:T.DoubleSide,transparent:system==='integumentary',opacity:system==='integumentary'?.1:1,depthWrite:system!=='integumentary'});
    m.onBeforeCompile=shader=>{
@@ -178,7 +178,7 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
     const visible=new Set(s.visible);
     // Timeline mode: partState never discards; the engine writes visibility into its fx texture.
     atlas.parts.forEach((p,i)=>{data[i*4+3]=engine||visible.has(p.system)?1:0;});
-    if(engine&&tl){lastIsolate=tl.isolate;pickVisible=visibilityFor(atlas.parts,s.visible,isolatedParts(tl.isolate));}
+    if(engine&&tl)lastIsolate=tl.isolate;
     partTexture.needsUpdate=true;lastState=s;dirty=true;
    }
    if(engine&&tl){
