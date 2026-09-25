@@ -29,7 +29,7 @@ async function fakeContext(c:Parameters<Check['run']>[0]){
 	};
 	return {ctx,flies,scene,segments};
 }
-const frame=(date:string,direction:-1|0|1,now:number,o:{skeletal?:boolean;hidden?:boolean}={}):LayerFrame=>({systemVisible:s=>s==='skeletal'?o.skeletal??true:true,hiddenByIsolate:!!o.hidden,now,direction,ctx:{body:bodyAt(date),date}});
+const frame=(date:string,direction:-1|0|1,now:number,o:{skeletal?:boolean;hidden?:boolean}={}):LayerFrame=>({systemVisible:s=>s==='skeletal'?o.skeletal??true:true,hiddenByIsolate:!!o.hidden,isolated:false,now,direction,ctx:{body:bodyAt(date),date}});
 const shown=(scene:T.Scene)=>{let n=0;scene.traverseVisible(o=>{if((o as T.Mesh).isMesh)n++;});return n;};
 
 export const checks:Check[]=[

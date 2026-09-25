@@ -1,6 +1,6 @@
 /** Facial acne (diagnosed 2021-08-25: comedonal + inflammatory, with scarring and PIH) and the isotretinoin course that cleared it (2022-01-03 → 06-28).
  *
- * Both scripts draw the same seeded marks (lesions, scars, PIH) with the same look: the acne layer throughout, the isotretinoin layer during its course. Isolating either one shows the lesions clearing; when neither is isolated the two copies coincide (the marks layer's strict depth test drops the second). Lesion i shows while the remaining fraction for its group exceeds its seeded threshold, so the count follows the cited response curves. */
+ * Both scripts draw the same seeded marks (lesions, scars, PIH) with the same look: the acne layer throughout, the isotretinoin layer during its course and only while isotretinoin is isolated (`onlyIsolated`), so the two copies never draw together. Isolating either one shows the lesions clearing. Lesion i shows while the remaining fraction for its group exceeds its seeded threshold, so the count follows the cited response curves. */
 import type {PartFx,Vec3} from '../../types';
 import {anchorFor} from '../../../health/anchors';
 import {toDays} from '../../../health/dates';
@@ -54,8 +54,8 @@ const acneState=(d:number):MarkState[]=>[
 ];
 /** Acne layer: every acne mark, throughout. */
 export const ACNE_MARKS:MarksSpec={marks,state:acneState};
-/** Isotretinoin layer: the same marks and look during the course (day = days since 2022-01-03), nothing outside it. */
-export const ISO_MARKS:MarksSpec={marks,state:e=>e>=0&&e<=ISO_DAYS?acneState(e+ISO_START):marks.map(()=>({alpha:0}))};
+/** Isotretinoin layer: the same marks and look during the course (day = days since 2022-01-03), nothing outside it; drawn only while isotretinoin is isolated (the acne layer shows them otherwise). */
+export const ISO_MARKS:MarksSpec={marks,onlyIsolated:true,state:e=>e>=0&&e<=ISO_DAYS?acneState(e+ISO_START):marks.map(()=>({alpha:0}))};
 
 /** Isotretinoin cheilitis (lip dryness), illustrative: in within two weeks, gone two weeks after stopping. */
 export const isoFx=(e:number):PartFx[]=>{const a=e<0?0:LIP_AMOUNT*smooth(0,CHEILITIS_RAMP,e)*(1-smooth(ISO_DAYS,ISO_DAYS+CHEILITIS_CLEAR,e));return a>0?[{part:'Lip',tint:[...LIP_DRY,a]}]:[];};

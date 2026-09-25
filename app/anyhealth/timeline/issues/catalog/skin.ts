@@ -14,7 +14,7 @@ export const SKIN_MARKS:Record<string,MarksSpec>={
 /** Scripts whose issue starts before the record date (the chin wound is a few days old at the follow-up call): days of lead, per the LEAD_DAYS ruling. */
 export const LEAD_DAYS:Record<string,number>={...LACERATION_LEAD};
 
-const layer=(id:string)=>()=>marksLayer(SKIN_MARKS[id]);
+const layer=(id:string)=>()=>marksLayer(SKIN_MARKS[id],id);
 const cut=(id:string,onset:string,illustrative=false):IssueScript=>({id,parts:['Skin'],onset,chronic:true,illustrative,acute:lacerationAcute(id),fxAt:()=>[],layer:layer(id),status:d=>lacerationStatus(id,d)});
 
 export const SCRIPTS:IssueScript[]=[

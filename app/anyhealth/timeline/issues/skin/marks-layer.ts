@@ -4,7 +4,7 @@
  * - Segments: every mark vertex carries the `seg` (segA, segB, weightA) of the Skin vertex nearest it (segOfVertex, read from ctx.restGeometry(skin).getAttribute('seg'), i.e. segments.bin), and the material leaves `segment` unset, so marks follow the blended body warp exactly like the skin under them.
  * - Look (update): the script's pure `state(day)` gives each mark an alpha and colour; the layer rewrites its RGBA vertex colours only when that changes. The Skin part is drawn at opacity 0.1, so marks use their own material (vertex colours, alphaTest) and draw after it.
  * - Size: a mark's physical size is divided by the local warp scale at its segment on `scaleDate` (localScale), so it is life-size on that date.
- * - One mesh per layer, frustumCulled off (the warp moves it far from its rest bounds). Depth test is strict (LessDepth): where two layers draw the same mark (acne and isotretinoin), the second copy is rejected instead of blending twice. */
+ * - One mesh per layer (named `marks:<script id>`), frustumCulled off (the warp moves it far from its rest bounds). A spec with `onlyIsolated` draws only while its script is isolated: the isotretinoin layer repeats the acne marks, so it shows them only on its own Isolate and never doubles the acne layer's copy. */
 import * as T from 'three';
 import {SEGMENTS,type Body,type CustomLayer,type LayerContext,type LayerFrame,type Rig,type Vec3} from '../../types';
 import {bodyAt} from '../../growth/proportions';
@@ -13,7 +13,7 @@ import {skinSurface,type SkinSurface,type SurfaceHit} from './surface';
 import {MARK_LIFT,rng,type MarkDef,type MarkState} from './marks';
 
 /** What a skin script hands the layer: its marks and their look as a pure function of days since onset. */
-export interface MarksSpec {marks:MarkDef[];state(day:number):MarkState[]}
+export interface MarksSpec {marks:MarkDef[];state(day:number):MarkState[];/** Draw only while this script is isolated (a layer that repeats another script's marks). */onlyIsolated?:boolean}
 /** Where a mark landed (rest space), for checks and Isolate. */
 export interface PlacedMark {def:MarkDef;/** The hint projected onto the Skin. */anchor:Vec3;center:Vec3;normal:Vec3;/** Vertex range in the layer mesh. */start:number;count:number}
 export interface MarksLayer extends CustomLayer {
@@ -87,7 +87,7 @@ function surfaceOf(rg:T.BufferGeometry):SkinSurface{
 }
 
 /** A skin marks layer for one script. */
-export function marksLayer(spec:MarksSpec):MarksLayer{
+export function marksLayer(spec:MarksSpec,id=''):MarksLayer{
 	let mesh:T.Mesh|null=null,placed:PlacedMark[]=[],colors:T.BufferAttribute|null=null,lastKey='',lastIn='',scene:T.Scene|null=null;
 	const tmp=new T.Color();
 	return {
@@ -96,14 +96,14 @@ export function marksLayer(spec:MarksSpec):MarksLayer{
 			const b=buildMarks(surfaceOf(rg),spec.marks);placed=b.placed;
 			const g=new T.BufferGeometry();g.setAttribute('position',new T.BufferAttribute(b.position,3));g.setAttribute('seg',new T.BufferAttribute(b.seg,3));
 			colors=new T.BufferAttribute(new Float32Array(b.position.length/3*4),4);g.setAttribute('color',colors);g.setIndex(b.index);g.computeVertexNormals();g.computeBoundingBox();g.computeBoundingSphere();
-			const mat=ctx.material({color:0xffffff,soft:true,transparent:true,depthWrite:true});mat.vertexColors=true;mat.alphaTest=.01;mat.roughness=.75;mat.depthFunc=T.LessDepth;mat.needsUpdate=true;
-			mesh=new T.Mesh(g,mat);mesh.frustumCulled=false;mesh.renderOrder=2;mesh.visible=false;mesh.matrixAutoUpdate=false;scene=ctx.scene;scene.add(mesh);
+			const mat=ctx.material({color:0xffffff,soft:true,transparent:true,depthWrite:true});mat.vertexColors=true;mat.alphaTest=.01;mat.roughness=.75;mat.needsUpdate=true;
+			mesh=new T.Mesh(g,mat);mesh.name=`marks:${id}`;mesh.frustumCulled=false;mesh.renderOrder=2;mesh.visible=false;mesh.matrixAutoUpdate=false;scene=ctx.scene;scene.add(mesh);
 			return true;
 		},
 		update(day:number,f:LayerFrame){
 			if(!mesh||!colors)return {changed:false,animating:false};
 			// Called every frame: the state is a pure function of the day, so skip it unless the day or visibility moved.
-			const on=f.systemVisible('integumentary')&&!f.hiddenByIsolate,input=on?String(day):'off';if(input===lastIn)return {changed:false,animating:false};lastIn=input;
+			const on=f.systemVisible('integumentary')&&!f.hiddenByIsolate&&(!spec.onlyIsolated||f.isolated),input=on?String(day):'off';if(input===lastIn)return {changed:false,animating:false};lastIn=input;
 			const states=on?spec.state(day):[];
 			const key=on?states.map(s=>`${s.alpha.toFixed(3)}:${s.color??''}`).join('|'):'off';
 			if(key===lastKey)return {changed:false,animating:false};lastKey=key;

@@ -76,6 +76,8 @@ export interface LayerFrame {
 	systemVisible:(s:SystemId)=>boolean;
 	/** True when some script is isolated and it isn't this one: hide everything. */
 	hiddenByIsolate:boolean;
+	/** True when this script is the one isolated. */
+	isolated:boolean;
 	now:number;
 	/** Wall-clock direction of the last date change: 1 forward, -1 back, 0 none. */
 	direction:-1|0|1;

@@ -188,7 +188,7 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 		if(doDate||isoChanged||visChanged)writeVisibility(f.visible,f.isolate);
 		let animating=false;
 		if(ctx)for(const {script,layer} of layers){
-			const own=f.isolate===script.id,r=layer.update(dayOf(script,ctx.date),{systemVisible:f.isolate?()=>own:s=>f.visible.includes(s),hiddenByIsolate:!!f.isolate&&!own,now:f.now,direction,ctx});
+			const own=f.isolate===script.id,r=layer.update(dayOf(script,ctx.date),{systemVisible:f.isolate?()=>own:s=>f.visible.includes(s),hiddenByIsolate:!!f.isolate&&!own,isolated:own,now:f.now,direction,ctx});
 			changed||=r.changed;animating||=r.animating;
 		}
 		let fly=pendingFly;pendingFly=null;if(isoChanged&&f.isolate)fly=isolateBox(f.isolate)??fly;

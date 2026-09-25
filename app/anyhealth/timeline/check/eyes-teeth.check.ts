@@ -36,7 +36,7 @@ async function fakeLayerContext(c:Parameters<Check['run']>[0]):Promise<LayerCont
 		requestFly(){},
 	};
 }
-const frameAt=(date:string):LayerFrame=>({systemVisible:()=>true,hiddenByIsolate:false,now:0,direction:1,ctx:{body:bodyAt(date),date}});
+const frameAt=(date:string):LayerFrame=>({systemVisible:()=>true,hiddenByIsolate:false,isolated:false,now:0,direction:1,ctx:{body:bodyAt(date),date}});
 
 export const checks:Check[]=[
 	{name:'eyes-teeth: no effect before onset',run(c){AREA.forEach(s=>c.assert(s.fxAt(-1,{body:bodyAt(s.onset),date:s.onset}).every(f=>(f.swell??0)===0&&(f.tint?.[3]??0)===0&&(f.scale??[1,1,1]).every(v=>v===1)&&(f.visible??1)===1&&!f.translate&&!f.rotate),`${s.id} before onset`));}},
