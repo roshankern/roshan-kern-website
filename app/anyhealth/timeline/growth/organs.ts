@@ -6,14 +6,20 @@
 import type {Body,GrowthFx,PartFx,SegmentId,Vec3} from '../types';
 import {bodyAt,LAST_MEASURED,monotone} from './proportions';
 
-/** Eyeball axial length, mm, by age (y): 16.8 at birth, 20 at 1 y, 22 at 3 y, 23 at 13 y (Fledelius & Christensen 1996); adult men 23.82 mm at 20–30 y (Larsen 1979). */
-const EYE_AXIAL=monotone([[0,16.8],[1,20.0],[3,22.0],[13,23.0],[20,23.82]]); // basis: growth#eye-axial
-/** Thymus mass, g: ~15 g at birth, ~35 g at 11–13 y (peak), back toward ~25 g by 20 and ~15 g by 50 (Hammar; Scammon lymphoid type). */
-const THYMUS=monotone([[0,15],[12,35],[20,25],[50,15]]); // basis: growth#thymus
-/** Liver mass as a fraction of body mass: 4% at birth, 3.5% in the first year, 2.9% at 1–6 y, 2% adult. */
-const LIVER_PCT=monotone([[0,0.040],[0.5,0.035],[3.5,0.029],[18,0.020]]); // basis: growth#liver
-/** Testicular volume, mL: prepubertal 1–1.5 mL until 11 y, 4 mL at 11.7 y (median onset), ~12 mL at the growth spurt, adult ~20 mL reached ~18 y (Koskela 2024: growth still under way at 17 y; 16.5–18 y ultrasound volumes 6–22 mL). Also used (as a mass fraction) for the epididymides, seminal vesicles and prostate (Scammon genital type). */
-const TESTIS=monotone([[0,1.0],[11,1.5],[11.7,4],[13.5,12],[18,20]]); // basis: growth#testis
+/** Piecewise-linear interpolation through [x,y] nodes, held constant outside them: how growth.md fills the grid between ICRP reference ages. */
+const linear=(t:[number,number][])=>(v:number)=>{if(v<=t[0][0])return t[0][1];for(let i=1;i<t.length;i++)if(v<=t[i][0]){const [x0,y0]=t[i-1],[x1,y1]=t[i];return y0+(y1-y0)*(v-x0)/(x1-x0);}return t[t.length-1][1];};
+/** Eyeball axial length, mm: Rozema 2023 meta-analytic bi-exponential fit (294 studies, valid −0.5 to 20 y), AL = 23.61 − 3.340·e^(−3.006·age) − 3.217·e^(−0.187·age). */
+const EYE_AXIAL=(a:number)=>23.61-3.340*Math.exp(-3.006*a)-3.217*Math.exp(-0.187*a); // basis: growth#eye-axial
+/** Thymus mass, g, ICRP 89 reference male (13, 30, 30, 40, 35 g at 0, 1, 5, 10, 15 y; adult 25 g placed at 20 y), linear in mass between nodes. */
+const THYMUS=linear([[0,13],[1,30],[5,30],[10,40],[15,35],[20,25]]); // basis: growth#thymus
+/** Liver as a fraction of body mass, ICRP 89 reference male liver ÷ body mass (130/3.5, 330/10, 570/19, 830/32, 1300/56, 1800/73 at 0, 1, 5, 10, 15, 20 y), linear between nodes; times the measured weight. */
+const LIVER_PCT=linear([[0,0.0371],[1,0.0330],[5,0.0300],[10,0.0259],[15,0.0232],[20,0.0247]]); // basis: growth#liver
+/** Testicular volume per testis, mL: ultrasound P50 (Joustra 2015, Dutch boys 0.5–19 y); birth extrapolated with ICRP's newborn : 1 y testis mass ratio. */
+const TESTIS=monotone([[0,0.23],[0.5,0.40],[1,0.41],[2,0.43],[3,0.44],[4,0.46],[6,0.53],[8,0.58],[10,0.75],[11,1.0],[12,2.0],[13,3.9],[14,6.5],[15,8.8],[16,10.8],[17,12.1],[18,12.9],[19,13.1]]); // basis: growth#testis
+/** Prostate mass, g, ICRP 89 reference male (adult 17 g placed at 20 y), linear between nodes. Seminal vesicles have no reference value and follow it. */
+const PROSTATE=linear([[0,0.8],[1,1.0],[5,1.2],[10,1.6],[15,4.3],[20,17]]); // basis: growth#prostate
+/** Epididymis mass (pair), g, ICRP 89 reference male (adult 4 g placed at 20 y), linear between nodes. */
+const EPIDIDYMIS=linear([[0,0.25],[1,0.35],[5,0.45],[10,0.6],[15,1.6],[20,4]]); // basis: growth#epididymis
 /** Stretched penile length, cm (Schonfeld & Beebe 1942): 3.5 at term, 6.4 at 10–11 y, 13.3 adult; puberty growth from 11 to 16 y. */
 const PENIS=monotone([[0,3.5],[0.25,3.9],[0.75,4.3],[1.5,4.7],[2.5,5.1],[3.5,5.5],[4.5,5.7],[5.5,6.0],[6.5,6.1],[7.5,6.2],[8.5,6.3],[9.5,6.3],[10.5,6.4],[11,6.4],[16,13.3]]); // basis: growth#scammon-genital
 
@@ -40,9 +46,10 @@ export const growthFx:GrowthFx=body=>{
 	const eye=EYE_AXIAL(age)/EYE_AXIAL(aAge);for(const s of ['Left','Right'] as const)put(EYE_PARTS(s),eye,'head',GLOBE_CENTRE[s]);
 	put(['Left lobe of thymus','Right lobe of thymus'],Math.cbrt(THYMUS(age)/THYMUS(aAge)),'trunk',THYMUS_PIVOT);
 	put(['Caudate lobe of liver'],Math.cbrt(LIVER_PCT(age)*body.weightKg/(LIVER_PCT(aAge)*A.weightKg)),'trunk');
-	const gen=Math.cbrt(TESTIS(age)/TESTIS(aAge));
-	put(['Left testis','Right testis','Prostate','Left seminal vesicle','Right seminal vesicle'],gen,'trunk');
-	for(const s of ['Left','Right'] as const)put([`${s} epididymis`],gen,'trunk',TESTIS_CENTRE[s]);
+	const cb=(g:(a:number)=>number)=>Math.cbrt(g(age)/g(aAge));
+	put(['Left testis','Right testis'],cb(TESTIS),'trunk');
+	put(['Prostate','Left seminal vesicle','Right seminal vesicle'],cb(PROSTATE),'trunk');
+	for(const s of ['Left','Right'] as const)put([`${s} epididymis`],cb(EPIDIDYMIS),'trunk',TESTIS_CENTRE[s]);
 	put(PENIS_PARTS,PENIS(age)/PENIS(aAge),'trunk',PENIS_PIVOT);
 	return out;
 };
