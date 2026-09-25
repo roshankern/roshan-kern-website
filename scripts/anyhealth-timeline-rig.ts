@@ -96,10 +96,14 @@ async function main(){
 
 	// Fallback when no bone is within REACH: distance to each segment's joint→distal line.
 	const lineD=(x:number,y:number,z:number,s:Segment)=>{const [jx,jy,jz]=s.joint,[ax,ay,az]=s.axis,t=Math.min(s.length,Math.max(0,(x-jx)*ax+(y-jy)*ay+(z-jz)*az));return Math.hypot(x-jx-ax*t,y-jy-ay*t,z-jz-az*t);};
-	const best=new Float64Array(NS),maxRing=Math.ceil(REACH/CELL);
-	const out=new Uint8Array(parts.reduce((s,p)=>s+p.position.length/3,0)*2);let o=0,far=0,mixed=0;
+	/** Rig neighbours of each segment (parent and children). segB is only ever chosen from these, so no blend spans segments the warp scales independently (thigh↔thigh, hand↔thigh, forearm↔trunk). */
+	const ADJ=SEGMENTS.map((id,i)=>SEGMENTS.map((_,j)=>j).filter(j=>segments[i].parent===SEGMENTS[j]||segments[j].parent===id));
+	/** sA = nearest segment overall, sB = nearest rig neighbour of sA (−1 if none is finite). */
+	const pick=(d:ArrayLike<number>)=>{let sA=-1,sB=-1;for(let s=0;s<NS;s++)if(d[s]<(sA<0?Infinity:d[sA]))sA=s;if(sA>=0)for(const s of ADJ[sA])if(d[s]<(sB<0?Infinity:d[sB]))sB=s;return [sA,sB];};
+	const best=new Float64Array(NS),line=new Float64Array(NS),maxRing=Math.ceil(REACH/CELL),hands=[SEG('lHand'),SEG('rHand')],thighs=[SEG('lThigh'),SEG('rThigh')];
+	const out=new Uint8Array(parts.reduce((s,p)=>s+p.position.length/3,0)*2);let o=0,far=0,mixed=0,skinHandOnThigh=0;
 	parts.forEach((g,pi)=>{
-		const fixed=boneSegment(atlas.parts[pi].name),v=g.position,nv=v.length/3;
+		const fixed=boneSegment(atlas.parts[pi].name),v=g.position,nv=v.length/3,skin=atlas.parts[pi].name==='Skin';
 		if(fixed){const s=SEG(fixed);for(let i=0;i<nv;i++){out[o++]=s|s<<4;out[o++]=255;}return;}
 		for(let i=0;i<nv;i++){
 			const x=v[3*i],y=v[3*i+1],z=v[3*i+2],cx=cellOf(x,0),cy=cellOf(y,1),cz=cellOf(z,2);best.fill(Infinity);
@@ -113,21 +117,23 @@ async function main(){
 						}
 					}
 				}
-				dA=dB=Infinity;sA=sB=-1;for(let s=0;s<NS;s++){const d=best[s];if(d<dA){dB=dA;sB=sA;dA=d;sA=s;}else if(d<dB){dB=d;sB=s;}}
-				const seen=r*CELL,a=Math.sqrt(dA),b=Math.sqrt(dB);
-				if(sA>=0&&(seen>=b||seen>=a+BLEND)||seen>=REACH)break;
+				[sA,sB]=pick(best);dA=sA<0?Infinity:Math.sqrt(best[sA]);dB=sB<0?Infinity:Math.sqrt(best[sB]);
+				// Done once A is exact and B is either exact or at least BLEND farther (weight saturates).
+				const seen=r*CELL;
+				if(sA>=0&&seen>=dA&&(seen>=dB||seen>=dA+BLEND)||seen>=REACH)break;
 			}
-			dA=Math.sqrt(dA);dB=Math.sqrt(dB);
-			if(sA<0||dA>REACH){far++;dA=dB=Infinity;sA=sB=-1;segments.forEach((s,si)=>{const d=lineD(x,y,z,s);if(d<dA){dB=dA;sB=sA;dA=d;sA=si;}else if(d<dB){dB=d;sB=si;}});}
-			// No second bone seen: fully A.
+			if(sA<0||dA>REACH){far++;segments.forEach((s,si)=>{line[si]=lineD(x,y,z,s);});[sA,sB]=pick(line);dA=line[sA];dB=sB<0?Infinity:line[sB];}
+			// No neighbour within the blend window: fully A.
 			const w=sB<0?1:0.5+0.5*smoothstep(0,BLEND,dB-dA);
-			if(sB<0)sB=sA;if(w<1)mixed++;
+			if(w>=1)sB=sA;else mixed++;
+			if(skin&&hands.includes(sA)&&Math.min(...thighs.map(t=>lineD(x,y,z,segments[t])))<lineD(x,y,z,segments[sA]))skinHandOnThigh++;
 			out[o++]=sA|sB<<4;out[o++]=Math.round(w*255);
 		}
 	});
 	if(o!==out.length)throw new Error(`wrote ${o} of ${out.length} bytes`);
 	fs.writeFileSync(BIN_OUT,out);
 	console.log(`vertices with no bone within ${REACH*100} cm (joint-line fallback): ${far}; blended vertices: ${mixed}`);
+	console.log(`residual mislabel: Skin vertices with segA = l/rHand but closer to a thigh axis than to that hand axis: ${skinHandOnThigh}`);
 	console.log(`\nwrote ${RIG_OUT} (${fs.statSync(RIG_OUT).size} B), ${BIN_OUT} (${(fs.statSync(BIN_OUT).size/1e6).toFixed(2)} MB) in ${((Date.now()-t0)/1000).toFixed(1)} s`);
 }
 main().catch(e=>{console.error(e);process.exit(1);});
