@@ -42,6 +42,14 @@ The atlas is one adult male reference model (BodyParts3D), so some anatomy the t
 - **Physis not modelled.** A 6-year-old's proximal humerus has an open growth plate. The atlas humerus is one fused adult bone, so the break is placed by fraction of length (0.21 from the shoulder end) rather than relative to the physis.
 - **Scoliosis moves parts rigidly.** T1–T6 and their disks shift, tilt and turn as whole parts. Ribs 1–6 only shift with their vertebra: they do not rotate into a rib hump. The costal cartilages and sternum stay put, so at the apex (≈4.5 mm) the rib ends can separate slightly from their cartilages. Vertebral wedging is not modelled.
 
+### airway
+
+- **No subglottis part.** Croup narrowing is drawn as a `swellBand` on the `Trachea`, covering the 2 cm below the cricoid's lower edge. The true subglottis also runs inside the cricoid ring, which is cartilage in the atlas and does not swell.
+- **Swell pushes along the mesh normals.** The trachea and bronchi are surface meshes, so a negative swell draws the tube narrowing. It does not model the mucosa thickening into a separate lumen. The mm values are set on the adult rest mesh, and the body warp scales them with the child.
+- **Laryngomalacia on the epiglottis only.** The atlas has no aryepiglottic-fold or supraglottic mucosa mesh, so the curl and posterior tilt of the `Epiglottis` carry the whole sign.
+- **Asthma and COVID live on the bronchial trees**, since there is no lung parenchyma. Asthma swells and tints all 22 respiratory `/bronch/i` names (100 parts). Small-airway disease below the segmental level is not modelled.
+- **Recurrent croup dates.** The record gives counts, not dates, for most episodes ("about 3 each winter"). Those episodes are spread with a seeded PRNG across October–March. Documented episodes with only a month use the 15th. See `airway.md#croup-winter`.
+
 ## Illustrative effects
 
 Effects that are stylized rather than literal anatomy (`illustrative: true` on the issue script, shown with an "Illustrative" tag in the tracker). Filled in by each area's agent as scripts are written:
@@ -52,3 +60,11 @@ Effects that are stylized rather than literal anatomy (`illustrative: true` on t
 
 - **`scoliosis-upper-thoracic-2025`** (`illustrative: true`). The record has no imaging, so the angle (10° Cobb), side (left-convex, the classic side of a proximal thoracic curve; the side is uncertain because no imaging exists), apex (T3–T4), axial rotation and 2020–2025 development are typical values from the literature. They are not measured on this patient (see [bones.md](bones.md)).
 - **Fracture clot and callus lumps** (`left-humerus-fracture-2009`). The fragment displacement and the callus extent come from the films. The hematoma is drawn as two soft translucent ellipsoids (≈4 × 6 cm), and the callus lumps are a seeded random pattern: both are stylized. The script is not flagged illustrative because the break itself is literal.
+
+### airway
+
+- **COVID-19 (2020-08-28)** (`illustrative: true`): a patchy warm tint on a deterministic 40% of the segmental bronchial trees for 14 days. It stands in for a lung infection the model has no parenchyma to show.
+- **Not flagged, but partly stylized:**
+  - The seeded winter croup dates (the counts come from the record, the days do not).
+  - The laryngomalacia curl angle.
+  - The blue highlight tints marking the bronchoscopy, spirometry, re-evaluation and budesonide windows.
