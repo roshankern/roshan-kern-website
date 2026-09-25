@@ -12,12 +12,16 @@ import IssueDots,{type DotsHandle} from '../health/issue-dots';
 import type {Anchor} from '../health/anchors';
 import type {Issue} from '../health/types';
 import {createFracture,type FractureHandle} from '../fracture/fracture-scene';
-interface Props {atlas:Atlas;state:SceneState;onProgress:(n:number)=>void;onError:(s:string)=>void;issues:Issue[];selectedIssue:string|null;onSelectIssue:(id:string|null)=>void;date?:string;fracture?:boolean}
-/** `date` + `fracture` (the /anyhealth/test page) draw the 2009 humerus fracture as of the timeline date; off by default. */
-export default function AnatomyScene({atlas,state,onProgress,onError,issues,selectedIssue,onSelectIssue,date,fracture=false}:Props){
+import {createEngine,isolatedParts,visibilityFor} from '../timeline/engine';
+import type {Rig} from '../timeline/types';
+interface Props {atlas:Atlas;state:SceneState;onProgress:(n:number)=>void;onError:(s:string)=>void;issues:Issue[];selectedIssue:string|null;onSelectIssue:(id:string|null)=>void;date?:string;fracture?:boolean;timeline?:{date:string;isolate:string|null;onFly?:()=>void};segments?:ArrayBuffer;rig?:Rig;onApi?:(api:{focusBox(b:T.Box3):void})=>void}
+/** `date` + `fracture` (the /anyhealth/test page) draw the 2009 humerus fracture as of the timeline date; off by default.
+ *  `timeline` + `rig` + `segments` (the /anyhealth/timeline page, read at mount) hand the body to the timeline engine (app/anyhealth/timeline/engine.ts): growth warp, issue effects, Isolate. Visibility then goes through the engine only. Off by default. */
+export default function AnatomyScene({atlas,state,onProgress,onError,issues,selectedIssue,onSelectIssue,date,fracture=false,timeline,segments,rig,onApi}:Props){
  const host=useRef<HTMLDivElement>(null),latest=useRef(state),dots=useRef<DotsHandle|null>(null);
  latest.current=state;
  const latestDate=useRef({date,fracture});latestDate.current={date,fracture};
+ const latestTimeline=useRef({timeline,onApi});latestTimeline.current={timeline,onApi};
  useEffect(()=>{
   const el=host.current!;let disposed=false,frame=0,dirty=true,ready=false;
   let lastState:SceneState|null=null,fx:FractureHandle|null=null,fxTried=false;
@@ -39,6 +43,9 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
   const width=T.MathUtils.ceilPowerOfTwo(atlas.parts.length),data=new Float32Array(width*4),partTexture=new T.DataTexture(data,width,1,T.RGBAFormat,T.FloatType);partTexture.needsUpdate=true;
   const materials:T.Material[]=[],geometries:T.BufferGeometry[]=[],pickers:(T.Mesh|undefined)[]=[];
   const bounds=atlas.parts.map(p=>new T.Box3(new T.Vector3().fromArray(p.bounds[0]),new T.Vector3().fromArray(p.bounds[1])));
+  const engine=timeline&&rig&&segments?createEngine({atlas,scene,bounds,rig,segments}):null;
+  // Timeline mode: what picking treats as visible (the switches or Isolate); null keeps the partState texture.
+  let pickVisible:Float32Array|null=null,lastIsolate:string|null=null,seenDate='',dateAt=0,settled=true;const shown=(i:number)=>(pickVisible?pickVisible[i]:data[i*4+3])>.5;
   const materialFor=(system:string)=>{
    const m=new T.MeshStandardMaterial({color:SYSTEMS.find(s=>s.id===system)?.mesh??'#aebbb8',metalness:.08,roughness:.53,side:T.DoubleSide,transparent:system==='integumentary',opacity:system==='integumentary'?.1:1,depthWrite:system!=='integumentary'});
    m.onBeforeCompile=shader=>{
@@ -47,7 +54,7 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
     shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nvec2 stateUv = vec2((partIndex + 0.5) / stateWidth, 0.5); vec4 state = texture2D(partState, stateUv); partVisible = state.w;');
     shader.fragmentShader='varying float partVisible;\n'+shader.fragmentShader;
     shader.fragmentShader=shader.fragmentShader.replace('#include <clipping_planes_fragment>','#include <clipping_planes_fragment>\nif (partVisible < 0.5) discard;');
-   };materials.push(m);return m;
+   };engine?.patchMaterial(m,{partFx:true,soft:['muscular','integumentary','connective'].includes(system)});materials.push(m);return m;
   };
   const mats=new Map(SYSTEMS.map(s=>[s.id,materialFor(s.id)]));
   let loaded=0;
@@ -62,12 +69,13 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
     g.setAttribute('normal',new T.BufferAttribute(normal,3,true));g.setIndex(new T.BufferAttribute(index,1));
     g.boundingBox=bounds[i].clone();g.computeBoundingSphere();const pick=new T.Mesh(g);pick.matrixAutoUpdate=false;pickers[i]=pick;geometries.push(g);
     g.setAttribute('partIndex',new T.BufferAttribute(new Float32Array(p.vertexCount).fill(i),1));
+    if(engine)g.setAttribute('seg',engine.segAttribute(i));
     const list=groups.get(p.system)??[];list.push(g);groups.set(p.system,list);
    });
    groups.forEach((gs,system)=>{const geometry=mergeGeometries(gs,false);if(!geometry)throw new Error('Could not assemble anatomy geometry.');geometries.push(geometry);const mesh=new T.Mesh(geometry,mats.get(system as never));mesh.frustumCulled=false;scene.add(mesh);});
    lastState=null;loaded++;onProgress(Math.round(loaded/atlas.chunks.length*100));dirty=true;
   };
-  (async()=>{try{let cursor=0;await Promise.all(Array.from({length:3},async()=>{while(cursor<atlas.chunks.length){const i=cursor++;await loadChunk(i);}}));if(!disposed){ready=true;dirty=true;}}catch(e){if(!disposed)onError(e instanceof Error?e.message:'Could not load the anatomy.');}})();
+  (async()=>{try{let cursor=0;await Promise.all(Array.from({length:3},async()=>{while(cursor<atlas.chunks.length){const i=cursor++;await loadChunk(i);}}));if(!disposed){ready=true;dirty=true;engine?.ready(pickers);}}catch(e){if(!disposed)onError(e instanceof Error?e.message:'Could not load the anatomy.');}})();
   // Width of the issue panel's right footprint (--issue-panel-w + --panel-inset on .studio), resolved through a probe so calc()/min()/vw values work. 0 when the properties are unset.
   const issueFootprint=()=>{
    const studio=document.querySelector('.studio');if(!(studio instanceof HTMLElement))return 0;const cs=getComputedStyle(studio);
@@ -124,8 +132,8 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
   // Nearest visible part under a screen point (the translucent body surface only counts when nothing solid is showing). setFromCamera uses the camera's view offset, matching the rendered image.
   const pick=(clientX:number,clientY:number):{index:number;point:T.Vector3|null}=>{
    const rect=renderer.domElement.getBoundingClientRect();pointer.set((clientX-rect.left)/rect.width*2-1,-(clientY-rect.top)/rect.height*2+1);raycaster.setFromCamera(pointer,camera);
-   let nearest=Infinity,found=-1,point:T.Vector3|null=null;const hasSolid=atlas.parts.some((p,i)=>p.system!=='integumentary'&&data[i*4+3]>.5);
-   pickers.forEach((mesh,i)=>{if(!mesh||data[i*4+3]<.5||(hasSolid&&atlas.parts[i].system==='integumentary'))return;if(!raycaster.ray.intersectBox(bounds[i],hitPoint))return;const hits=raycaster.intersectObject(mesh,false);if(hits[0]&&hits[0].distance<nearest){nearest=hits[0].distance;found=i;point=hits[0].point.clone();}});
+   let nearest=Infinity,found=-1,point:T.Vector3|null=null;const hasSolid=atlas.parts.some((p,i)=>p.system!=='integumentary'&&shown(i));
+   pickers.forEach((mesh,i)=>{if(!mesh||!shown(i)||(hasSolid&&atlas.parts[i].system==='integumentary'))return;if(!raycaster.ray.intersectBox(bounds[i],hitPoint))return;const hits=raycaster.intersectObject(mesh,false);if(hits[0]&&hits[0].distance<nearest){nearest=hits[0].distance;found=i;point=hits[0].point.clone();}});
    return {index:found,point};
   };
   // Re-center orbit and zoom on a world point without moving the camera: aim at it, then shift the principal point so it stays at the same pixel.
@@ -143,6 +151,7 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
    const direction=camera.position.clone().sub(controls.target).normalize();
    flyTo({target:center,position:center.clone().addScaledVector(direction,distance),ox:w/2-(left+right)/2,oy:h/2-(top+bottom)/2});
   };
+  latestTimeline.current.onApi?.({focusBox:b=>focusBox(b)});
   const touches=new Map<number,{x:number;y:number}>();let lastTap:{t:number;x:number;y:number}|null=null;
   const down=(e:PointerEvent)=>{
    tap.down(e.pointerId,e.clientX,e.clientY,e.pointerType==='touch'?12:5);flight=null;
@@ -164,10 +173,19 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
   const animate=()=>{
    if(disposed)return;frame=requestAnimationFrame(animate);const s=latest.current;
    if(flight){const {from,to}=flight,k=Math.min(1,(performance.now()-flight.t0)/420),e=1-Math.pow(1-k,3);controls.target.lerpVectors(from.target,to.target,e);camera.position.lerpVectors(from.position,to.position,e);setOffset(T.MathUtils.lerp(from.ox,to.ox,e),T.MathUtils.lerp(from.oy,to.oy,e));if(k>=1)flight=null;dirty=true;}
-   if(lastState?.visible!==s.visible){
+   const tl=latestTimeline.current.timeline;
+   if(lastState?.visible!==s.visible||(engine&&tl&&tl.isolate!==lastIsolate)){
     const visible=new Set(s.visible);
-    atlas.parts.forEach((p,i)=>{data[i*4+3]=visible.has(p.system)?1:0;});
+    // Timeline mode: partState never discards; the engine writes visibility into its fx texture.
+    atlas.parts.forEach((p,i)=>{data[i*4+3]=engine||visible.has(p.system)?1:0;});
+    if(engine&&tl){lastIsolate=tl.isolate;pickVisible=visibilityFor(atlas.parts,s.visible,isolatedParts(tl.isolate));}
     partTexture.needsUpdate=true;lastState=s;dirty=true;
+   }
+   if(engine&&tl){
+    const now=performance.now();if(tl.date!==seenDate){seenDate=tl.date;dateAt=now;settled=false;}
+    const r=engine.update({date:tl.date,visible:s.visible,isolate:tl.isolate,now});if(r.changed||r.animating)dirty=true;if(r.fly){focusBox(r.fly,1.35);tl.onFly?.();}
+    // Re-warp the picking geometry and bounds once the date has rested for 150 ms.
+    if(ready&&!settled&&now-dateAt>=150){engine.settle();settled=true;}
    }
    const fd=latestDate.current;if(ready&&fd.fracture&&!fxTried){fxTried=true;fx=createFracture({scene,atlas,pickers,data,partTexture});}
    if(fx){const r=fx.update(fd.fracture?fd.date??'':'',s.visible.includes('skeletal'),performance.now());if(r.changed||r.animating)dirty=true;if(r.fly)focusBox(fx.box,1.35);}
@@ -175,7 +193,7 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
    if(dirty){renderer.render(scene,camera);dirty=false;dots.current?.place(projectDot);}else if(dots.current?.stale)dots.current.place(projectDot);
   };fit();animate();
   const contextLost=(e:Event)=>{e.preventDefault();onError('The 3D session was paused by your device. Reload to continue.');};renderer.domElement.addEventListener('webglcontextlost',contextLost);
-  return()=>{disposed=true;fx?.dispose();abort.abort();cancelAnimationFrame(frame);observer.disconnect();el.removeEventListener('pointerdown',down,{capture:true});el.removeEventListener('wheel',wheel,{capture:true});controls.dispose();geometries.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());scene.traverse(o=>{if(o instanceof T.Mesh&&!geometries.includes(o.geometry)){o.geometry.dispose();const ms=Array.isArray(o.material)?o.material:[o.material];ms.forEach(m=>m.dispose());}});env.dispose();partTexture.dispose();renderer.dispose();renderer.domElement.remove();};
+  return()=>{disposed=true;fx?.dispose();engine?.dispose();abort.abort();cancelAnimationFrame(frame);observer.disconnect();el.removeEventListener('pointerdown',down,{capture:true});el.removeEventListener('wheel',wheel,{capture:true});controls.dispose();geometries.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());scene.traverse(o=>{if(o instanceof T.Mesh&&!geometries.includes(o.geometry)){o.geometry.dispose();const ms=Array.isArray(o.material)?o.material:[o.material];ms.forEach(m=>m.dispose());}});env.dispose();partTexture.dispose();renderer.dispose();renderer.domElement.remove();};
  },[atlas]);
- return <><div className="scene" ref={host}/><IssueDots issues={issues} selectedIssue={selectedIssue} onSelectIssue={onSelectIssue} handle={dots}/></>;
+ return <><div className="scene" ref={host}/>{!timeline&&<IssueDots issues={issues} selectedIssue={selectedIssue} onSelectIssue={onSelectIssue} handle={dots}/>}</>;
 }
