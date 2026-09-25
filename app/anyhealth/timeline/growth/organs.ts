@@ -6,14 +6,14 @@
 import type {Body,GrowthFx,PartFx,SegmentId,Vec3} from '../types';
 import {bodyAt,LAST_MEASURED,monotone} from './proportions';
 
-/** Eyeball axial length, mm, by age (y): 16.8 at birth, 20 at 1 y, 21 at 4 y, 23 at 13 y, 23.6 adult. */
-const EYE_AXIAL=monotone([[0,16.8],[1,20.0],[4,21.0],[13,23.0],[18,23.6]]); // basis: growth#eye-axial
+/** Eyeball axial length, mm, by age (y): 16.8 at birth, 20 at 1 y, 22 at 3 y, 23 at 13 y (Fledelius & Christensen 1996); adult men 23.82 mm at 20–30 y (Larsen 1979). */
+const EYE_AXIAL=monotone([[0,16.8],[1,20.0],[3,22.0],[13,23.0],[20,23.82]]); // basis: growth#eye-axial
 /** Thymus mass, g: ~15 g at birth, ~35 g at 11–13 y (peak), back toward ~25 g by 20 and ~15 g by 50 (Hammar; Scammon lymphoid type). */
 const THYMUS=monotone([[0,15],[12,35],[20,25],[50,15]]); // basis: growth#thymus
 /** Liver mass as a fraction of body mass: 4% at birth, 3.5% in the first year, 2.9% at 1–6 y, 2% adult. */
 const LIVER_PCT=monotone([[0,0.040],[0.5,0.035],[3.5,0.029],[18,0.020]]); // basis: growth#liver
-/** Testicular volume, mL: prepubertal 1–1.5 mL until 11 y, 4 mL at 11.7 y (median onset), ~12 mL at the growth spurt, adult ~20 mL by 16 y. Also used (as a mass fraction) for the epididymides, seminal vesicles and prostate (Scammon genital type). */
-const TESTIS=monotone([[0,1.0],[11,1.5],[11.7,4],[13.5,12],[16,20]]); // basis: growth#testis
+/** Testicular volume, mL: prepubertal 1–1.5 mL until 11 y, 4 mL at 11.7 y (median onset), ~12 mL at the growth spurt, adult ~20 mL reached ~18 y (Koskela 2024: growth still under way at 17 y; 16.5–18 y ultrasound volumes 6–22 mL). Also used (as a mass fraction) for the epididymides, seminal vesicles and prostate (Scammon genital type). */
+const TESTIS=monotone([[0,1.0],[11,1.5],[11.7,4],[13.5,12],[18,20]]); // basis: growth#testis
 /** Stretched penile length, cm (Schonfeld & Beebe 1942): 3.5 at term, 6.4 at 10–11 y, 13.3 adult; puberty growth from 11 to 16 y. */
 const PENIS=monotone([[0,3.5],[0.25,3.9],[0.75,4.3],[1.5,4.7],[2.5,5.1],[3.5,5.5],[4.5,5.7],[5.5,6.0],[6.5,6.1],[7.5,6.2],[8.5,6.3],[9.5,6.3],[10.5,6.4],[11,6.4],[16,13.3]]); // basis: growth#scammon-genital
 
@@ -28,7 +28,7 @@ const PENIS_PARTS=['Corpus cavernosum of penis','Corpus spongiosum of penis','Gl
 /** Each epididymis scales about its testis centre so the two stay in contact. */
 const TESTIS_CENTRE:Record<'Left'|'Right',Vec3>={Left:[0.0175,0.7823,0.0524],Right:[-0.0207,0.7829,0.0523]};
 
-/** The warp's uniform local size for a segment (bone girth): scale × ∛(along × girth²). */
+/** The warp's uniform local size for a segment (bone girth): scale × ∛(along × girth²). The reproductive parts use the trunk here although they sit where the trunk and thigh weights blend: an approximation (the two segments' local sizes differ by a few % at most ages). */
 const local=(b:Body,s:SegmentId)=>b.scale*Math.cbrt(b.length[s]*b.boneGirth[s]**2);
 let adult:Body|null=null;
 const adultBody=()=>adult??=bodyAt(LAST_MEASURED);

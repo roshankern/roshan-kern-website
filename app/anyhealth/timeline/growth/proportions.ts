@@ -39,7 +39,8 @@ const THIGH:Table=HIP_ANKLE.map(([a,v])=>[a,v*THIGH_SHARE]); // basis: growth#ra
 const SHANK:Table=HIP_ANKLE.map(([a,v])=>[a,v*(1-THIGH_SHARE)]); // basis: growth#ratio-shank
 /** Head height (vertex–menton). 0 and 1 y: Snyder's 2 y head height (166 mm) scaled by WHO head circumference (34.46, 46.07, 48.25 cm at 0, 12, 24 mo) over WHO length (49.9, 75.7 cm); 2–18 y: Snyder 1977. */
 const HEAD:Table=[[0,0.2377],[1,0.2094],[2,0.1891],[3,0.1856],[4,0.1764],[6,0.162],[8,0.1502],[10,0.1431],[12,0.1358],[14,0.1324],[16,0.1258],[18,0.1255]]; // basis: growth#ratio-head
-/** Neck, menton to suprasternale (1 − suprasternale height − head height), Snyder 1977 3–18 y (3-point moving average: the two medians come from disjoint subsamples, so their difference is noisy); 0 y is an assumption (the newborn chin nearly meets the chest). */
+/** Neck, menton to suprasternale (1 − suprasternale height − head height), Snyder 1977 3–18 y (3-point moving average: the two medians come from disjoint subsamples, so their difference is noisy); 0 y is an assumption (the newborn chin nearly meets the chest).
+ * Applied to the rig's neck span (C7/T1 joint → atlanto-occipital joint), not menton→suprasternale itself. At birth the warped chin nearly meets the manubrium (review measured a 0.04 cm gap): chin/clavicle contact is possible. */
 const NECK:Table=[[0,0.030],[3,0.0544],[4,0.054],[6,0.0551],[8,0.0553],[10,0.054],[12,0.0543],[14,0.0581],[16,0.0617],[18,0.064]]; // basis: growth#ratio-neck
 /** Sole to ankle (sphyrion height), Snyder 1977 3–18 y; 0 y assumed. Only used to close the vertical chain for the trunk. */
 const ANKLE:Table=[[0,0.035],[3,0.0402],[4,0.0372],[6,0.0417],[8,0.0416],[10,0.041],[12,0.0402],[14,0.0409],[16,0.0422],[18,0.0399]]; // basis: growth#ratio-trunk
@@ -69,6 +70,7 @@ const W_SHOULDER:Table=[[3,0.2322],[4,0.2278],[6,0.2239],[8,0.2182],[10,0.2205],
 const W_HIP:Table=[[3,0.1884],[4,0.1825],[6,0.1742],[8,0.1708],[10,0.1699],[12,0.1738],[14,0.1822],[16,0.1846],[18,0.1853]]; // basis: growth#girth-bone
 const W_WRIST:Table=[[3,0.0306],[4,0.0289],[6,0.0271],[8,0.0255],[10,0.0248],[12,0.0247],[14,0.0246],[16,0.0246],[18,0.0245]]; // basis: growth#girth-bone
 const W_HAND:Table=[[2,0.0565],[3,0.0548],[4,0.0539],[6,0.0523],[8,0.051],[10,0.0508],[12,0.0501],[14,0.0509],[16,0.0504],[18,0.0505]]; // basis: growth#girth-bone
+/** Thigh and shank bone girth both follow bimalleolar (ankle) breadth: the only bony lower-limb breadth in Snyder 1977. An approximation for the femur and upper tibia. */
 const W_ANKLE:Table=[[3,0.0429],[4,0.0416],[6,0.0385],[8,0.0366],[10,0.0358],[12,0.0357],[14,0.0352],[16,0.0347],[18,0.0343]]; // basis: growth#girth-bone
 const W_FOOT:Table=[[2,0.0682],[3,0.0658],[4,0.0646],[6,0.0633],[8,0.0616],[10,0.0611],[12,0.0609],[14,0.0613],[16,0.0589],[18,0.0589]]; // basis: growth#girth-bone
 const rel=(t:Table)=>{const g=f(t),a=g(ADULT_AGE);return (x:number)=>g(x)/a;};
@@ -76,7 +78,7 @@ const GIRTH:Record<SegmentId,(a:number)=>number>=(()=>{const hd=rel(W_HEAD),nk=r
 	return {trunk:tr,neck:nk,head:hd,lUpperArm:wr,lForearm:wr,lHand:hn,rUpperArm:wr,rForearm:wr,rHand:hn,lThigh:an,lShank:an,lFoot:ft,rThigh:an,rShank:an,rFoot:ft};})();
 
 /** Median BMI-for-age, boys: WHO 2006 standards 0–2 y, CDC 2000 charts 3–20 y (agemos 36.5, 48.5, …, 240). */
-const BMI_REF=monotone([[0,13.41],[1/12,14.91],[2/12,16.32],[0.25,16.90],[0.5,17.34],[0.75,17.17],[1,16.80],[1.5,16.14],[2,15.74],[3,16.00],[4,15.63],[5,15.42],[6,15.38],[8,15.78],[10,16.65],[12,17.81],[14,19.16],[16,20.56],[18,21.90],[20,23.02]]); // basis: growth#girth-soft
+export const BMI_REF=monotone([[0,13.41],[1/12,14.91],[2/12,16.32],[0.25,16.90],[0.5,17.34],[0.75,17.17],[1,16.80],[1.5,16.14],[2,15.74],[3,16.00],[4,15.63],[5,15.42],[6,15.38],[8,15.78],[10,16.65],[12,17.81],[14,19.16],[16,20.56],[18,21.90],[20,23.02]]); // basis: growth#girth-soft
 /** Soft-tissue girth moves with BMI deviation at half rate: at fixed stature, cross-section area ∝ mass, so girth ∝ √BMI and d(girth)/girth ≈ ½ d(BMI)/BMI. */
 const K_SOFT=0.5; // basis: growth#girth-soft
 
@@ -90,7 +92,8 @@ function heightOver(foot:'lFoot'|'rFoot',len:Record<SegmentId,number>,girth:Reco
 	const h=by.get('head')!,ft=by.get(foot)!;
 	return T(h,[h.joint[0],rig.stature,h.joint[2]])[1]-T(ft,[ft.joint[0],0,ft.joint[2]])[1];
 }
-/** Scale the vertical segments by one common factor so the warped floor-to-vertex height is exactly the rig stature (× body.scale = statureM). The height is affine in that factor, per foot; the lower foot sets the floor. */
+/** Known gap (deferred to Task 14, which will call warpState/warpPoint directly after merge): this mirrors the warp with one sole point per foot and bone girth for the vertex, while warp.ts grounds on four sole points and the skin vertex uses soft girth. Review measured the resulting stature error at +0.06% at 3 y.
+ * Scale the vertical segments by one common factor so the warped floor-to-vertex height is exactly the rig stature (× body.scale = statureM). The height is affine in that factor, per foot; the lower foot sets the floor. */
 function renormalise(len:Record<SegmentId,number>,girth:Record<SegmentId,number>):void{
 	const at=(foot:'lFoot'|'rFoot',k:number)=>{const l={...len};for(const s of VERTICAL)l[s]*=k;return heightOver(foot,l,girth);};
 	const k=Math.min(...(['lFoot','rFoot'] as const).map(ft=>{const h0=at(ft,0),h1=at(ft,1);return (rig.stature-h0)/(h1-h0);}));
@@ -101,7 +104,7 @@ const bmiAt=(iso:string)=>{const h=(growth.heightAt(iso)??0)/100,w=growth.weight
 const softK=(iso:string,age:number)=>1+K_SOFT*(bmiAt(iso)-BMI_REF(age))/BMI_REF(age);
 const SOFT_ADULT=softK(LAST_MEASURED,(LAST-BIRTH)/365.25);
 
-/** The body on `date`, clamped to [birth, last measurement]: measured stature and weight, and per-segment factors relative to `scale` (1 = the adult model). */
+/** The body on `date`: measured stature and weight, and per-segment factors relative to `scale` (1 = the adult model). Every value, including `ageYears`, is computed at the date clamped to [birth, last measurement]; `date` itself is returned as given (unclamped). */
 export function bodyAt(date:string):Body{
 	const days=Math.min(Math.max(toDays(date),BIRTH),LAST),iso=fromDays(days),age=(days-BIRTH)/365.25;
 	const statureM=(growth.heightAt(iso)??rig.stature*100)/100,weightKg=growth.weightAt(iso)??0;
