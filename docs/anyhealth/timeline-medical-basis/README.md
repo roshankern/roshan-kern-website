@@ -69,6 +69,15 @@ The atlas is one adult male reference model (BodyParts3D), so some anatomy the t
 - **Isotretinoin response curve is a proxy.** The course-day lesion curve (skin.md `isotretinoin-response`) uses IGA percentage reductions at weeks 8 and 12 as stand-ins for lesion counts. They come from a low-dose micronized isotretinoin study in severe nodular acne. This course was 40 → 80 mg/day for comedonal and inflammatory acne, so its real curve may differ. The end point (no active lesions on 2022-06-28) is from the record.
 - **Wart and palm sites.** The warts' site is unrecorded, so they go on the left hand (the anchor). Palm vesicle flares start at age 2 on the right palm (the anchor). The record only names dyshidrotic eczema in 2022 and doesn't say when the palm became involved.
 
+### digestive
+
+- **Rectum dilation pivot.** The brief asks for a scale about the rectum's centre. That drives the posterior wall about 7 mm into the `Sacrum`, which sits 1.2 mm behind it at rest. So the scale pivots instead on the anorectal end (min y), the posterior wall (min z) and the midline (centre x). The ampulla then dilates up and forward into the soft `Urinary bladder`, `Prostate` and seminal vesicles (up to about 9 mm of overlap at the peak), which is what a loaded rectum actually does. It doesn't dilate back through bone or down through the pelvic floor. A check guards this.
+- **Descending colon uses swell, not scale.** The mesh curves medially into the rectum (its bounds are 13.5 cm wide in x), so scaling about the bounds centre would pull its two limbs apart. A 1.7 mm swell along the normals widens the tube in place. Its lateral wall already touches `Left external oblique` and `Left iliacus` at rest, so any dilation adds a little overlap there.
+- **No sigmoid colon.** The sigmoid–rectum dilation, which is the largest in constipation, is carried by `Rectum` alone.
+- **LPR sits on the esophagus.** LPR findings are laryngeal and hypopharyngeal (oedema and erythema). The model shows them as a tint on the whole `Esophagus` plus a swell in its top 5 cm.
+- **Tint is per part.** GERD's "distal esophagus" tint colours the whole `Esophagus`, because PartFx has no banded tint (`swellBand` only weights swell).
+- **LPR fade is shorter than the evidence.** LPR fades over 12 weeks (the brief's upper bound), but laryngoscopic findings usually resolve over 6 months or more (Belafsky 2001).
+
 ## Illustrative effects
 
 Effects that are stylized rather than literal anatomy (`illustrative: true` on the issue script, shown with an "Illustrative" tag in the tracker). Filled in by each area's agent as scripts are written:
@@ -103,3 +112,10 @@ Effects that are stylized rather than literal anatomy (`illustrative: true` on t
   - the cradle-cap yellow tint on `Hair of head`;
   - the suture thread width (0.3 mm, wider than real 5-0/6-0 thread);
   - the direction of each cut (the shin along the tibia, the face cuts horizontal).
+
+### digestive
+
+- **Encopresis: faecal-loading tint** (dark brown on `Rectum` and `Descending colon`). The dilation itself is cited (Hamdy 2023, Sharif 2021), so this script is not flagged `illustrative`. Only the tint colour and amount are stylized.
+- **Silent reflux (LPR)** — `illustrative: true`. A red tint and an upper-band swell on the esophagus stand in for laryngeal findings.
+- **GERD 2026** — `illustrative: true`. Non-erosive reflux, so no mucosal change would actually be visible. The tint on the whole esophagus and the mild tint on the stomach are symbolic.
+- **Famotidine nightly** — `illustrative: true`. A very low residual tint, marking reflux that is being controlled.
