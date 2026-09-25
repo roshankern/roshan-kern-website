@@ -4,6 +4,7 @@
  * - WARP_PARS is injected after `#include <common>` in the vertex shader. It declares the uniforms `twJ`, `twA`, `twN`, `twS` (vec4[15]), `twGround` and `twSoft` (float), and any functions. It must NOT declare `seg`: the engine does.
  * - WARP_APPLY is injected right after FX_APPLY, at a point where both `transformed` (vec3, starts as `position`) and `objectNormal` (vec3) are live and nothing has read them yet. It rewrites both in place.
  * - When WARP_APPLY is non-empty the engine declares `attribute vec3 seg;` and defines a local `vec3 twSeg` (segA, segB, weightA 0..1) just before WARP_APPLY; read `twSeg`, not `seg` (custom layers with a fixed segment get `twSeg` from a define, with no attribute).
+ * - `objectTangent` is NOT warped: the atlas materials use no normal maps, so no tangent is needed. Add a tangent warp here if one ever is.
  * - `twSoft` is bound per material (1 for muscular / integumentary / connective, and for custom layers created with `soft`); every other uniform comes from warpUniforms() and is shared by every material. */
 import * as T from 'three';
 import {SEGMENTS} from '../types';

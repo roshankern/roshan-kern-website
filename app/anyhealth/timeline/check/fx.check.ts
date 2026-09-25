@@ -10,7 +10,7 @@ export const checks:Check[]=[
 		const s=Math.SQRT1_2,qz:Quat=[0,0,s,s],qx:Quat=[s,0,0,s];
 		const m2=mergeFx([{part:'A',swell:0.001},{part:'A',pivot:[1,2,3],swellBand:[0.1,0.2],rotate:qz},{part:'A',pivot:[9,9,9],swellBand:[0.5,0.6],rotate:qx}],idx,()=>[7,7,7]).get(0)!;
 		near3(c,m2.pivot,[1,2,3],1e-12,'pivot');c.assert(m2.swellBand?.[0]===0.1&&m2.swellBand[1]===0.2,'swellBand first');
-		const r=applyFxPoint({...identityFx([0,0,0]),rotate:m2.rotate},[1,0,0],[0,0,1],[0,0,0]);near3(c,r,[0,0,1],1e-9,'qz·qx applies qx first, then qz');
+		const r=applyFxPoint({...identityFx([0,0,0]),rotate:m2.rotate},[1,0,0],[0,0,1],[0,0,0]);near3(c,r,[0,0,1],1e-9,'qx·qz: qz first (listed first), then qx');
 		c.near(mergeFx([{part:'A',swell:0.001}],idx,()=>[7,7,7]).get(0)!.pivot[0],7,1e-12,'pivot default = rest centre');c.assert(mergeFx([{part:'B',swell:1}],idx,()=>[0,0,0]).size===0,'unknown part ignored');
 	}},
 	{name:'identity fx leaves points unchanged; scale about pivot keeps the pivot fixed',run(c){

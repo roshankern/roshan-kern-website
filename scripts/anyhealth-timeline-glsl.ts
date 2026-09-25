@@ -2,6 +2,7 @@
 // Compiles FX_PARS + WARP_PARS / FX_APPLY + WARP_APPLY (wired exactly as engine.ts patchMaterial wires them) in a WebGL2 program under
 // headless Chromium (SwiftShader), pushes 64 test points through it as gl.POINTS (one per pixel of an RGBA32F target), reads the warped
 // positions and normals back and compares them with applyFxPoint + warpPoint / warpNormal in node. Not a screenshot check.
+// Also compiles the custom-layer variant (`#define TW_FIXED_SEG 3`, no seg attribute, no part fx) and checks it against warpPoint with segment 3.
 // Needs playwright-core, kept OUTSIDE the repo (no new dependency): mkdir -p <dir> && cd <dir> && npm i playwright-core, then run with
 // ANYHEALTH_PLAYWRIGHT=<dir>. Chromium: ANYHEALTH_CHROME=<binary>, else the newest cached ~/Library/Caches/ms-playwright/chromium-* build.
 import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {createRequire} from 'node:module';
@@ -13,8 +14,8 @@ import {FX_ROWS,createFxTexture,writeFx,applyFxPoint,identityFx,type ResolvedFx}
 import {FX_PARS,FX_APPLY} from '../app/anyhealth/timeline/fx/part-fx-glsl';
 
 const N=64,POS_TOL=1e-5,NRM_TOL=1e-4,rig=rigJson as Rig;
-/** Where playwright-core may live: $ANYHEALTH_PLAYWRIGHT, then the scratch directory used when this script was written. */
-const PW_DIRS=[process.env.ANYHEALTH_PLAYWRIGHT,'/private/tmp/claude-501/-Users-roshankern-Desktop-Github-roshan-kern-website/e4a480ba-a607-4447-8123-b2cae557f01f/scratchpad/glsl'].filter((d):d is string=>!!d);
+/** Where playwright-core may live: $ANYHEALTH_PLAYWRIGHT (a directory with node_modules/playwright-core, or the package itself). */
+const PW_DIRS=[process.env.ANYHEALTH_PLAYWRIGHT].filter((d):d is string=>!!d);
 
 type Launch={launch(o:{executablePath:string;headless:boolean;args:string[]}):Promise<{newPage():Promise<{evaluate<R,A>(fn:((a:A)=>R|Promise<R>)|string,arg?:A):Promise<R>}>;close():Promise<void>}>};
 function loadPlaywright():{chromium:Launch}|null{
@@ -62,38 +63,45 @@ function testPoints(){
 	return {pos,nrm,seg,part};
 }
 
-// ── The shader, wired as engine.ts patchMaterial wires it (tfxRow copied verbatim from there) ──
-const VS=`#version 300 es
-precision highp float;precision highp int;precision highp sampler2D;
+// ── The shaders, wired as engine.ts patchMaterial wires them (tfxRow and the twSeg lines copied verbatim from there) ──
+/** Atlas parts: partFx + warp with the seg attribute. Custom layers (`fixedSeg`): warp only, `#define TW_FIXED_SEG`, no seg attribute. */
+const vsFor=(fixedSeg:number|null)=>{const fx=fixedSeg===null;return `#version 300 es
+${fx?'':`#define TW_FIXED_SEG ${fixedSeg}\n`}precision highp float;precision highp int;precision highp sampler2D;
 #define attribute in
 #define varying out
 #define texture2D texture
-attribute vec3 position;attribute vec3 normal;attribute vec3 seg;attribute float partIndex;
+attribute vec3 position;attribute vec3 normal;attribute float partIndex;
 uniform float outMode;
 varying vec3 vOut;
-varying float tfxVisible; varying vec4 tfxTint; uniform sampler2D tfxState; uniform float tfxWidth;
+${fx?`varying float tfxVisible; varying vec4 tfxTint; uniform sampler2D tfxState; uniform float tfxWidth;
 vec4 tfxRow(float row){ return texture2D(tfxState, vec2((partIndex + 0.5) / tfxWidth, (row + 0.5) / ${FX_ROWS}.0)); }
-${FX_PARS}
+${FX_PARS}`:''}
 #ifndef TW_FIXED_SEG
+attribute vec3 seg;
 #endif
 ${WARP_PARS}
 void main(){
 	vec3 objectNormal = vec3(normal);
 	vec3 transformed = vec3(position);
 	{
-tfxVisible = tfxRow(0.0).x; tfxTint = tfxRow(1.0);
-${FX_APPLY}
+${fx?`tfxVisible = tfxRow(0.0).x; tfxTint = tfxRow(1.0);\n${FX_APPLY}`:''}
+#ifdef TW_FIXED_SEG
+vec3 twSeg = vec3(float(TW_FIXED_SEG), float(TW_FIXED_SEG), 1.0);
+#else
 vec3 twSeg = seg;
+#endif
 ${WARP_APPLY}
 	}
 	vOut = outMode < 0.5 ? transformed : objectNormal;
 	gl_PointSize = 1.0;
 	gl_Position = vec4((float(gl_VertexID) + 0.5) / ${N}.0 * 2.0 - 1.0, 0.0, 0.0, 1.0);
-}`;
-const FS=`#version 300 es
+}`;};
+const fsFor=(fixedSeg:number|null)=>`#version 300 es
 precision highp float;
-in vec3 vOut;in float tfxVisible;in vec4 tfxTint;out vec4 fragOut;
-void main(){ fragOut = vec4(vOut, tfxVisible + tfxTint.a * 0.0); }`;
+in vec3 vOut;${fixedSeg===null?'in float tfxVisible;in vec4 tfxTint;':''}out vec4 fragOut;
+void main(){ fragOut = vec4(vOut, ${fixedSeg===null?'tfxVisible + tfxTint.a * 0.0':'1.0'}); }`;
+/** The custom-layer variant's fixed segment (lForearm). */
+const FIXED=3;
 
 interface GpuIn {vs:string;fs:string;n:number;pos:number[];nrm:number[];seg:number[];part:number[];tex:number[];texW:number;rows:number;u:Record<string,number[]>}
 /** Runs in the page: compile, draw 4 passes (soft 0/1 × position/normal), read back. */
@@ -128,7 +136,7 @@ function gpu(a:GpuIn):{error:string}|{out:number[][]}{
 
 async function main(){
 	const pw=loadPlaywright();
-	if(!pw){console.error(`playwright-core not found (looked in: ${PW_DIRS.join(', ')}).\nInstall it outside the repo and point ANYHEALTH_PLAYWRIGHT at that directory:\n  mkdir -p /tmp/anyhealth-glsl && (cd /tmp/anyhealth-glsl && npm i playwright-core)\n  ANYHEALTH_PLAYWRIGHT=/tmp/anyhealth-glsl npx tsx scripts/anyhealth-timeline-glsl.ts`);process.exit(2);}
+	if(!pw){console.error(`playwright-core not found (${PW_DIRS.length?`looked in: ${PW_DIRS.join(', ')}`:'ANYHEALTH_PLAYWRIGHT is not set'}).\nInstall it outside the repo and point ANYHEALTH_PLAYWRIGHT at that directory:\n  mkdir -p /tmp/anyhealth-glsl && (cd /tmp/anyhealth-glsl && npm i playwright-core)\n  ANYHEALTH_PLAYWRIGHT=/tmp/anyhealth-glsl npx tsx scripts/anyhealth-timeline-glsl.ts`);process.exit(2);}
 	const exe=findChrome();
 	if(!exe){console.error('No cached Chromium: set ANYHEALTH_CHROME to a Chrome / Chromium binary, or run `npx playwright-core install chromium` in the playwright-core directory.');process.exit(2);}
 	if(!WARP_APPLY.trim()||!FX_APPLY.trim()){console.error('WARP_APPLY / FX_APPLY are empty: nothing to check.');process.exit(1);}
@@ -138,24 +146,30 @@ async function main(){
 	const tex=createFxTexture(FX.length);writeFx(tex,new Map(FX.map((f,i)=>[i,f])));
 	const {pos,nrm,seg,part}=testPoints();
 
-	// Node reference (the TS mirror): applyFxPoint, then warpPoint / warpNormal.
-	const want=[0,1].map(soft=>{const P:number[]=[],M:number[]=[];for(let i=0;i<N;i++){
+	// Node reference (the TS mirror): applyFxPoint, then warpPoint / warpNormal; the custom-layer variant is warp only, on segment FIXED with weight 1.
+	const reference=(fixed:boolean)=>[0,1].map(soft=>{const P:number[]=[],M:number[]=[];for(let i=0;i<N;i++){
 		const p:Vec3=[pos[i*3],pos[i*3+1],pos[i*3+2]],n:Vec3=[nrm[i*3],nrm[i*3+1],nrm[i*3+2]],m:Vec3=[0,0,0],q:Vec3=[0,0,0];
-		applyFxPoint(FX[part[i]],p,n,q,m);warpPoint(ws,q,seg[i*3],seg[i*3+1],seg[i*3+2],!!soft,q);warpNormal(ws,m,seg[i*3],seg[i*3+1],seg[i*3+2],!!soft,m);P.push(...q);M.push(...m);
+		const [a,b,w]=fixed?[FIXED,FIXED,1]:[seg[i*3],seg[i*3+1],seg[i*3+2]];
+		if(fixed){q[0]=p[0];q[1]=p[1];q[2]=p[2];m[0]=n[0];m[1]=n[1];m[2]=n[2];}else applyFxPoint(FX[part[i]],p,n,q,m);
+		warpPoint(ws,q,a,b,w,!!soft,q);warpNormal(ws,m,a,b,w,!!soft,m);P.push(...q);M.push(...m);
 	}return [P,M];}).flat();
 
 	const browser=await pw.chromium.launch({executablePath:exe,headless:true,args:['--use-angle=swiftshader','--enable-unsafe-swiftshader','--ignore-gpu-blocklist']});
 	try{
 		const page=await browser.newPage();
 		await page.evaluate('globalThis.__name=(f)=>f'); // tsx (esbuild keepNames) wraps nested functions in __name(), which the page doesn't have
-		const r=await page.evaluate(gpu,{vs:VS,fs:FS,n:N,pos:[...pos],nrm:[...nrm],seg:[...seg],part:[...part],tex:[...tex.data],texW:tex.width,rows:FX_ROWS,u:{twJ:flat('twJ'),twA:flat('twA'),twN:flat('twN'),twS:flat('twS'),twGround:[ws.ground]}});
-		if('error' in r){console.error(`GLSL check failed:\n${r.error}`);process.exit(1);}
-		console.log('compile ok');
-		let posErr=0,nrmErr=0,worst='';
-		r.out.forEach((px,pass)=>{const ref=want[pass],isPos=pass%2===0;for(let i=0;i<N;i++)for(let k=0;k<3;k++){const e=Math.abs(px[i*4+k]-ref[i*3+k]);if(isPos&&e>posErr){posErr=e;worst=`point ${i} (part ${part[i]}, seg ${seg[i*3]}/${seg[i*3+1]} w ${seg[i*3+2].toFixed(3)}, soft ${pass>>1})`;}if(!isPos)nrmErr=Math.max(nrmErr,e);}});
-		const moved=Math.max(...want[0].map((v,i)=>Math.abs(v-pos[i])));
-		console.log(`parity max err ${posErr.toExponential(2)} m (positions, worst ${worst}) · ${nrmErr.toExponential(2)} (normals) · largest displacement tested ${moved.toFixed(3)} m`);
-		if(!(posErr<POS_TOL)||!(nrmErr<NRM_TOL)){console.error(`FAIL: tolerance ${POS_TOL} m (positions), ${NRM_TOL} (normals)`);process.exit(1);}
+		let failed=false;
+		for(const [label,fixed] of [['atlas parts (part fx + seg attribute)',null],[`custom layer (TW_FIXED_SEG ${FIXED})`,FIXED]] as const){
+			const want=reference(fixed!==null);
+			const r=await page.evaluate(gpu,{vs:vsFor(fixed),fs:fsFor(fixed),n:N,pos:[...pos],nrm:[...nrm],seg:[...seg],part:[...part],tex:[...tex.data],texW:tex.width,rows:FX_ROWS,u:{twJ:flat('twJ'),twA:flat('twA'),twN:flat('twN'),twS:flat('twS'),twGround:[ws.ground]}});
+			if('error' in r){console.error(`GLSL check failed (${label}):\n${r.error}`);process.exit(1);}
+			let posErr=0,nrmErr=0,worst='';
+			r.out.forEach((px,pass)=>{const ref=want[pass],isPos=pass%2===0;for(let i=0;i<N;i++)for(let k=0;k<3;k++){const e=Math.abs(px[i*4+k]-ref[i*3+k]);if(isPos&&e>posErr){posErr=e;worst=`point ${i} (${fixed===null?`part ${part[i]}, seg ${seg[i*3]}/${seg[i*3+1]} w ${seg[i*3+2].toFixed(3)}`:`seg ${fixed}`}, soft ${pass>>1})`;}if(!isPos)nrmErr=Math.max(nrmErr,e);}});
+			const moved=Math.max(...want[0].map((v,i)=>Math.abs(v-pos[i])));
+			console.log(`${label}: compile ok · parity max err ${posErr.toExponential(2)} m (positions, worst ${worst}) · ${nrmErr.toExponential(2)} (normals) · largest displacement tested ${moved.toFixed(3)} m`);
+			if(!(posErr<POS_TOL)||!(nrmErr<NRM_TOL)){console.error(`FAIL (${label}): tolerance ${POS_TOL} m (positions), ${NRM_TOL} (normals)`);failed=true;}
+		}
+		if(failed)process.exit(1);
 		console.log(`compile ok · parity max err <${POS_TOL}`);
 	}finally{await browser.close();}
 }

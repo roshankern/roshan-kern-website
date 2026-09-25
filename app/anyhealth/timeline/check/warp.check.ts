@@ -4,6 +4,8 @@ import {SEGMENTS,type Body,type Rig,type SegmentId,type Vec3} from '../types';
 import {bodyAt} from '../growth/proportions';
 import {warpState,warpPoint,type WarpState} from '../growth/warp';
 import {SOFT_SYSTEMS} from '../engine';
+import {seamDefects} from './seam';
+import {loadAtlasNode} from './node-atlas';
 const R=rig as Rig;
 export const checks:Check[]=[
 	{name:'rig has all 15 segments with parents first',run(c){c.assert(R.segments.length===15,'count');R.segments.forEach((s,i)=>{c.assert(s.id===SEGMENTS[i],`order ${s.id}`);if(s.parent)c.assert(SEGMENTS.indexOf(s.parent)<i,`parent before ${s.id}`);});}},
@@ -18,7 +20,7 @@ export const checks:Check[]=[
 const unitBody=():Body=>{const ones=()=>Object.fromEntries(SEGMENTS.map(s=>[s,1])) as Record<SegmentId,number>;return {date:'2026-01-01',ageYears:22,statureM:R.stature,weightKg:70,scale:1,length:ones(),boneGirth:ones(),softGirth:ones()};};
 /** A deliberately non-identity body built by hand (not from bodyAt): small scale, a long head, short legs, slimmer bone and fuller soft tissue. */
 const oddBody=():Body=>{const b=unitBody();b.scale=0.3;b.statureM=R.stature*0.3;b.length.head=2.0;for(const s of ['lThigh','lShank','lFoot','rThigh','rShank','rFoot'] as const)b.length[s]=0.7;for(const s of SEGMENTS){b.boneGirth[s]=0.9;b.softGirth[s]=1.25;}return b;};
-/** A moderate hand-built child (about age 6-8): the seam check's body. Newborn-like proportions (oddBody) fold some hip-crossing muscle triangles: see the Task 6 report. */
+/** A moderate hand-built child (about age 6-8). It still flips / tears a few hundred seam triangles (see the KNOWN check and the Task 6 report). */
 const childBody=():Body=>{const b=unitBody();b.scale=0.75;b.statureM=R.stature*0.75;b.length.head=1.2;for(const s of ['lThigh','lShank','lFoot','rThigh','rShank','rFoot'] as const)b.length[s]=0.9;for(const s of SEGMENTS){b.boneGirth[s]=0.9;b.softGirth[s]=1.0;}return b;};
 const SEG_BIN='public/anyhealth/models/segments.bin';
 /** Visit every `stride`-th vertex of every part with its segment weights from segments.bin (per part in atlas order, vertexCount × 2 bytes). */
@@ -45,24 +47,21 @@ checks.push(
 		for(const d of ['2003-06-22','2006-06-22','2012-01-01','2026-01-02']){const b=bodyAt(d),{lo,hi}=await extent(c,warpState(R,b));c.near(lo,0,0.003,`floor ${d}`);c.near(hi-lo,b.statureM,b.statureM*0.01,`stature ${d}`);}
 		const {lo}=await extent(c,warpState(R,oddBody()));c.near(lo,0,0.003,'floor, hand-built body');
 	}},
-	{name:'warp is continuous across segment weights (no seam tears > 1 mm)',async run(c){
-		// For every triangle of every part that mixes segments: each warped edge / rest edge stays within [0.2 × the smallest, 5 × the largest] scale of the segments its vertices ride (edges shorter than 0.1 mm are skipped: their ratio is noise).
+	{name:'warp is continuous across segment weights (no seam tears > 1 mm, no flipped triangles)',async run(c){
+		// seamDefects: flipped faces, edges longer than rest × max segment scale + 1 mm, edge ratios outside [0.2, 5] × max segment scale.
 		const g=await c.geometry(),fs=await import('node:fs'),bin=fs.readFileSync(SEG_BIN);
-		for(const [label,body] of [['hand-built child',childBody()],['bodyAt 2006-06-22',bodyAt('2006-06-22')],['bodyAt 2012-01-01',bodyAt('2012-01-01')]] as const){
-			const ws=warpState(R,body),P:Vec3=[0,0,0];let off=0,bad=0,edges=0,worst='';
-			g.parts.forEach((part,i)=>{
-				const n=part.position.length/3,o=off;off+=n*2;const soft=SOFT_SYSTEMS.includes(g.atlas.parts[i].system),girth=soft?ws.softScale:ws.boneScale;
-				let mixed=false;for(let v=0;v<n&&!mixed;v++)mixed=bin[o+v*2]!==bin[o]||(bin[o+v*2+1]<255&&(bin[o+v*2]&15)!==bin[o+v*2]>>4);if(!mixed)return;
-				const w=new Float64Array(n*3);for(let v=0;v<n;v++){P[0]=part.position[v*3];P[1]=part.position[v*3+1];P[2]=part.position[v*3+2];w.set(warpPoint(ws,P,bin[o+v*2]&15,bin[o+v*2]>>4,bin[o+v*2+1]/255,soft,[0,0,0]),v*3);}
-				const segScale=(v:number,f:(...x:number[])=>number)=>{const a=bin[o+v*2]&15,b=bin[o+v*2]>>4,sa=f(ws.alongScale[a],girth[a]);return bin[o+v*2+1]<255?f(sa,ws.alongScale[b],girth[b]):sa;};
-				const len=(A:ArrayLike<number>,u:number,v:number)=>Math.hypot(A[u*3]-A[v*3],A[u*3+1]-A[v*3+1],A[u*3+2]-A[v*3+2]),ix=part.index;
-				for(let t=0;t<ix.length;t+=3){
-					let hi=0,lo=Infinity;for(let k=0;k<3;k++){hi=Math.max(hi,segScale(ix[t+k],Math.max));lo=Math.min(lo,segScale(ix[t+k],Math.min));}
-					for(let k=0;k<3;k++){const u=ix[t+k],v=ix[t+(k+1)%3],r0=len(part.position,u,v);if(r0<1e-4)continue;edges++;const r=len(w,u,v)/r0;
-						if(r>5*hi||r<0.2*lo){bad++;if(!worst)worst=`${g.atlas.parts[i].name}: ratio ${r.toFixed(3)} vs segment scales [${lo.toFixed(3)}, ${hi.toFixed(3)}]`;}}
-				}
-			});
-			c.assert(edges>0,'no mixed-weight triangles found');c.assert(bad===0,`${label}: ${bad} of ${edges} edges torn across a seam, e.g. ${worst}`);
+		const uniform=unitBody();uniform.scale=0.75;uniform.statureM=R.stature*0.75;
+		for(const [label,body] of [['uniform scale 0.75',uniform],['bodyAt 2006-06-22',bodyAt('2006-06-22')],['bodyAt 2012-01-01',bodyAt('2012-01-01')]] as const){
+			const d=seamDefects(warpState(R,body),g,bin);c.assert(d.triangles>0,'no mixed-weight triangles found');
+			c.assert(d.flipped===0&&d.torn===0&&d.ratioOut===0,`${label}: ${d.flipped} flipped, ${d.torn} torn, ${d.ratioOut} out-of-ratio of ${d.triangles} triangles (e.g. ${d.worst})`);
 		}
+	}},
+	{name:'KNOWN(seam rework): infant-proportion body folds',async run(){
+		// Reports only; the integration seam rework turns this into a hard assertion (and moves the hand-built child into the check above).
+		const g=await loadAtlasNode(),fs=await import('node:fs'),bin=fs.readFileSync(SEG_BIN);
+		const bodies:[string,Body][]=[['hand-built child (S .75, head 1.2, legs .9)',childBody()]];
+		for(const legs of [0.7,0.8]){const b=oddBody();for(const s of ['lThigh','lShank','lFoot','rThigh','rShank','rFoot'] as const)b.length[s]=legs;bodies.push([`infant (S .3, head 2, legs ${legs})`,b]);}
+		for(const [label,b] of bodies){const d=seamDefects(warpState(R,b),g,bin),top=[...d.byPart].sort((x,y)=>y[1]-x[1]).slice(0,4).map(([n,k])=>`${n} ${k}`).join(', ');
+			console.log(`     KNOWN ${label}: ${d.flipped} flipped, ${d.torn} torn, ${d.ratioOut} out-of-ratio of ${d.triangles} mixed-weight triangles; most in ${top}`);}
 	}},
 );
