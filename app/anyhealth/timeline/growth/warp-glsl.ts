@@ -1,14 +1,14 @@
 /** GLSL for the body warp, the shader twin of warp.ts (warpPoint / warpNormal), line for line; scripts/anyhealth-timeline-glsl.ts compiles it headless and checks parity against the TS.
  *
  * Contract with engine.ts (patchMaterial):
- * - WARP_PARS is injected after `#include <common>` in the vertex shader. It declares the uniforms `twJ`, `twA`, `twN`, `twS` (vec4[15]), `twX` (vec4[AXIAL_VEC4], the axial remap), `twGround` and `twSoft` (float), and any functions. It must NOT declare `seg`: the engine does, with TW_SEG_ATTRS.
+ * - WARP_PARS is injected after `#include <common>` in the vertex shader. It declares the uniforms `twJ`, `twA` (w = a thigh's girth at its joint, else 0), `twN`, `twS` (vec4[15]), `twX` (vec4[AXIAL_VEC4], the axial remap), `twGround` and `twSoft` (float), and any functions. It must NOT declare `seg`: the engine does, with TW_SEG_ATTRS.
  * - WARP_APPLY is injected right after FX_APPLY, at a point where both `transformed` (vec3, starts as `position`) and `objectNormal` (vec3) are live and nothing has read them yet. It rewrites both in place.
  * - When WARP_APPLY is non-empty the engine declares the segment attributes with TW_SEG_ATTRS and defines the locals `vec3 twSeg` (segA, segB, weightA 0..1) and `float twD` (rest distance to the nearest bone, metres) just before WARP_APPLY with TW_SEG; read those, not `seg` (atlas parts carry `seg` as the 4 unnormalized segments.bin bytes, custom layers a float `seg` + optional float `segD`, or a fixed-segment define with no attribute).
  * - `objectTangent` is NOT warped: the atlas materials use no normal maps, so no tangent is needed. Add a tangent warp here if one ever is.
  * - `twSoft` is bound per material (1 for muscular / integumentary / connective, and for custom layers created with `soft`); every other uniform comes from warpUniforms() and is shared by every material. */
 import * as T from 'three';
 import {SEGMENTS} from '../types';
-import {D_UNIT,AXIAL_VEC4,AXIAL_SEGMENTS,type WarpState} from './warp';
+import {D_UNIT,AXIAL_VEC4,AXIAL_SEGMENTS,ROOT_TAPER,type WarpState} from './warp';
 
 /** GLSL declarations: the tw* uniforms and the per-segment point / normal maps. Needs GLSL ES 3.00 (three's WebGL2 programs) for dynamic uniform-array indexing. */
 export const WARP_PARS=`
@@ -36,21 +36,27 @@ void twCurves(float y, out float f, out float g, out vec2 c0, out vec2 c, out fl
 		c0 += B.xy * R; c += B.zw * R + C.xy * Q; fp += A.z * h; k += B.xy * h;
 	}
 }
+// A limb's perpendicular scale and its t-derivative (warp.ts rootGirth): twS.y, or on a tapered limb root (the thighs, twA.w > 0) the taper from the remap's g at the joint to twS.y over ROOT_TAPER.
+vec2 twGirth(int i, float t){
+	if (!(twA[i].w > 0.0)) return vec2(twS[i].y, 0.0);
+	float w = ${(ROOT_TAPER[1]-ROOT_TAPER[0]).toFixed(6)}; float u = clamp((t - ${ROOT_TAPER[0].toFixed(6)}) / w, 0.0, 1.0);
+	return vec2(twA[i].w + (twS[i].y - twA[i].w) * u * u * (3.0 - 2.0 * u), (twS[i].y - twA[i].w) * 6.0 * u * (1.0 - u) / w);
+}
 vec3 twPoint(int i, vec3 p){
 	if (i < ${AXIAL_SEGMENTS}) { float f; float g; vec2 c0; vec2 c; float fp; float gp; vec2 k; float gs; twCurves(p.y, f, g, c0, c, fp, gp, k, gs); return vec3(c.x + g * (p.x - c0.x), f, c.y + g * (p.z - c0.y)); }
-	vec3 ax = twA[i].xyz; vec3 d = p - twJ[i].xyz; float t = dot(d, ax);
-	return twN[i].xyz + twS[i].x * t * ax + twS[i].y * (d - t * ax);
+	vec3 ax = twA[i].xyz; vec3 d = p - twJ[i].xyz; float t = dot(d, ax); vec2 gE = twGirth(i, t);
+	return twN[i].xyz + twS[i].x * t * ax + gE.x * (d - t * ax);
 }
 vec3 twNormal(int i, vec3 p, vec3 n){
 	if (i < ${AXIAL_SEGMENTS}) { float f; float g; vec2 c0; vec2 c; float fp; float gp; vec2 k; float gs; twCurves(p.y, f, g, c0, c, fp, gp, k, gs);
-		float A = k.x * (fp - g) + gp * (p.x - c0.x); float B = k.y * (fp - g) + gp * (p.z - c0.y); float S = twX[12].x;
-		return vec3(S * n.x / g, S * (n.y - (A * n.x + B * n.z) / g) / fp, S * n.z / g); }
-	vec3 ax = twA[i].xyz; float t = dot(n, ax);
-	return (1.0 / twS[i].x) * t * ax + (1.0 / twS[i].y) * (n - t * ax);
+		float A = k.x * (fp - g) + gp * (p.x - c0.x); float B = k.y * (fp - g) + gp * (p.z - c0.y);
+		return vec3(n.x / g, (n.y - (A * n.x + B * n.z) / g) / fp, n.z / g); }
+	vec3 ax = twA[i].xyz; float t = dot(n, ax); vec3 d = p - twJ[i].xyz; float tp = dot(d, ax); vec2 gE = twGirth(i, tp); float rn = dot(d - tp * ax, n);
+	return ((t - gE.y * rn / gE.x) / twS[i].x) * ax + (1.0 / gE.x) * (n - t * ax);
 }
 vec3 twInflate(int i, vec3 p, float w, float dBone){
 	if (i < ${AXIAL_SEGMENTS}) { float f; float g; vec2 c0; vec2 c; float fp; float gp; vec2 k; float gs; twCurves(p.y, f, g, c0, c, fp, gp, k, gs);
-		vec2 r = p.xz - c0; float m = w * (gs - g) * min(1.0, dBone / max(length(r), 1e-9)); return vec3(m * r.x, 0.0, m * r.y); }
+		vec2 r = p.xz - c0; float m = w * max(0.0, gs - g) * min(1.0, dBone / max(length(r), 1e-9)); return vec3(m * r.x, 0.0, m * r.y); }
 	vec3 ax = twA[i].xyz; vec3 d = p - twJ[i].xyz; vec3 r = d - dot(d, ax) * ax;
 	return (w * (twS[i].z - twS[i].y) * min(1.0, dBone / max(length(r), 1e-9))) * r;
 }
@@ -91,7 +97,7 @@ export const WARP_APPLY=`
 }
 `;
 
-/** Uniform objects, shared by every material: twJ = (restJoint, 0), twA = (axis, 0), twN = (newJoint, 0), twS = (along, bone, soft, 0) per segment, twX = WarpState.axial as vec4s, and twGround. */
+/** Uniform objects, shared by every material: twJ = (restJoint, 0), twA = (axis, a thigh's girth at its joint or 0), twN = (newJoint, 0), twS = (along, bone, soft, 0) per segment, twX = WarpState.axial as vec4s, and twGround. */
 export function warpUniforms():Record<string,{value:unknown}>{
 	const vs=()=>SEGMENTS.map(()=>new T.Vector4());
 	return {twJ:{value:vs()},twA:{value:vs()},twN:{value:vs()},twS:{value:vs()},twX:{value:Array.from({length:AXIAL_VEC4},()=>new T.Vector4())},twGround:{value:0}};
@@ -101,7 +107,7 @@ export function warpUniforms():Record<string,{value:unknown}>{
 export function writeWarpUniforms(u:ReturnType<typeof warpUniforms>,ws:WarpState):void{
 	const J=u.twJ.value as T.Vector4[],A=u.twA.value as T.Vector4[],N=u.twN.value as T.Vector4[],S=u.twS.value as T.Vector4[];
 	for(let i=0;i<SEGMENTS.length;i++){
-		J[i].set(ws.restJoint[i*3],ws.restJoint[i*3+1],ws.restJoint[i*3+2],0);A[i].set(ws.axis[i*3],ws.axis[i*3+1],ws.axis[i*3+2],0);
+		J[i].set(ws.restJoint[i*3],ws.restJoint[i*3+1],ws.restJoint[i*3+2],0);A[i].set(ws.axis[i*3],ws.axis[i*3+1],ws.axis[i*3+2],ws.rootGirth[i]);
 		N[i].set(ws.newJoint[i*3],ws.newJoint[i*3+1],ws.newJoint[i*3+2],0);S[i].set(ws.alongScale[i],ws.boneScale[i],ws.softScale[i],0);
 	}
 	const X=u.twX.value as T.Vector4[];for(let i=0;i<AXIAL_VEC4;i++)X[i].fromArray(ws.axial,i*4);

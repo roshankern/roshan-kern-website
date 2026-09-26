@@ -37,7 +37,7 @@ let seed=0x2003_0622;const rnd=()=>{seed=(seed*1664525+1013904223)>>>0;return se
 /** A hand-built, deliberately non-identity body (not from bodyAt): every segment gets its own factors. */
 function testBody():Body{
 	const f=(lo:number,hi:number)=>Object.fromEntries(SEGMENTS.map(s=>[s,lo+(hi-lo)*rnd()])) as Record<SegmentId,number>;
-	const b:Body={date:'2006-06-22',ageYears:3,statureM:0.95,weightKg:14,scale:0.55,length:f(0.7,1.3),boneGirth:f(0.8,1.1),softGirth:f(0.9,1.4)};b.length.head=2.0;b.length.lThigh=b.length.rThigh=0.7;b.faceLength=1.6;b.craniumLength=2.2;b.faceGirth=1.3;return b;
+	const b:Body={date:'2006-06-22',ageYears:3,statureM:0.95,weightKg:14,scale:0.55,length:f(0.7,1.3),boneGirth:f(0.8,1.1),softGirth:f(0.9,1.4)};b.length.head=2.0;b.length.lThigh=b.length.rThigh=0.7;b.faceLength=1.6;b.craniumLength=2.2;b.faceGirth=1.3;b.softGirth.trunk=0.8*b.boneGirth.trunk;return b; // a deflating trunk exercises the axial deflation clamp
 }
 const unit=(v:Vec3):Vec3=>{const l=Math.hypot(...v);return [v[0]/l,v[1]/l,v[2]/l];};
 const quat=(axis:Vec3,deg:number):Quat=>{const a=unit(axis),h=deg*Math.PI/360,s=Math.sin(h);return [a[0]*s,a[1]*s,a[2]*s,Math.cos(h)];};

@@ -38,10 +38,10 @@ const HIP_ANKLE:Table=SHR.map(([a,v])=>[a,1-v-0.005]); // basis: growth#ratio-th
 const THIGH_SHARE=0.53; // basis: growth#ratio-thigh
 const THIGH:Table=HIP_ANKLE.map(([a,v])=>[a,v*THIGH_SHARE]); // basis: growth#ratio-thigh
 const SHANK:Table=HIP_ANKLE.map(([a,v])=>[a,v*(1-THIGH_SHARE)]); // basis: growth#ratio-shank
-/** Head height (vertex–menton). 0 and 1 y: Snyder's 2 y head height (166 mm) scaled by WHO head circumference (34.46, 46.07, 48.25 cm at 0, 12, 24 mo) over WHO length (49.9, 75.7 cm); 2–18 y: Snyder 1977. */
+/** Head height (vertex–menton), applied by the axial remap to the whole rest menton → vertex height (split into face and cranium rates, FACE_SHARE). 0 and 1 y: Snyder's 2 y head height (166 mm) scaled by WHO head circumference (34.46, 46.07, 48.25 cm at 0, 12, 24 mo) over WHO length (49.9, 75.7 cm); 2–18 y: Snyder 1977. */
 const HEAD:Table=[[0,0.2377],[1,0.2094],[2,0.1891],[3,0.1856],[4,0.1764],[6,0.162],[8,0.1502],[10,0.1431],[12,0.1358],[14,0.1324],[16,0.1258],[18,0.1255]]; // basis: growth#ratio-head
 /** Neck, menton to suprasternale (1 − suprasternale height − head height), Snyder 1977 3–18 y (3-point moving average: the two medians come from disjoint subsamples, so their difference is noisy); 2 y = vertex→suprasternale 0.2391 − chin→vertex 0.1891 (Snyder 1977, n=6); 0 y is an assumption (the newborn chin nearly meets the chest).
- * Applied to the rig's neck span (C7/T1 joint → atlanto-occipital joint), not menton→suprasternale itself. At birth the warped chin nearly meets the manubrium (review measured a 0.04 cm gap): chin/clavicle contact is possible. */
+ * Applied by the axial remap (growth/warp.ts) to the rest C7/T1 joint → menton interval, not menton→suprasternale itself; the head factor covers menton → vertex. The chin clears the collar bones by ≥ 1 cm at every date (warp check). */
 const NECK:Table=[[0,0.030],[2,0.050],[3,0.0544],[4,0.054],[6,0.0551],[8,0.0553],[10,0.054],[12,0.0543],[14,0.0581],[16,0.0617],[18,0.064]]; // basis: growth#ratio-neck
 /** Sole to ankle (sphyrion height), Snyder 1977 3–18 y; 0 y assumed. Only used to close the vertical chain for the trunk. */
 const ANKLE:Table=[[0,0.035],[3,0.0402],[4,0.0372],[6,0.0417],[8,0.0416],[10,0.041],[12,0.0402],[14,0.0409],[16,0.0422],[18,0.0399]]; // basis: growth#ratio-trunk

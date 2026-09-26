@@ -25,6 +25,8 @@ const PENIS=monotone([[0,3.5],[0.25,3.9],[0.75,4.3],[1.5,4.7],[2.5,5.1],[3.5,5.5
 
 /** Rest-space globe centres, from each side's sclera vertex bounds. The atlas.json bounds of "Right sclera", "Right cornea", one "Right choroid" and "Suspensory ligament of right lens" include a stray vertex near x = +0.031, so the default pivot (the rest bounds centre) is wrong for them: every eye part pivots here instead. */
 export const GLOBE_CENTRE:Record<'Left'|'Right',Vec3>={Left:[0.0291,1.5962,0.0511],Right:[-0.0305,1.5962,0.0511]};
+/** Rest-space anterior poles (corneal apex, the cornea's most anterior vertex). Eye growth is anchored here, not at the centre: relative to the warp the infant globe is large (fx 1.21 at birth, 1.12 at 3–10 y) and scaling it about its centre pushed the cornea 0.7–2.5 mm into the lids (Task 14c controller note), so it grows back into the orbit. */
+export const GLOBE_FRONT:Record<'Left'|'Right',Vec3>={Left:[0.0291,1.5956,0.0660],Right:[-0.0301,1.5958,0.0660]};
 const EYE_PARTS=(s:'Left'|'Right')=>{const l=s.toLowerCase();return [`${s} sclera`,`${s} cornea`,`${s} lens`,`${s} iris`,`${s} choroid`,`${s} vitreous body`,`Optic part of ${l} retina`,`Anterior chamber of ${l} eyeball`,`${s} corona ciliaris`,`Suspensory ligament of ${l} lens`];};
 /** The thymus lobes share one pivot (their joint bounds centre) so they stay together. */
 const THYMUS_PIVOT:Vec3=[-0.0015,1.3718,0.0396];
@@ -36,6 +38,8 @@ const TESTIS_CENTRE:Record<'Left'|'Right',Vec3>={Left:[0.0175,0.7823,0.0524],Rig
 
 /** The warp's uniform local size for a segment (bone girth): scale × ∛(along × girth²). The reproductive parts use the trunk here although they sit where the trunk and thigh weights blend: an approximation (the two segments' local sizes differ by a few % at most ages). */
 const local=(b:Body,s:SegmentId)=>b.scale*Math.cbrt(b.length[s]*b.boneGirth[s]**2);
+/** The warp's local size at the eyes: the axial remap's cranium interval (rest AO joint → vertex; the globe centres sit 4 cm above the AO joint, past the face → cranium windows), S·∛(craniumLength × head girth²) (Task 14c). */
+export const eyeLocal=(b:Body)=>b.scale*Math.cbrt((b.craniumLength??b.length.head)*b.boneGirth.head**2);
 let adult:Body|null=null;
 const adultBody=()=>adult??=bodyAt(LAST_MEASURED);
 
@@ -43,7 +47,7 @@ const adultBody=()=>adult??=bodyAt(LAST_MEASURED);
 export const growthFx:GrowthFx=body=>{
 	const A=adultBody(),age=body.ageYears,aAge=A.ageYears,out:PartFx[]=[];
 	const put=(parts:string[],size:number,seg:SegmentId,pivot?:Vec3)=>{const k=size*local(A,seg)/local(body,seg);for(const part of parts)out.push(pivot?{part,scale:[k,k,k],pivot}:{part,scale:[k,k,k]});};
-	const eye=EYE_AXIAL(age)/EYE_AXIAL(aAge);for(const s of ['Left','Right'] as const)put(EYE_PARTS(s),eye,'head',GLOBE_CENTRE[s]);
+	const eye=EYE_AXIAL(age)/EYE_AXIAL(aAge),ke=eye*eyeLocal(A)/eyeLocal(body);for(const s of ['Left','Right'] as const){const c=GLOBE_CENTRE[s],f=GLOBE_FRONT[s],t:Vec3=[(1-ke)*(f[0]-c[0]),(1-ke)*(f[1]-c[1]),(1-ke)*(f[2]-c[2])];for(const part of EYE_PARTS(s))out.push({part,scale:[ke,ke,ke],pivot:c,translate:t});} // scale about the centre, then shift so the anterior pole stays put (the pivot stays the centre for the rotations that share it)
 	put(['Left lobe of thymus','Right lobe of thymus'],Math.cbrt(THYMUS(age)/THYMUS(aAge)),'trunk',THYMUS_PIVOT);
 	put(['Caudate lobe of liver'],Math.cbrt(LIVER_PCT(age)*body.weightKg/(LIVER_PCT(aAge)*A.weightKg)),'trunk');
 	const cb=(g:(a:number)=>number)=>Math.cbrt(g(age)/g(aAge));
