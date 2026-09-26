@@ -1,4 +1,4 @@
-/** Geometry helpers for the clipping checks (node only): convex hulls as half-planes, and a triangle mesh bucketed in a 1 cm grid for inside-mesh ray parity and nearest-surface distance. No BVH, no new dependency. */
+/** Geometry helpers for the clipping checks (node only): convex hulls as half-planes, and a triangle mesh bucketed in a 1 cm grid for inside tests (ray votes far from the surface, the nearest triangle's pseudo-normal sign near it) and nearest-surface distance. No BVH, no new dependency. */
 import * as T from 'three';
 import {ConvexHull} from 'three/examples/jsm/math/ConvexHull.js';
 
@@ -6,6 +6,8 @@ import {ConvexHull} from 'three/examples/jsm/math/ConvexHull.js';
 export interface Hull {
 	/** Signed distance to the hull, metres: > 0 outside (the largest face-plane distance), ≤ 0 inside. */
 	dist(x:number,y:number,z:number):number;
+	/** Outward normal of the face plane that gives dist() (the side a point leaves through). */
+	exitNormal(x:number,y:number,z:number):[number,number,number];
 	faces:number;
 }
 /** The convex hull of flat xyz points (every `stride`-th point). */
@@ -13,10 +15,13 @@ export function hullOf(points:ArrayLike<number>,stride=1):Hull{
 	const v:T.Vector3[]=[];for(let k=0;k<points.length;k+=3*stride)v.push(new T.Vector3(points[k],points[k+1],points[k+2]));
 	const h=new ConvexHull().setFromPoints(v),nf=h.faces.length,P=new Float64Array(nf*4);
 	h.faces.forEach((f,i)=>{P[i*4]=f.normal.x;P[i*4+1]=f.normal.y;P[i*4+2]=f.normal.z;P[i*4+3]=f.constant;});
-	return {faces:nf,dist(x,y,z){let d=-Infinity;for(let i=0;i<nf*4;i+=4){const s=P[i]*x+P[i+1]*y+P[i+2]*z-P[i+3];if(s>d)d=s;}return d;}};
+	const arg=(x:number,y:number,z:number)=>{let d=-Infinity,f=0;for(let i=0;i<nf*4;i+=4){const s=P[i]*x+P[i+1]*y+P[i+2]*z-P[i+3];if(s>d){d=s;f=i;}}return [d,f];};
+	return {faces:nf,dist:(x,y,z)=>arg(x,y,z)[0],exitNormal(x,y,z){const f=arg(x,y,z)[1];return [P[f],P[f+1],P[f+2]];}};
 }
 
-/** Squared distance from p to triangle abc (Ericson, Real-Time Collision Detection 5.1.5). */
+/** The closest point found by the last triDist2 call. */
+const CQ=new Float64Array(3);
+/** Squared distance from p to triangle abc (Ericson, Real-Time Collision Detection 5.1.5); the closest point goes to CQ. */
 function triDist2(px:number,py:number,pz:number,A:ArrayLike<number>,a:number,b:number,c:number){
 	const ax=A[a*3],ay=A[a*3+1],az=A[a*3+2],abx=A[b*3]-ax,aby=A[b*3+1]-ay,abz=A[b*3+2]-az,acx=A[c*3]-ax,acy=A[c*3+1]-ay,acz=A[c*3+2]-az,apx=px-ax,apy=py-ay,apz=pz-az;
 	const d1=abx*apx+aby*apy+abz*apz,d2=acx*apx+acy*apy+acz*apz;let qx:number,qy:number,qz:number;
@@ -39,9 +44,11 @@ function triDist2(px:number,py:number,pz:number,A:ArrayLike<number>,a:number,b:n
 			}
 		}
 	}
-	return (px-qx!)**2+(py-qy!)**2+(pz-qz!)**2;
+	CQ[0]=qx!;CQ[1]=qy!;CQ[2]=qz!;return (px-qx!)**2+(py-qy!)**2+(pz-qz!)**2;
 }
 
+/** Within this distance of a surface, a split ray vote defers to the nearest-triangle sign. */
+const NEAR_SIGN=0.003;
 /** Compressed buckets: cell → triangle ids. */
 interface Buckets {start:Int32Array;items:Int32Array}
 function bucket(nCells:number,nTri:number,cells:(t:number,visit:(cell:number)=>void)=>void):Buckets{
@@ -54,8 +61,13 @@ function bucket(nCells:number,nTri:number,cells:(t:number,visit:(cell:number)=>v
 export class TriGrid {
 	readonly lo:[number,number,number];readonly n:[number,number,number];
 	private colX:Buckets;private colZ:Buckets;private vox:Buckets;
-	/** `shell`: the mesh is a closed shell with thickness (two surfaces), as the atlas Skin; otherwise a plain closed (or open tube) surface. */
-	constructor(readonly pos:ArrayLike<number>,readonly index:ArrayLike<number>,readonly cell=0.01,readonly shell=false){
+	/** Shell meshes: 1 for triangles of the outer surface (their normal faces away from the body), 0 for the inner one. */
+	outer:Uint8Array|null=null;
+	readonly shell:boolean;private parityOnly:boolean;private flip=1;
+	/** Options: `shell`, the mesh is a closed shell with thickness (two surfaces), as the atlas Skin; `outer`, the shell's triangle classes from classifyShell() on the rest mesh (same topology; computed here when omitted);
+	 * `parityOnly`, an open surface (a tube such as the fracture callus): inside by the ray votes alone. A plain closed surface is signed by its winding, flipped when its signed volume is negative. */
+	constructor(readonly pos:ArrayLike<number>,readonly index:ArrayLike<number>,readonly cell=0.01,opts:{shell?:boolean;outer?:Uint8Array;parityOnly?:boolean}={}){
+		this.shell=!!opts.shell;this.parityOnly=!!opts.parityOnly;
 		const lo:[number,number,number]=[Infinity,Infinity,Infinity],hi=[-Infinity,-Infinity,-Infinity];
 		for(let k=0;k<pos.length;k+=3)for(let j=0;j<3;j++){const v=pos[k+j];if(v<lo[j])lo[j]=v;if(v>hi[j])hi[j]=v;}
 		for(let j=0;j<3;j++)lo[j]-=cell;this.lo=lo;const n=[0,1,2].map(j=>Math.max(1,Math.ceil((hi[j]-lo[j])/cell)+2)) as [number,number,number];this.n=n;
@@ -64,6 +76,23 @@ export class TriGrid {
 		this.colX=bucket(n[1]*n[2],nt,(t,visit)=>{const [y0,y1]=box(t,1),[z0,z1]=box(t,2);for(let y=y0;y<=y1;y++)for(let z=z0;z<=z1;z++)visit(y*n[2]+z);});
 		this.colZ=bucket(n[0]*n[1],nt,(t,visit)=>{const [x0,x1]=box(t,0),[y0,y1]=box(t,1);for(let x=x0;x<=x1;x++)for(let y=y0;y<=y1;y++)visit(x*n[1]+y);});
 		this.vox=bucket(n[0]*n[1]*n[2],nt,(t,visit)=>{const [x0,x1]=box(t,0),[y0,y1]=box(t,1),[z0,z1]=box(t,2);for(let x=x0;x<=x1;x++)for(let y=y0;y<=y1;y++)for(let z=z0;z<=z1;z++)visit((x*n[1]+y)*n[2]+z);});
+		if(this.shell)this.outer=opts.outer??this.classifyShell();
+		else if(!this.parityOnly){let v=0;for(let t=0;t<nt;t++){const a=I[t*3]*3,b=I[t*3+1]*3,c=I[t*3+2]*3;v+=P[a]*(P[b+1]*P[c+2]-P[b+2]*P[c+1])-P[a+1]*(P[b]*P[c+2]-P[b+2]*P[c])+P[a+2]*(P[b]*P[c+1]-P[b+1]*P[c]);}if(v<0)this.flip=-1;}
+	}
+	/** Unit face normal of triangle t from its winding. */
+	private faceN(t:number):[number,number,number]{
+		const P=this.pos,a=this.index[t*3]*3,b=this.index[t*3+1]*3,c=this.index[t*3+2]*3,ux=P[b]-P[a],uy=P[b+1]-P[a+1],uz=P[b+2]-P[a+2],vx=P[c]-P[a],vy=P[c+1]-P[a+1],vz=P[c+2]-P[a+2];
+		const x=uy*vz-uz*vy,y=uz*vx-ux*vz,z=ux*vy-uy*vx,l=Math.hypot(x,y,z)||1;return [x/l,y/l,z/l];
+	}
+	/** Shell triangles: inner (0) when the point 1 mm along the normal from the centroid is inside the body by the ray vote (both ±z rays, or 3 of 4, shell counting), else outer (1); then 8 rounds of a majority filter over
+	 * edge neighbours (welded by position), since single votes misfire where rays graze the lids, nostrils and the eye pocket, and a lone misclassified triangle flips the sign test for every point near it. */
+	classifyShell():Uint8Array{
+		const nt=this.index.length/3,o=new Uint8Array(nt),P=this.pos,I=this.index;
+		for(let t=0;t<nt;t++){const n=this.faceN(t),c=[0,1,2].map(j=>(P[I[t*3]*3+j]+P[I[t*3+1]*3+j]+P[I[t*3+2]*3+j])/3+n[j]*0.001),v=this.votes(c[0],c[1],c[2]);o[t]=(v[2]&&v[3])||v[0]+v[1]+v[2]+v[3]>=3?0:1;}
+		const id=new Map<string,number>(),w=(v:number)=>{const k=`${P[v*3]},${P[v*3+1]},${P[v*3+2]}`;let x=id.get(k);if(x===undefined){x=id.size;id.set(k,x);}return x;},edge=new Map<number,number[]>(),nb:number[][]=Array.from({length:nt},()=>[]);
+		for(let t=0;t<nt;t++){const a=[w(I[t*3]),w(I[t*3+1]),w(I[t*3+2])];for(let k=0;k<3;k++){const u=a[k],v=a[(k+1)%3],key=u<v?u*4194304+v:v*4194304+u,l=edge.get(key);if(l){for(const x of l){nb[x].push(t);nb[t].push(x);}l.push(t);}else edge.set(key,[t]);}}
+		for(let r=0;r<8;r++){const next=o.slice();for(let t=0;t<nt;t++){let s=o[t];for(const x of nb[t])s+=o[x];next[t]=2*s>nb[t].length+1?1:2*s<nb[t].length+1?0:o[t];}o.set(next);}
+		return o;
 	}
 	private ci(v:number,j:number){return Math.floor((v-this.lo[j])/this.cell);}
 	/** Crossings of the axis-aligned lines through p along `axis` (0 = x, 2 = z): [count on the + side, count on the − side]. */
@@ -84,26 +113,45 @@ export class TriGrid {
 	/** Inside votes of the rays [+x, −x, +z, −z] (1 = inside). A plain closed surface votes inside on an odd count. The atlas Skin is a closed shell about 2.5 mm thick (an outer and an inner surface, no boundary edges),
 	 * so each pass through it is 2 crossings: a ray from inside the body crosses 2 (+ 4k), from outside 0 (+ 4k), and from within the shell 1 or 3; with `shell` a ray votes inside when its count is not a multiple of 4. */
 	votes(x:number,y:number,z:number):[number,number,number,number]{const [a,b]=this.crossings(x,y,z,0),[c,d]=this.crossings(x,y,z,2),v=(k:number)=>this.shell?+(k%4!==0):k&1;return [v(a),v(b),v(c),v(d)];}
-	/** Inside when both front / back (±z) rays vote inside, or at least 3 of the 4 do. The ±x rays of a trunk point pass through the arms, whose shell touches and crosses the flank's (a count of 4 there reads as outside), so they only break ties. */
-	inside(x:number,y:number,z:number):boolean{const [a,b,c,d]=this.votes(x,y,z);return (c&&d)||a+b+c+d>=3?true:false;}
+	/** Inside test. When all four rays agree, the ray vote decides. When they split (a ray grazed a surface near the point, or crossed two touching shells: a hand on the thigh, an arm on the flank, the lids over the eye):
+	 * within NEAR_SIGN of the surface, or on a 2–2 tie, the sign against the nearest triangle's pseudo-normal decides (signedInside); farther out, the 3-of-4 majority (a far nearest triangle may belong to another sheet). */
+	inside(x:number,y:number,z:number):boolean{const v=this.votes(x,y,z),s=v[0]+v[1]+v[2]+v[3];if(this.parityOnly)return s>=3||!!(v[2]&&v[3]);if(s===0||s===4)return s===4;if(s!==2&&!this.near(x,y,z,NEAR_SIGN))return s>=3;return this.signedInside(x,y,z);}
+	/** Inside by the nearest surface: s = (p − q)·n with q the closest point and n its angle-weighted pseudo-normal (so edges and vertices are signed right).
+	 * Plain surface: inside when s ≤ 0. Shell: outside only when the nearest triangle is on the outer surface and s > 0 (s > 0 on the inner surface is the body cavity; s ≤ 0 is within the shell). Beyond 5 cm: the ray vote (both ±z rays, or 3 of 4: the ±x rays of a trunk point cross the arms, whose shell touches the flank's). */
+	signedInside(x:number,y:number,z:number):boolean{
+		const h=this.nearestHit(x,y,z,0.05);if(!h){const v=this.votes(x,y,z);return !!(v[2]&&v[3])||v[0]+v[1]+v[2]+v[3]>=3;}
+		const s=(x-h.q[0])*h.n[0]+(y-h.q[1])*h.n[1]+(z-h.q[2])*h.n[2];return this.outer?!(this.outer[h.t]&&s>0):s*this.flip<=0;
+	}
 	/** Whether some triangle lies within `r` of p (stops at the first). */
 	near(x:number,y:number,z:number,r:number):boolean{
 		const n=this.n,r2=r*r,lo=[x-r,y-r,z-r].map((v,j)=>Math.max(0,this.ci(v,j))),hi=[x+r,y+r,z+r].map((v,j)=>Math.min(n[j]-1,this.ci(v,j)));
 		for(let i=lo[0];i<=hi[0];i++)for(let j=lo[1];j<=hi[1];j++)for(let k=lo[2];k<=hi[2];k++){const cell=(i*n[1]+j)*n[2]+k;for(let q=this.vox.start[cell];q<this.vox.start[cell+1];q++){const t=this.vox.items[q];if(triDist2(x,y,z,this.pos,this.index[t*3],this.index[t*3+1],this.index[t*3+2])<r2)return true;}}
 		return false;
 	}
-	/** Distance to the nearest triangle, searching out to `maxR` metres (returns maxR when none is nearer). */
-	nearest(x:number,y:number,z:number,maxR=0.05):number{
-		const n=this.n,c=[this.ci(x,0),this.ci(y,1),this.ci(z,2)],R=Math.ceil(maxR/this.cell);let best=maxR*maxR;const seen=new Set<number>();
+	/** The nearest triangle within `maxR`: its id, distance, closest point and pseudo-normal (the unit normals of every triangle within 1e-6 m of the nearest distance, weighted by the corner angle at q when q is a vertex, summed and normalized), or null. */
+	nearestHit(x:number,y:number,z:number,maxR=0.05):{t:number;d:number;q:[number,number,number];n:[number,number,number]}|null{
+		const n=this.n,c=[this.ci(x,0),this.ci(y,1),this.ci(z,2)],R=Math.ceil(maxR/this.cell),EPS=1e-6;let best=maxR,bt=-1;const q:[number,number,number]=[0,0,0],seen=new Set<number>(),ties:number[]=[];
 		for(let r=0;r<=R;r++){
-			if(r>0&&(r-1)*this.cell>=Math.sqrt(best))break;
+			if(r>0&&(r-1)*this.cell>best+EPS)break;
 			for(let i=c[0]-r;i<=c[0]+r;i++)for(let j=c[1]-r;j<=c[1]+r;j++)for(let k=c[2]-r;k<=c[2]+r;k++){
 				if(Math.max(Math.abs(i-c[0]),Math.abs(j-c[1]),Math.abs(k-c[2]))!==r)continue;if(i<0||j<0||k<0||i>=n[0]||j>=n[1]||k>=n[2])continue;
-				const cell=(i*n[1]+j)*n[2]+k;for(let q=this.vox.start[cell];q<this.vox.start[cell+1];q++){const t=this.vox.items[q];if(seen.has(t))continue;seen.add(t);const d=triDist2(x,y,z,this.pos,this.index[t*3],this.index[t*3+1],this.index[t*3+2]);if(d<best)best=d;}
+				const cell=(i*n[1]+j)*n[2]+k;for(let p=this.vox.start[cell];p<this.vox.start[cell+1];p++){const t=this.vox.items[p];if(seen.has(t))continue;seen.add(t);
+					const d=Math.sqrt(triDist2(x,y,z,this.pos,this.index[t*3],this.index[t*3+1],this.index[t*3+2]));
+					if(d>=best+EPS)continue;if(bt<0||d<best-EPS)ties.length=0;ties.push(t);if(bt<0||d<best){best=d;bt=t;q[0]=CQ[0];q[1]=CQ[1];q[2]=CQ[2];}}
 			}
 		}
-		return Math.sqrt(best);
+		if(bt<0)return null;const m:[number,number,number]=[0,0,0];for(const t of ties){const f=this.faceN(t),w=this.cornerAngle(t,q);m[0]+=f[0]*w;m[1]+=f[1]*w;m[2]+=f[2]*w;}const l=Math.hypot(...m)||1;
+		return {t:bt,d:best,q,n:[m[0]/l,m[1]/l,m[2]/l]};
 	}
+	/** Angle-weighted pseudo-normal weight (Bærentzen & Aanæs 2005): the interior angle of triangle t at the corner that coincides with q, or 1 when q is not a corner (inside a face or on an edge). */
+	private cornerAngle(t:number,q:[number,number,number]):number{
+		const P=this.pos,v=[this.index[t*3]*3,this.index[t*3+1]*3,this.index[t*3+2]*3];
+		for(let k=0;k<3;k++){const a=v[k];if(Math.hypot(P[a]-q[0],P[a+1]-q[1],P[a+2]-q[2])>1e-9)continue;const b=v[(k+1)%3],c=v[(k+2)%3],ux=P[b]-P[a],uy=P[b+1]-P[a+1],uz=P[b+2]-P[a+2],wx=P[c]-P[a],wy=P[c+1]-P[a+1],wz=P[c+2]-P[a+2];
+			return Math.acos(Math.max(-1,Math.min(1,(ux*wx+uy*wy+uz*wz)/((Math.hypot(ux,uy,uz)*Math.hypot(wx,wy,wz))||1))));}
+		return 1;
+	}
+	/** Distance to the nearest triangle, searching out to `maxR` metres (returns maxR when none is nearer). */
+	nearest(x:number,y:number,z:number,maxR=0.05):number{return this.nearestHit(x,y,z,maxR)?.d??maxR;}
 }
 
 /** Least-squares affine map rest → warped over paired points (flat xyz): returns f(p) mapping a rest point. */
