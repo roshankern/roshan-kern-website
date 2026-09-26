@@ -42,16 +42,16 @@ function tripKeys(t0:number,d0:number,d1:number,release:boolean,approach:number|
 	const rs=release?Math.min(30,0.3*g):0,as=approach!==null?Math.min(approach,0.3*g):0,cruiseDays=g-rs-as;
 	const cruiseMs=g>=1?clamp(cruiseDays/365*CRUISE_MS_PER_YEAR,CRUISE_MIN_MS,CRUISE_MAX_MS):0,t1=t0+R+cruiseMs+A;
 	const keys:Key[]=[];
-	if(cruiseMs>0){// Joint velocities: the cruise mean, capped at 3× the neighbouring leg's mean (Fritsch–Carlson, so its Hermite stays monotone). Birth enters at the cruise mean; the end trip stops at today with velocity 0.
-		const v=cruiseDays/cruiseMs,mA=release?Math.min(v,3*rs/RELEASE_MS):v,mB=approach!==null?Math.min(v,3*as/APPROACH_MS):0;
+	if(cruiseMs>0){// Joint velocities: the cruise mean, capped at 3× the neighbouring leg's mean (Fritsch–Carlson, so its Hermite stays monotone). Birth eases in from rest (velocity 0 at story 0; cruiseDay keeps it C¹, acceleration 0 there too); the end trip stops at today with velocity 0.
+		const v=cruiseDays/cruiseMs,mA=release?Math.min(v,3*rs/RELEASE_MS):0,mB=approach!==null?Math.min(v,3*as/APPROACH_MS):0;
 		if(release)keys.push({t:t0,d:d0,m:0});keys.push({t:t0+R,d:d0+rs,m:mA,cruise:true});keys.push({t:t1-A,d:d1-as,m:mB});if(approach!==null)keys.push({t:t1,d:d1,m:0});
 		return {keys,t1};}
 	else{// Gap under a day: no cruise leg; the release / approach keys collapse into one mid key (or none) at the leg joint.
-		const v=R+A>0?g/(R+A):0;keys.push({t:t0,d:d0,m:release?0:v});if(release&&approach!==null)keys.push({t:t0+R,d:d0+g*R/(R+A),m:v});keys.push({t:t1,d:d1,m:0});}
+		const v=R+A>0?g/(R+A):0;keys.push({t:t0,d:d0,m:0});if(release&&approach!==null)keys.push({t:t0+R,d:d0+g*R/(R+A),m:v});keys.push({t:t1,d:d1,m:0});}
 	limit(keys);return {keys,t1};
 }
 
-/** The story schedule for `scripts` on a birth..`today` timeline. `reducedMotion`: approach / release keep their story length, but ghost and zoom become short crossfades (8% of the leg, ≈ 0.2 s) at the hold end of each leg. */
+/** The story schedule for `scripts` on a birth..`today` timeline. `reducedMotion`: approach / release keep their story length; ghost becomes a short crossfade (8% of the leg, ≈ 0.2 s) at the hold end of each leg and zoom a cut (a step at that crossfade's midpoint), so the camera never whip-zooms. */
 export function buildSchedule(scripts:IssueScript[],today:string,opts:{reducedMotion?:boolean}={}):Schedule{
 	const stops=stopsFor(scripts,today),end=Math.max(0,toDays(today)-BIRTH),trips:Trip[]=[],holdMs:number[]=[];
 	let t=0,d=0;
@@ -60,8 +60,10 @@ export function buildSchedule(scripts:IssueScript[],today:string,opts:{reducedMo
 		trips.push({t0:t,t1,keys,from:i>0?i-1:null,to});if(to!==null)holdMs.push(t1);t=t1;d=keys[keys.length-1].d;
 	}
 	const totalMs=t,starts=trips.map(x=>x.t0);
-	// Ramps as [ghost from,to] / [zoom from,to] over the leg fraction; release ramps run 1 → 0.
-	const rm=!!opts.reducedMotion,AG=rm?[0.92,1]:[0,0.5],AZ=rm?[0.92,1]:[0.3,1],RZ=rm?[0,0.08]:[0,0.7],RG=rm?[0,0.08]:[0.4,1];
+	// Ramps as [ghost from,to] / [zoom from,to] over the leg fraction; release ramps run 1 → 0. Reduced motion: zoom has no width, a step at the ghost ramp's midpoint.
+	const rm=!!opts.reducedMotion,AG=rm?[0.92,1]:[0,0.5],AZ=rm?[0.96,0.96]:[0.3,1],RZ=rm?[0.04,0.04]:[0,0.7],RG=rm?[0,0.08]:[0.4,1];
+	/** smootherstep over the ramp, or a step at its start when it has no width. */
+	const ramp=(r:number[],u:number)=>r[1]>r[0]?smootherstep(r[0],r[1],u):u>=r[0]?1:0;
 	/** The trip containing story time s: the last one starting at or before s (binary search). */
 	const tripAt=(s:number)=>{let lo=0,hi=starts.length-1;while(lo<hi){const mid=(lo+hi+1)>>1;if(starts[mid]<=s)lo=mid;else hi=mid-1;}return trips[lo];};
 	/** Day within a trip; each piece is clamped to its key values, so float error never dips below a hold's day (monotone across keys). */
@@ -72,8 +74,8 @@ export function buildSchedule(scripts:IssueScript[],today:string,opts:{reducedMo
 		let phase:Phase='cruise',stop:number|null=null,ghost=0,zoom=0;
 		if(holding&&tr.from!==null&&s===tr.t0){phase='hold';stop=tr.from;ghost=1;zoom=1;}
 		else if(s>=totalMs&&tr.to===null&&totalMs>0){phase='end';}
-		else if(tr.from!==null&&s<tr.t0+RELEASE_MS){phase='release';stop=tr.from;const u=(s-tr.t0)/RELEASE_MS;zoom=1-smootherstep(RZ[0],RZ[1],u);ghost=1-smootherstep(RG[0],RG[1],u);}
-		else if(tr.to!==null&&s>=tr.t1-APPROACH_MS){phase='approach';stop=tr.to;const u=(s-(tr.t1-APPROACH_MS))/APPROACH_MS;ghost=smootherstep(AG[0],AG[1],u);zoom=smootherstep(AZ[0],AZ[1],u);}
+		else if(tr.from!==null&&s<tr.t0+RELEASE_MS){phase='release';stop=tr.from;const u=(s-tr.t0)/RELEASE_MS;zoom=1-ramp(RZ,u);ghost=1-ramp(RG,u);}
+		else if(tr.to!==null&&s>=tr.t1-APPROACH_MS){phase='approach';stop=tr.to;const u=(s-(tr.t1-APPROACH_MS))/APPROACH_MS;ghost=ramp(AG,u);zoom=ramp(AZ,u);}
 		if(s===0&&phase!=='hold')phase='idle';// 'idle' at story 0; the clock reports it as cruise / approach while playing
 		return {storyMs:s,day,date:fromDays(BIRTH+Math.floor(day)),phase,stop,focusId:stop!==null?stops[stop].id:null,ghost,zoom};
 	}

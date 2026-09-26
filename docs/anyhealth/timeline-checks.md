@@ -22,13 +22,16 @@ Full gate before merging:
 - presses Play on /anyhealth/timeline;
 - waits for the tracker's `data-phase="hold"` at the first stop;
 - checks the focused card and its Continue button;
+- clicks Isolate on another card (skipped, with a log line, when no other card is listed), checks the hold is left, presses Play, and checks that no Isolate is left on and that the same stop holds again;
+- clicks another stop's tick from the hold, and checks for the `approach` phase, then a hold whose focused card has the tick's title;
 - presses Continue, and checks the phase leaves the hold;
 - fails on any page or console error.
 
-Under SwiftShader the page renders at about 4 fps, so the first hold can take 10–20 s of wall-clock time even though its story time is about 4 s.
+Under SwiftShader the page renders at 0.5–4 fps (machine dependent), and the clock advances at most 100 ms of story time per frame (`MAX_STEP_MS`), so reaching a hold can take one to two minutes of wall-clock time even though its story time is only a few seconds (the first hold is 4 s of story, 40 frames); the script allows 5 minutes per hold.
 
 ## v2 director groups
 
+- **`tracker`** (bar part): stop ticks, year labels, and a drag fraction → `seekMs` → handle round trip that is exact.
 - **`director`:** covers the story schedule and the clock:
   - one stop per script;
   - cruise legs within 1.5–5 s;
@@ -36,7 +39,10 @@ Under SwiftShader the page renders at about 4 fps, so the first hold can take 10
   - holds are exact;
   - ghost and zoom ramps have the right order and continuity;
   - `storyMsForDay` inverts the day, including at exact stop days and at today;
-  - the clock's hold, continue, re-arm, seek and end behaviour.
+  - play from birth eases in (velocity 0 at story 0);
+  - the clock's hold, continue, re-arm, seek and end behaviour;
+  - `seekMs` is exact, paused and free, and re-arms stops at or after it: at the second stop of a same-day pair, Play holds that second stop;
+  - one tick advances story time by at most `MAX_STEP_MS` (100 ms).
 - **`climax`:**
   - every script has a climax inside its active window;
   - the anatomy shows at the climax;
@@ -48,7 +54,10 @@ Under SwiftShader the page renders at about 4 fps, so the first hold can take 10
   - growth framing: the projected body height stays within ±3% of the adult's at 25 dates;
   - every stop's focus box fits the open area at desktop and phone sizes;
   - the rejoin blend is continuous;
-  - the frozen focus box is taken at the climax day.
+  - `needsRejoin`: a guided/free switch or a guided seek (`cue.seq`) rejoins, a seek within free mode does not;
+  - the focus handover (`blendFocus`) is exact at its ends and never steps, and a new id fades in only after the old one fades out;
+  - reduced motion: the cue zoom is a cut at the ghost ramp's midpoint, and the ghost still ramps over about 0.2 s;
+  - the frozen focus box is taken at the climax day, clamped to today exactly as the director places the stop.
 - **`ghost`:**
   - the focus flag and `focusAlso`;
   - the ghost crossfade is a uniform write only;
@@ -58,5 +67,7 @@ Under SwiftShader the page renders at about 4 fps, so the first hold can take 10
   - layers fade instead of hiding;
   - fractional days drive the fx;
   - `focusBox` matches `isolateBox`, and its prefetch completes;
+  - the prefetch runs in the director's stop order, and `prefetchSlice` keeps to its budget, never settles, and completes;
+  - a sub-day step recomputes the fx only (the body and warp are cached by date), and the settle afterwards is exact;
   - GPU checks (SwiftShader): program count is stable after `prewarm`, the ghost onset is continuous, focus parts occlude ghosts, and a ghost shows only its frontmost surface.
 

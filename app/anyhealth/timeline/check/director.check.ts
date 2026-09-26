@@ -1,8 +1,8 @@
 /** v2 director checks: the story schedule (stops, trips, day continuity, ghost/zoom ramps, inverse) and the clock state machine. Pure, no geometry. */
 import type {Check,CheckContext} from './harness';
 import type {IssueScript} from '../types';
-import type {Schedule} from '../director/types';
-import {RELEASE_MS,APPROACH_MS,CRUISE_MIN_MS,CRUISE_MAX_MS} from '../director/types';
+import type {Clock,Sample,Schedule} from '../director/types';
+import {RELEASE_MS,APPROACH_MS,CRUISE_MIN_MS,CRUISE_MAX_MS,MAX_STEP_MS} from '../director/types';
 import {buildSchedule} from '../director/schedule';
 import {createClock} from '../director/clock';
 import {SCRIPTS} from '../issues';
@@ -16,22 +16,24 @@ const SYN=[fake('c-late','2015-03-01',10),fake('b-same','2010-05-01',4),fake('a-
 const syn=()=>buildSchedule(SYN,TODAY);
 /** Trip boundaries: 0, every hold, totalMs. */
 const bounds=(s:Schedule)=>[0,...s.holdMs,s.totalMs];
+/** Tick a clock every `dt` ms of wall-clock time from t0 to t1 (the clock advances at most MAX_STEP_MS per tick); the last sample. */
+const run=(k:Clock,t0:number,t1:number,dt=16):Sample=>{let x=k.tick(t0);for(let t=t0;t<t1;){t=Math.min(t1,t+dt);x=k.tick(t);}return x;};
 
-/** Dense (≤ 1 ms) sampling of each trip: monotone day, C¹ velocity, zero velocity at holds, continuous ghost/zoom. */
-function continuity(c:CheckContext,s:Schedule,what:string){
+/** Dense (≤ 1 ms) sampling of each trip: monotone day, C¹ velocity, zero velocity at holds and at birth (the ease-in), continuous ghost (and zoom, unless `zoomCut`: reduced motion, where zoom is a step). */
+function continuity(c:CheckContext,s:Schedule,what:string,zoomCut=false){
 	const B=bounds(s);
 	for(let k=0;k+1<B.length;k++){
 		const a=B[k],b=B[k+1],n=Math.max(1,Math.ceil(b-a)),h=(b-a)/n;if(b-a<=0)continue;
 		const days:number[]=[],gz:[number,number][]=[];for(let j=0;j<=n;j++){const t=j===n?b:a+j*h,x=s.sample(t,false);days.push(x.day);gz.push([x.ghost,x.zoom]);}
 		const v:number[]=[];for(let j=0;j<n;j++){const dd=days[j+1]-days[j];c.assert(dd>=0,`${what} trip ${k}: day decreases at ${a+j*h} ms (${dd})`);v.push(dd/h);}
-		for(let j=0;j<n;j++)for(let q=0;q<2;q++)c.assert(Math.abs(gz[j+1][q]-gz[j][q])<=0.02,`${what} trip ${k}: ${q?'zoom':'ghost'} step ${gz[j+1][q]-gz[j][q]} at ${a+j*h} ms`);
+		for(let j=0;j<n;j++)for(let q=0;q<(zoomCut?1:2);q++)c.assert(Math.abs(gz[j+1][q]-gz[j][q])<=0.02,`${what} trip ${k}: ${q?'zoom':'ghost'} step ${gz[j+1][q]-gz[j][q]} at ${a+j*h} ms`);
 		const peak=Math.max(...v);if(peak<=0)continue;
 		for(let j=1;j<n;j++)c.assert(Math.abs(v[j]-v[j-1])<=0.02*peak,`${what} trip ${k}: velocity jump ${v[j]-v[j-1]} (peak ${peak}) at ${a+j*h} ms`);
 		// Leg joints, against the local speed (the peak bound alone lets kinks in slow legs through).
 		const joints=[...(k>0?[a+RELEASE_MS]:[]),...(k<s.holdMs.length?[b-APPROACH_MS]:[])].filter(J=>J-1>=a&&J+1<=b);
 		for(const J of joints){const day=(t:number)=>s.sample(t,false).day,vb=day(J)-day(J-1),va=day(J+1)-day(J);
 			c.assert(Math.abs(va-vb)<=0.05*(Math.abs(va)+Math.abs(vb))/2+1e-6,`${what} trip ${k}: joint at ${J} ms kinks ${vb} → ${va} day/ms`);}
-		if(k>0)c.assert(v[0]<=1e-3*peak,`${what} trip ${k}: velocity leaving hold ${k-1} is ${v[0]} (peak ${peak})`);
+		c.assert(v[0]<=1e-3*peak,`${what} trip ${k}: velocity leaving ${k>0?`hold ${k-1}`:'birth'} is ${v[0]} (peak ${peak})`);
 		if(k<s.holdMs.length)c.assert(v[n-1]<=1e-3*peak,`${what} trip ${k}: velocity arriving at hold ${k} is ${v[n-1]} (peak ${peak})`);
 	}
 }
@@ -60,7 +62,7 @@ export const checks:Check[]=[
 		const s=syn();cruiseLegs(c,s,'synthetic');c.near(s.holdMs[1]-s.holdMs[0],RELEASE_MS+APPROACH_MS,1e-9,'same-day trip is release + approach only');
 		cruiseLegs(c,buildSchedule(SCRIPTS,REAL_TODAY),'real');
 	}},
-	{name:'director: day is C1 and monotone (1 ms sampling)',run(c){continuity(c,syn(),'synthetic');continuity(c,buildSchedule(SCRIPTS,REAL_TODAY),'real');continuity(c,buildSchedule(SCRIPTS,REAL_TODAY,{reducedMotion:true}),'reduced motion');}},
+	{name:'director: day is C1 and monotone (1 ms sampling)',run(c){continuity(c,syn(),'synthetic');continuity(c,buildSchedule(SCRIPTS,REAL_TODAY),'real');continuity(c,buildSchedule(SCRIPTS,REAL_TODAY,{reducedMotion:true}),'reduced motion',true);}},
 	{name:'director: day hits the climax exactly at the hold',run(c){
 		for(const s of [syn(),buildSchedule(SCRIPTS,REAL_TODAY)])s.stops.forEach((st,i)=>{const x=s.sample(s.holdMs[i],true);
 			c.assert(x.day===st.day,`${st.id}: day ${x.day} vs ${st.day}`);c.assert(x.phase==='hold'&&x.stop===i&&x.focusId===st.id,`${st.id}: ${x.phase} ${x.stop} ${x.focusId}`);c.assert(x.ghost===1&&x.zoom===1,`${st.id}: ghost ${x.ghost} zoom ${x.zoom}`);});
@@ -100,27 +102,27 @@ export const checks:Check[]=[
 	}},
 	{name:'director clock: plays to a hold and stays',run(c){
 		const s=syn(),k=createClock(s);k.play(0);let x=k.tick(1);c.assert(x.phase==='cruise',`playing from 0 reads cruise, not ${x.phase}`);
-		x=k.tick(s.holdMs[0]+1000);c.assert(k.holding===0&&!k.playing&&k.storyMs===s.holdMs[0]&&x.phase==='hold',`holding ${k.holding} at ${k.storyMs}`);
+		x=run(k,1,s.holdMs[0]+1000);c.assert(k.holding===0&&!k.playing&&k.storyMs===s.holdMs[0]&&x.phase==='hold',`holding ${k.holding} at ${k.storyMs}`);
 		x=k.tick(s.holdMs[0]+50000);c.assert(k.holding===0&&k.storyMs===s.holdMs[0],'stays');
 	}},
 	{name:'director clock: continue passes once',run(c){
-		const s=syn(),k=createClock(s);k.play(0);k.tick(s.holdMs[0]+10);k.continue(1e6);c.assert(k.playing&&k.holding===null,'playing after continue');
+		const s=syn(),k=createClock(s);k.play(0);run(k,0,s.holdMs[0]+10);k.continue(1e6);c.assert(k.playing&&k.holding===null,'playing after continue');
 		k.tick(1e6+10);c.assert(k.storyMs===s.holdMs[0]+10&&k.holding===null,`passed stop 0: ${k.storyMs}`);
-		k.tick(1e6+RELEASE_MS+APPROACH_MS+100);c.assert(k.holding===1&&k.storyMs===s.holdMs[1],`holds at stop 1: ${k.holding}`);
+		run(k,1e6+10,1e6+RELEASE_MS+APPROACH_MS+100);c.assert(k.holding===1&&k.storyMs===s.holdMs[1],`holds at stop 1: ${k.holding}`);
 		k.continue(0);const at=k.storyMs;k.continue(0);c.assert(k.holding===null&&k.storyMs===at,'continue is a no-op away from a hold');
 	}},
 	{name:'director clock: pause mid-approach then play still holds',run(c){
-		const s=syn(),k=createClock(s);k.seekStop(0,0);k.tick(1000);c.assert(k.tick(1000).phase==='approach','mid approach');k.pause(1000);k.tick(9000);c.assert(k.storyMs===s.holdMs[0]-APPROACH_MS+1000,'paused');
-		k.play(20000);k.tick(20000+APPROACH_MS);c.assert(k.holding===0&&k.storyMs===s.holdMs[0],`holding ${k.holding}`);
+		const s=syn(),k=createClock(s);k.seekStop(0,0);run(k,0,1000);c.assert(k.tick(1000).phase==='approach','mid approach');k.pause(1000);k.tick(9000);c.assert(k.storyMs===s.holdMs[0]-APPROACH_MS+1000,'paused');
+		k.play(20000);run(k,20000,20000+APPROACH_MS);c.assert(k.holding===0&&k.storyMs===s.holdMs[0],`holding ${k.holding}`);
 	}},
 	{name:'director clock: seekDay re-arms',run(c){
-		const s=syn(),k=createClock(s);k.play(0);k.tick(s.holdMs[0]+1);k.continue(0);k.tick(100);c.assert(k.storyMs>s.holdMs[0],'past stop 0');
+		const s=syn(),k=createClock(s);k.play(0);run(k,0,s.holdMs[0]+1);k.continue(0);k.tick(100);c.assert(k.storyMs>s.holdMs[0],'past stop 0');
 		k.seekDay(s.stops[0].day-10);c.assert(!k.playing&&k.holding===null&&k.storyMs<s.holdMs[0],`seek ${k.storyMs}`);
-		k.play(0);k.tick(s.holdMs[0]);c.assert(k.holding===0&&k.storyMs===s.holdMs[0],`re-armed: ${k.holding} ${k.storyMs}`);
+		k.play(0);run(k,0,s.holdMs[0]);c.assert(k.holding===0&&k.storyMs===s.holdMs[0],`re-armed: ${k.holding} ${k.storyMs}`);
 	}},
 	{name:'director clock: seekStop lands at the approach start and plays',run(c){
 		const s=syn(),k=createClock(s);k.seekStop(2,500);c.assert(k.playing&&k.holding===null&&k.storyMs===s.holdMs[2]-APPROACH_MS,`seekStop ${k.storyMs}`);
-		const x=k.tick(500);c.assert(x.phase==='approach'&&x.stop===2&&x.ghost===0,`${x.phase} ${x.stop}`);k.tick(500+APPROACH_MS);c.assert(k.holding===2,'holds at 2');
+		const x=k.tick(500);c.assert(x.phase==='approach'&&x.stop===2&&x.ghost===0,`${x.phase} ${x.stop}`);run(k,500,500+APPROACH_MS);c.assert(k.holding===2,'holds at 2');
 	}},
 	{name:'director: exact stop days invert to their hold, and seekDay there + play holds at the first stop that day',run(c){
 		// 2020-01-01 clamps later climaxes onto today, so stops share the end day.
@@ -134,14 +136,34 @@ export const checks:Check[]=[
 	}},
 	{name:'director: a stop at birth reads idle at story 0 until played',run(c){
 		const s=buildSchedule([fake('birth',BIRTH_DATE,0)],TODAY),x=s.sample(0,false);c.assert(x.phase==='idle'&&x.ghost===0,`at 0: ${x.phase}`);
-		const k=createClock(s);k.play(0);c.assert(k.tick(0).phase==='approach','playing at 0 reads approach');k.tick(APPROACH_MS+1);c.assert(k.holding===0,'holds at the birth stop');
+		const k=createClock(s);k.play(0);c.assert(k.tick(0).phase==='approach','playing at 0 reads approach');run(k,0,APPROACH_MS+1);c.assert(k.holding===0,'holds at the birth stop');
+	}},
+	{name:'director clock: seekMs is exact, paused, not holding, and re-arms every stop with hold ≥ ms',run(c){
+		const s=syn(),k=createClock(s);k.play(0);run(k,0,s.holdMs[0]+1);k.continue(0);run(k,0,RELEASE_MS);c.assert(k.storyMs>s.holdMs[0]&&k.holding===null,'past stop 0');
+		for(const ms of [s.holdMs[0]-123.456,s.holdMs[2]+0.25,0,s.totalMs])k.seekMs(ms),c.assert(k.storyMs===ms&&!k.playing&&k.holding===null,`seekMs(${ms}) → ${k.storyMs}`);
+		k.seekMs(-5);c.assert(k.storyMs===0,'clamped low');k.seekMs(s.totalMs+5);c.assert(k.storyMs===s.totalMs,'clamped high');
+		k.seekMs(s.holdMs[0]-500);k.play(0);run(k,0,600);c.assert(k.holding===0&&k.storyMs===s.holdMs[0],`re-armed stop 0 holds: ${k.holding} at ${k.storyMs}`);
+		k.seekMs(s.holdMs[0]);c.assert(k.tick(0).phase!=='hold'&&k.holding===null,'a seek to a hold instant is not a hold');k.play(0);k.tick(1);c.assert(k.holding===0&&k.storyMs===s.holdMs[0],`play at a hold instant holds it: ${k.holding}`);
+	}},
+	{name:'director clock: same-day pair: seekMs(holdMs[second]) then play holds the SECOND stop (seekDay would hold the first)',run(c){
+		const s=syn();c.assert(s.stops[0].day===s.stops[1].day,'same-day pair');
+		const k=createClock(s);k.seekMs(s.holdMs[1]);k.play(0);k.tick(16);c.assert(k.holding===1&&k.storyMs===s.holdMs[1],`seekMs: holding ${k.holding} at ${k.storyMs}`);
+		const d=createClock(s);d.seekDay(s.stops[1].day);d.play(0);d.tick(16);c.assert(d.holding===0,`seekDay maps the shared day to the first stop (${d.holding})`);
+	}},
+	{name:'director clock: a tick advances story time by at most MAX_STEP_MS (a background tab or long frame never jumps the story)',run(c){
+		const s=syn(),k=createClock(s);k.play(0);k.tick(5000);c.assert(k.storyMs===MAX_STEP_MS,`one 5 s tick moved ${k.storyMs} ms`);k.tick(5016);c.assert(k.storyMs===MAX_STEP_MS+16,`then ${k.storyMs}`);
+		k.pause(60000);c.assert(k.storyMs===2*MAX_STEP_MS+16,`pause after a long gap: ${k.storyMs}`);
+	}},
+	{name:'director: play from birth eases in (velocity 0 at story 0, then accelerating smoothly)',run(c){
+		for(const s of [syn(),buildSchedule(SCRIPTS,REAL_TODAY)]){const day=(t:number)=>s.sample(t,false).day,v0=day(1)-day(0),v=(t:number)=>day(t+1)-day(t),mid=v(s.holdMs[0]/2);
+			c.assert(v0<=1e-3*mid,`velocity at birth ${v0} vs mid-trip ${mid}`);let prev=v0;for(let t=1;t<200;t++){const x=v(t);c.assert(x>=prev-1e-12,`velocity dips at ${t} ms`);prev=x;}}
 	}},
 	{name:'director clock: seekStop out of range is a no-op',run(c){
 		const s=syn(),k=createClock(s);k.seekDay(s.stops[1].day);const at=k.storyMs;for(const i of [-1,s.holdMs.length,1.5,NaN]){k.seekStop(i,0);c.assert(k.storyMs===at&&!k.playing,`seekStop(${i})`);}
 	}},
 	{name:'director clock: end then play restarts at 0',run(c){
 		const s=syn(),k=createClock(s);k.seekDay(1e9);c.assert(k.storyMs===s.totalMs,'at end');k.play(0);k.tick(1);c.assert(k.storyMs===0||k.storyMs===1,`restart ${k.storyMs}`);
-		k.seekStop(3,0);k.tick(APPROACH_MS);k.continue(0);const x=k.tick(1e7);c.assert(k.storyMs===s.totalMs&&!k.playing&&x.phase==='end',`end: ${x.phase} ${k.storyMs}`);
-		k.play(5);c.assert(k.storyMs===0&&k.playing,'restarted');k.tick(s.holdMs[0]+100);c.assert(k.holding===0,'stops re-armed on restart');
+		k.seekStop(3,0);run(k,0,APPROACH_MS);k.continue(0);const x=run(k,0,s.totalMs-s.holdMs[3]+1000,50);c.assert(k.storyMs===s.totalMs&&!k.playing&&x.phase==='end',`end: ${x.phase} ${k.storyMs}`);
+		k.play(5);c.assert(k.storyMs===0&&k.playing,'restarted');run(k,5,s.holdMs[0]+100);c.assert(k.holding===0,'stops re-armed on restart');
 	}},
 ];

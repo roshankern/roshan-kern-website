@@ -15,7 +15,7 @@ import {createFracture,type FractureHandle} from '../fracture/fracture-scene';
 import type {createEngine as CreateEngine} from '../timeline/engine';
 import type {Rig,Vec3} from '../timeline/types';
 import type {CameraCue} from '../timeline/director/types';
-import type {Pose as TPose} from '../timeline/camera/pose';
+import type {Pose as TPose,Focus as TFocus,CueKey} from '../timeline/camera/pose';
 import {todayISO} from '../health/dates';
 interface Props {atlas:Atlas;state:SceneState;onProgress:(n:number)=>void;onError:(s:string)=>void;issues:Issue[];selectedIssue:string|null;onSelectIssue:(id:string|null)=>void;date?:string;fracture?:boolean;timeline?:{date:string;isolate:string|null;/** v2 director (Task 4 consumes): the camera/ghost cue for this frame. */cue?:CameraCue;/** v2: manual camera input while guided. */onManualCamera?:()=>void};/** Timeline mode: segments.bin, still downloading (the chunks load alongside; decoding waits for it, and it counts as one more unit of progress). */segments?:Promise<ArrayBuffer>;rig?:Rig;/** Timeline mode: the engine factory, passed in so the default page never bundles the engine (atlas-app.tsx imports it dynamically). */createEngine?:typeof CreateEngine}
 /** `date` + `fracture` (the /anyhealth/test page) draw the 2009 humerus fracture as of the timeline date; off by default.
@@ -52,7 +52,7 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
   const timelineOn=!!(timeline&&rig&&segments&&createEngine),units=atlas.chunks.length+(timelineOn?1:0);let loaded=0;const report=()=>onProgress(Math.round(loaded/units*100));
   let engine=null as ReturnType<typeof CreateEngine>|null;const engineReady=timelineOn?segments!.then(buf=>{if(disposed)return;engine=createEngine!({atlas,scene,bounds,rig:rig!,segments:buf,renderer});mats.forEach((m,system)=>engine!.patchMaterial(m,{partFx:true,soft:['muscular','integumentary','connective'].includes(system)}));loaded++;report();}):null;engineReady?.catch(()=>{/* reported by the chunk loader, which awaits it */});
   // Timeline mode: picking treats a part as visible by the engine's final fx visibility (switches, Isolate and issue effects such as a hidden fractured bone or an unerupted tooth).
-  let lastIsolate:string|null=null,seenDate='',dateAt=0,settled=true;const shown=(i:number)=>(engine?engine.partVisible(i):data[i*4+3])>.5;
+  let lastIsolate:string|null=null,seenDate='',dateAt=0,settled=true,prefetched=false;const shown=(i:number)=>(engine?engine.partVisible(i):data[i*4+3])>.5;
   const materialFor=(system:string)=>{
    const m=new T.MeshStandardMaterial({color:SYSTEMS.find(s=>s.id===system)?.mesh??'#aebbb8',metalness:.08,roughness:.53,side:T.DoubleSide,transparent:system==='integumentary',opacity:system==='integumentary'?.1:1,depthWrite:system!=='integumentary'});
    m.onBeforeCompile=shader=>{
@@ -162,18 +162,24 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
    flyTo({target:center,position:center.clone().addScaledVector(direction,distance),ox:w/2-(left+right)/2,oy:h/2-(top+bottom)/2});
   };
   // Timeline camera (spec 2026-09-26 §4; timeline mode only, once the pose math has loaded with the engine chunk, so /anyhealth never bundles it). One pure pose per frame, no springs:
-  // scripted = the posed path from defaultPoseFor(day) (growth framing) to the stop's focus pose by cue.zoom (0 in free mode: the default pose); a timed rejoin blends from the actual camera after manual input or a guided/free switch;
+  // scripted = the posed path from defaultPoseFor(day) (growth framing) to the stop's focus pose by cue.zoom (0 in free mode: the default pose); a timed rejoin blends from the actual camera after manual input, a guided/free switch or a guided seek (cue.seq, pose.ts needsRejoin);
   // a flight (manual Isolate, Show all, double-click) runs the posed path over ISOLATE_FLY_MS. Manual input (a drag past the tap slop, pinch, wheel, double-click on a part) hands the camera to the user.
-  const STILL_MS=150;let P:typeof import('../timeline/camera/pose')|null=null,viewOf:(id:string)=>Vec3|null=()=>null,boxDay:(id:string,cueDay:number)=>number=(_,d)=>d;
-  if(timelineOn)Promise.all([import('../timeline/camera/pose'),import('../timeline/issues')]).then(([m,issues])=>{if(disposed)return;P=m;viewOf=id=>issues.scriptFor(id)?.view??null;boxDay=(id,d)=>m.stopBoxDay(id,d,issues.scriptFor);lastPose=null;dirty=true;
+  // The rendered focus (id + ghost for the engine) never steps: a seek, a guided/free switch or any jump in the wanted focus hands over from the last rendered one over the rejoin window (pose.ts blendFocus).
+  // prefers-reduced-motion (read at mount and on change): flights and rejoins last REDUCED_MOTION_MS; the director's schedule already cuts its zoom.
+  const STILL_MS=150,FOCUS_JUMP=.25;let P:typeof import('../timeline/camera/pose')|null=null,viewOf:(id:string)=>Vec3|null=()=>null,boxDay:(id:string,cueDay:number)=>number=(_,d)=>d;
+  const motion=timelineOn&&typeof matchMedia==='function'?matchMedia('(prefers-reduced-motion: reduce)'):null;let reduced=!!motion?.matches;const onMotion=()=>{reduced=!!motion?.matches;};motion?.addEventListener?.('change',onMotion);
+  const flyMs=()=>reduced?P!.REDUCED_MOTION_MS:P!.ISOLATE_FLY_MS,rejoinMs=()=>reduced?P!.REDUCED_MOTION_MS:P!.REJOIN_MS;
+  if(timelineOn)Promise.all([import('../timeline/camera/pose'),import('../timeline/issues')]).then(([m,issues])=>{if(disposed)return;P=m;viewOf=id=>issues.scriptFor(id)?.view??null;const end=m.dayOfDate(todayISO());boxDay=(id,d)=>m.stopBoxDay(id,d,issues.scriptFor,end);lastPose=null;dirty=true;
    // Blend from the v1 fit() pose the scene started with instead of snapping.
    if(!userMoved)rejoin={t0:performance.now(),from:nowPose()};}).catch(()=>{/* keep the v1 camera */});
   const restBody={min:bodyBox.min.toArray() as Vec3,max:bodyBox.max.toArray() as Vec3},boxOf=(b:T.Box3)=>({min:b.min.toArray() as Vec3,max:b.max.toArray() as Vec3});
-  let todayDay=0,cueSig='',stillSince=0,adult:TPose|null=null,scripted:TPose|null=null,userMoved=false,armed=false,wasGuided=false,rejoin:{t0:number;from:TPose}|null=null,tflight:{t0:number;ms:number;from:TPose;to:()=>TPose;end?:()=>void}|null=null;
+  let todayDay=0,cueSig='',stillSince=0,adult:TPose|null=null,scripted:TPose|null=null,userMoved=false,armed=false,lastKey:CueKey|null=null,rejoin:{t0:number;from:TPose}|null=null,tflight:{t0:number;ms:number;from:TPose;to:()=>TPose;end?:()=>void}|null=null;
   // The stop being approached / held / released: its focus box frozen at the first frame with that stop (at that frame's day), its pose refitted on resize.
   let stop:{id:string|null;day:number;box:T.Box3|null;pose:TPose|null}={id:null,day:0,box:null,pose:null};
   // Manual Isolate: ghost fades from → to over ISOLATE_FADE_MS; the camera flies once the engine has the box.
-  let iso:{id:string|null;from:number;to:number;t0:number}={id:null,from:0,to:0,t0:0},isoSeen:string|null=null,isoFly=false,isoBox:T.Box3|null=null,isoPose:TPose|null=null,lastFocus:{id:string;ghost:number}|null=null;
+  let iso:{id:string|null;from:number;to:number;t0:number}={id:null,from:0,to:0,t0:0},isoSeen:string|null=null,isoFly=false,isoBox:T.Box3|null=null,isoPose:TPose|null=null,lastFocus:TFocus|null=null;
+  // Focus handover: the wanted focus last frame, and the blend from the rendered focus at its start.
+  let lastWant:TFocus|null=null,fblend:{t0:number;from:TFocus|null}|null=null;
   let press:{id:number;x:number;y:number;th:number}|null=null,pending:{x:number;y:number;fallback:boolean}|null=null;
   const nowPose=():TPose=>{const c=currentPose();return {target:c.target.toArray() as Vec3,position:c.position.toArray() as Vec3,ox:c.ox,oy:c.oy};};
   const samePose=(a:TPose,b:TPose)=>a.ox===b.ox&&a.oy===b.oy&&a.target.every((v,i)=>v===b.target[i])&&a.position.every((v,i)=>v===b.position[i]);
@@ -186,21 +192,27 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
    if(pending){const p=pending;pending=null;pivotAt(p.x,p.y,p.fallback);}
   };
   // Show all / double-click empty: fly to the scripted pose as it is at the start (a snapshot, so a scrub mid-flight never retargets it), then rejoin the live script from there.
-  const backTo=(now:number)=>{const to=scripted!;return {t0:now,ms:P!.ISOLATE_FLY_MS,from:nowPose(),to:()=>to,end:()=>{if(!userMoved)rejoin={t0:performance.now(),from:nowPose()};}};};
+  const backTo=(now:number)=>{const to=scripted!;return {t0:now,ms:flyMs(),from:nowPose(),to:()=>to,end:()=>{if(!userMoved)rejoin={t0:performance.now(),from:nowPose()};}};};
   const flyStep=(now:number)=>{const f=tflight!,k=(now-f.t0)/f.ms,to=f.to();if(k>=1){tflight=null;setPose(to);f.end?.();}else setPose(P!.lerpPose(f.from,to,P!.smootherstep(0,1,k)));};
+  /** The focus to render this frame: `want`, unless a handover is running (started by `restart` or by a jump in `want`), then the blend from the focus rendered when it began. */
+  const focusOut=(want:TFocus|null,now:number,restart:boolean):TFocus|null=>{
+   const M=P!;if(restart||M.focusGap(lastWant,want)>FOCUS_JUMP)fblend={t0:now,from:lastFocus};lastWant=want;
+   if(fblend){const k=(now-fblend.t0)/rejoinMs();if(k<1)return M.blendFocus(fblend.from,want,k);fblend=null;}
+   return want;
+  };
   /** One timeline camera frame: poses the camera and returns the focus (id + ghost) for the engine. */
-  const tlFrame=(tl:NonNullable<Props['timeline']>,now:number):{id:string;ghost:number}|null=>{
+  const tlFrame=(tl:NonNullable<Props['timeline']>,now:number):TFocus|null=>{
    const M=P!,cue=tl.cue,guided=!!cue?.guided,day=cue?cue.day:M.dayOfDate(tl.date);
    if(!adult){todayDay=M.dayOfDate(todayISO());adult=M.adultPose(restBody,todayDay,camera.fov,openArea());}
-   // The focus box is frozen at the first frame of the stop (its approach start), taken at the stop's climax day, where it holds.
-   const id=cue?.stop?.id??null,fresh=id!==stop.id;if(fresh)stop={id,day:id?boxDay(id,day):day,box:null,pose:null};
+   // The focus box is frozen at the first frame of the stop (its approach start), taken at the stop's climax day, where it holds. Free mode (a scrub) has no stop: no box work while dragging.
+   const id=guided?cue?.stop?.id??null:null,fresh=id!==stop.id;if(fresh)stop={id,day:id?boxDay(id,day):day,box:null,pose:null};
    if(id&&!stop.box){const b=engine?.focusBox(id,stop.day)??null;stop.box=b&&!b.isEmpty()?b:null;
     // The box arrived late (engine not ready at approach start) with the zoom already under way: rejoin rather than jump.
     if(stop.box&&!fresh&&cue!.zoom>0&&!userMoved&&!tflight)rejoin={t0:now,from:nowPose()};}
    if(stop.box&&!stop.pose)stop.pose=M.focusPose(boxOf(stop.box),cue!.stop!.view,camera.fov,openArea(true),controls.minDistance*2);
    const def=M.defaultPoseFor(adult,day,todayDay);scripted=stop.pose&&cue!.zoom>0?M.lerpPose(def,stop.pose,cue!.zoom):def;
-   // Guided ↔ free (a scrub or reset) with the camera still scripted: blend from where it is (free mode has zoom 0, so a scrub from a held stop would otherwise jump).
-   if(guided!==wasGuided){wasGuided=guided;if(!userMoved&&!tflight)rejoin={t0:now,from:nowPose()};}
+   // Guided ↔ free (a scrub or reset), or a seek while guided (a stop tick from a hold), with the camera still scripted: blend from where it is (the new shot would otherwise cut, zoom 1 → 0 at another day). The rendered focus hands over too, camera scripted or not.
+   const key={seq:cue?.seq??0,guided},seek=M.needsRejoin(lastKey,key);lastKey=key;if(seek&&!userMoved&&!tflight)rejoin={t0:now,from:nowPose()};
    // After manual input, guided posing resumes (Play / Continue / a stop tick) when the sample moves again after the director has been still (paused from play, or holding: guided stays true, the sample frozen) for STILL_MS,
    // or after free mode (scrub): rejoin from the actual camera. The stillness wait keeps the frame or two before the director's pause lands from counting as a resume.
    const sig=cue?`${cue.day}|${cue.zoom}|${cue.ghost}|${cue.phase}|${id}`:'',moved=sig!==cueSig;if(moved){cueSig=sig;stillSince=now;}
@@ -211,14 +223,15 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
     isoSeen=tl.isolate;iso={id:tl.isolate??lastFocus?.id??null,from:lastFocus?.ghost??0,to:tl.isolate?1:0,t0:now};isoFly=!!tl.isolate;
     if(!tl.isolate){userMoved=false;rejoin=null;tflight=backTo(now);}
    }
-   if(isoFly&&tl.isolate){const b=engine?.focusBox(tl.isolate,day)??null;if(b&&!b.isEmpty()){const view=viewOf(tl.isolate);isoFly=false;isoBox=b;isoPose=null;rejoin=null;tflight={t0:now,ms:M.ISOLATE_FLY_MS,from:nowPose(),to:()=>isoPose??=M.focusPose(boxOf(isoBox!),view,camera.fov,openArea(true),controls.minDistance*2),end:()=>{userMoved=true;}};}}
+   if(isoFly&&tl.isolate){const b=engine?.focusBox(tl.isolate,day)??null;if(b&&!b.isEmpty()){const view=viewOf(tl.isolate);isoFly=false;isoBox=b;isoPose=null;rejoin=null;tflight={t0:now,ms:flyMs(),from:nowPose(),to:()=>isoPose??=M.focusPose(boxOf(isoBox!),view,camera.fov,openArea(true),controls.minDistance*2),end:()=>{userMoved=true;}};}}
    if(tflight)flyStep(now);
-   else if(!userMoved){let p=scripted;if(rejoin){const k=(now-rejoin.t0)/M.REJOIN_MS;if(k>=1)rejoin=null;else p=M.lerpPose(rejoin.from,p,M.smootherstep(0,1,k));}setPose(p);}
+   else if(!userMoved){let p=scripted;if(rejoin){const k=(now-rejoin.t0)/rejoinMs();if(k>=1)rejoin=null;else p=M.lerpPose(rejoin.from,p,M.smootherstep(0,1,k));}setPose(p);}
    controls.enableDamping=userMoved&&!tflight;
-   // Show all while a stop is focused (at a hold, say) hands straight back to the cue's focus instead of fading everything solid first.
+   // Show all while a stop is focused (at a hold, say) hands back to the cue's focus instead of fading everything solid first (focusOut blends the id change).
    if(iso.id&&iso.to===0&&id&&cue!.ghost>0)iso.id=null;
-   if(iso.id){const ghost=iso.from+(iso.to-iso.from)*M.smootherstep(0,M.ISOLATE_FADE_MS,now-iso.t0);if(ghost>0||iso.to>0)return {id:iso.id,ghost};iso.id=null;}
-   return id&&cue!.ghost>0?{id,ghost:cue!.ghost}:null;
+   let want:TFocus|null=id&&cue!.ghost>0?{id,ghost:cue!.ghost}:null;
+   if(iso.id){const ghost=iso.from+(iso.to-iso.from)*M.smootherstep(0,M.ISOLATE_FADE_MS,now-iso.t0);if(ghost>0||iso.to>0)want={id:iso.id,ghost};else iso.id=null;}
+   return focusOut(want,now,seek);
   };
   const touches=new Map<number,{x:number;y:number}>();let lastTap:{t:number;x:number;y:number}|null=null;
   const down=(e:PointerEvent)=>{
@@ -239,7 +252,7 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
    if(double&&P){
     // Timeline: a part flies there on the posed path (manual: pauses the director); empty space returns to the script (guided: a rejoin; free: a flight to the scripted pose, which it then follows).
     const M=P,tl=latestTimeline.current.timeline;
-    if(index>=0){manual();userMoved=true;rejoin=null;const box=boxOf(bounds[index]),dir=camera.position.clone().sub(controls.target).normalize().toArray() as Vec3;let to:TPose|null=null;tflight={t0:now,ms:M.ISOLATE_FLY_MS,from:nowPose(),to:()=>to??=M.fitPose(box,dir,camera.fov,openArea(),1/2.4,controls.minDistance*2)};}
+    if(index>=0){manual();userMoved=true;rejoin=null;const box=boxOf(bounds[index]),dir=camera.position.clone().sub(controls.target).normalize().toArray() as Vec3;let to:TPose|null=null;tflight={t0:now,ms:flyMs(),from:nowPose(),to:()=>to??=M.fitPose(box,dir,camera.fov,openArea(),1/2.4,controls.minDistance*2)};}
     else if(tl?.cue?.guided){if(userMoved){userMoved=armed=false;tflight=null;rejoin={t0:now,from:nowPose()};}}
     else if(scripted){userMoved=false;rejoin=null;tflight=backTo(now);}
    }
@@ -267,6 +280,8 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
     const r=engine.update({date:tl.date,day:tl.cue?.day,visible:s.visible,isolate:tl.isolate,now,focus});if(r.changed||r.animating)dirty=true;if(r.fly&&!P)focusBox(r.fly,1.35);
     // Re-warp the picking geometry and bounds once the date has rested for 150 ms, about 4 ms per frame (a pick completes the rest first); after ready() it also runs the focus-box prefetch, so it keeps being called until both are done.
     if(ready&&!settled&&now-dateAt>=150)settled=engine.settleSlice(4);
+    // The focus-box prefetch (stop order) also runs 1.5 ms every frame until done, playing or not, so the first approaches never compute a box synchronously.
+    if(ready&&!prefetched)prefetched=engine.prefetchSlice(1.5);
    }
    const fd=latestDate.current;if(ready&&fd.fracture&&!fxTried){fxTried=true;fx=createFracture({scene,atlas,pickers,data,partTexture});}
    if(fx){const r=fx.update(fd.fracture?fd.date??'':'',s.visible.includes('skeletal'),performance.now());if(r.changed||r.animating)dirty=true;if(r.fly)focusBox(fx.box,1.35);}
@@ -274,7 +289,7 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
    if(dirty){renderer.render(scene,camera);if(engine&&focus&&focus.ghost>0)engine.renderGhostPass(renderer,scene,camera);dirty=false;dots.current?.place(projectDot);}else if(dots.current?.stale)dots.current.place(projectDot);
   };fit();animate();
   const contextLost=(e:Event)=>{e.preventDefault();onError('The 3D session was paused by your device. Reload to continue.');};renderer.domElement.addEventListener('webglcontextlost',contextLost);
-  return()=>{disposed=true;fx?.dispose();engine?.dispose();abort.abort();cancelAnimationFrame(frame);observer.disconnect();el.removeEventListener('pointerdown',down,{capture:true});el.removeEventListener('wheel',wheel,{capture:true});controls.dispose();geometries.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());scene.traverse(o=>{if(o instanceof T.Mesh&&!geometries.includes(o.geometry)){o.geometry.dispose();const ms=Array.isArray(o.material)?o.material:[o.material];ms.forEach(m=>m.dispose());}});env.dispose();partTexture.dispose();renderer.dispose();renderer.domElement.remove();};
+  return()=>{disposed=true;motion?.removeEventListener?.('change',onMotion);fx?.dispose();engine?.dispose();abort.abort();cancelAnimationFrame(frame);observer.disconnect();el.removeEventListener('pointerdown',down,{capture:true});el.removeEventListener('wheel',wheel,{capture:true});controls.dispose();geometries.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());scene.traverse(o=>{if(o instanceof T.Mesh&&!geometries.includes(o.geometry)){o.geometry.dispose();const ms=Array.isArray(o.material)?o.material:[o.material];ms.forEach(m=>m.dispose());}});env.dispose();partTexture.dispose();renderer.dispose();renderer.domElement.remove();};
  },[atlas]);
  return <><div className="scene" ref={host}/>{!timeline&&<IssueDots issues={issues} selectedIssue={selectedIssue} onSelectIssue={onSelectIssue} handle={dots}/>}</>;
 }

@@ -13,7 +13,7 @@ import growthJson from '../../health/growth.json';
 import rigJson from '../growth/rig.json';
 import {FOCUS_MARGIN} from '../director/types';
 /** Re-exported so scene.tsx reads them from this dynamically loaded module (a value import of director/types would put it in the /anyhealth bundle). */
-export {REJOIN_MS,ISOLATE_FADE_MS,ISOLATE_FLY_MS} from '../director/types';
+export {REJOIN_MS,ISOLATE_FADE_MS,ISOLATE_FLY_MS,REDUCED_MOTION_MS} from '../director/types';
 
 export interface Pose {target:Vec3;position:Vec3;ox:number;oy:number}
 /** The screen area left for the anatomy (scene.tsx openArea): canvas size and the open rect, CSS px. */
@@ -97,7 +97,24 @@ export const defaultPoseFor=(adult:Pose,day:number,todayDay:number)=>scalePose(a
 /** A stop's focus pose: the focus box × FOCUS_MARGIN fitted in the open area from `view` (default: DEFAULT_DIRECTION), at least minDistance away. */
 export const focusPose=(box:Box,view:Vec3|null|undefined,fovDeg:number,open:Open,minDistance=0)=>fitPose(box,view??DEFAULT_DIRECTION,fovDeg,open,1/FOCUS_MARGIN,minDistance);
 
-/** A stop's climax day (fractional days since BIRTH_DATE): onset + climax (0 until Task 2 fills every catalog). */
-export const climaxDay=(s:{onset:string;climax?:number})=>dayOfDate(s.onset)+(s.climax??0);
-/** The day the scene freezes a stop's focus box at (at the first frame of its approach): the script's climax day, or the cue's day for an id without a script. */
-export const stopBoxDay=(id:string,cueDay:number,scriptFor:(id:string)=>{onset:string;climax?:number}|undefined)=>{const s=scriptFor(id);return s?climaxDay(s):cueDay;};
+/** A stop's climax day (fractional days since BIRTH_DATE): onset + climax, clamped to [0, endDay] (endDay = today's day since birth) exactly as director/schedule.ts stopsFor places the stop. */
+export const climaxDay=(s:{onset:string;climax?:number},endDay:number)=>Math.max(0,Math.min(Math.max(0,endDay),dayOfDate(s.onset)+(s.climax??0)));
+/** The day the scene freezes a stop's focus box at (at the first frame of its approach): the script's clamped climax day (the engine's prefetch key), or the cue's day for an id without a script. */
+export const stopBoxDay=(id:string,cueDay:number,scriptFor:(id:string)=>{onset:string;climax?:number}|undefined,endDay:number)=>{const s=scriptFor(id);return s?climaxDay(s,endDay):cueDay;};
+
+/** What the scene compares frame to frame to decide on a rejoin. */
+export interface CueKey {seq:number;guided:boolean}
+/** Whether the scene must blend (rejoin) from the actual camera this frame instead of taking the scripted pose: a guided ↔ free switch, or a seek while guided (a stop tick from a hold would otherwise cut zoom 1 → 0 at a new day). A seek within free mode needs none: zoom is 0 on both sides, so the scripted pose (growth framing) already follows the body. False on the first frame (prev null). */
+export const needsRejoin=(prev:CueKey|null,cue:CueKey)=>!!prev&&(prev.guided!==cue.guided||cue.guided&&prev.seq!==cue.seq);
+
+/** The focus the engine renders: a script id and how far everything else is ghosted (0..1); null = nothing. */
+export interface Focus {id:string;ghost:number}
+/** How far the rendered ghost must travel from `a` to `b`: |Δghost| for the same id (null reads as ghost 0), gA + gB for different ids (the old one must fade out before the new one fades in). */
+export const focusGap=(a:Focus|null,b:Focus|null)=>{const ga=a?.ghost??0,gb=b?.ghost??0;return a&&b&&a.id!==b.id?ga+gb:Math.abs(ga-gb);};
+/** Focus handover at progress k ∈ [0,1] (smootherstep eased) from the last rendered focus `from` to the live one `to`: the same id (or either null) crossfades its ghost; a different id fades `from` out over the first half and `to` in over the second. Continuous in k, exactly `from` at 0 and `to` at 1; null whenever the ghost is 0. */
+export function blendFocus(from:Focus|null,to:Focus|null,k:number):Focus|null{
+	if(k>=1)return to;const fg=from?.ghost??0,tg=to?.ghost??0,e=(x:number)=>smootherstep(0,1,x);let id:string|null,g:number;
+	if(!from||!to||from.id===to.id){id=(to??from)?.id??null;g=fg+(tg-fg)*e(k);}
+	else if(k<.5){id=from.id;g=fg*(1-e(2*k));}else{id=to.id;g=tg*e(2*k-1);}
+	return id&&g>0?{id,ghost:g}:null;
+}

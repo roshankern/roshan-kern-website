@@ -5,7 +5,10 @@ import {DEFAULT_VISIBLE} from '../../atlas/anatomy';
 import {nodeEngine} from './engine-node';
 import {ghostGpu} from './ghost-gpu';
 import {SCRIPTS,scriptFor,dayOf} from '../issues';
-import {climaxDay,stopBoxDay} from '../camera/pose';
+import {climaxDay,stopBoxDay,dayOfDate} from '../camera/pose';
+import {prefetchPlan} from '../engine';
+import {stopsFor} from '../director/schedule';
+import {todayISO} from '../../health/dates';
 import {GHOST_ALPHA} from '../director/types';
 import {FX_ROWS} from '../fx/part-fx';
 import {toDays} from '../../health/dates';
@@ -144,14 +147,40 @@ export const checks:Check[]=[
 		c.assert(birth<today*.4,`spine box height at birth ${birth.toFixed(3)} m, today ${today.toFixed(3)} m`);
 		const b=engine.focusBox(SCOLIOSIS,0)!;c.assert(b.max.y<.6,`birth box top ${b.max.y.toFixed(3)} m is within a newborn's height`);
 	}},
-	{name:'focusBox prefetch: ready() queues every script\'s climax box, settleSlice finishes it in budgeted slices, and every real stop (scene.tsx stopBoxDay: fractional climaxes included) then hits the cache',async run(c){
-		const g=await c.geometry(),{engine}=nodeEngine(g),fresh=nodeEngine(g).engine;engine.update(frame('2012-01-01'));
+	{name:'focusBox prefetch: ready() queues every script\'s climax box (clamped to today) in stop order, settleSlice finishes it in budgeted slices, and every real stop (scene.tsx stopBoxDay: fractional climaxes included) then hits the cache',async run(c){
+		const g=await c.geometry(),{engine}=nodeEngine(g),fresh=nodeEngine(g).engine,end=dayOfDate(todayISO());engine.update(frame('2012-01-01'));
 		let slices=0,worst=0;for(;;){const t=performance.now(),done=engine.settleSlice(4);worst=Math.max(worst,performance.now()-t);slices++;if(done)break;c.assert(slices<5000,'prefetch never finished');}
-		const st=engine.stats().boxes,stops=SCRIPTS.map(s=>({id:s.id,day:stopBoxDay(s.id,0,scriptFor)})),keys=new Set(stops.map(s=>`${s.id}|${Math.floor(s.day)}`));
+		const st=engine.stats().boxes,stops=SCRIPTS.map(s=>({id:s.id,day:stopBoxDay(s.id,0,scriptFor,end)})),keys=new Set(stops.map(s=>`${s.id}|${Math.floor(s.day)}`));
 		c.assert(st.pending===0&&st.cached>=keys.size&&st.misses===0,`after ${slices} slices: ${JSON.stringify(st)}, ${keys.size} stops`);c.assert(worst<15,`slowest slice ${worst.toFixed(1)} ms for a 4 ms budget`);
-		c.assert(stops.every(s=>s.day===climaxDay(scriptFor(s.id)!)),'stop box days are the climax days');
+		c.assert(stops.every(s=>s.day===climaxDay(scriptFor(s.id)!,end)),'stop box days are the clamped climax days');
 		for(const s of stops)engine.focusBox(s.id,s.day);const after=engine.stats().boxes;
 		c.assert(after.misses===0&&after.hits===stops.length,`stop lookups: ${JSON.stringify(after)}`);
 		for(const s of stops.filter(x=>[FRACTURE,SCOLIOSIS,ACNE].includes(x.id)))boxNear(c,engine.focusBox(s.id,s.day),fresh.focusBox(s.id,s.day),1e-9,`${s.id}: prefetched = computed`);
+	}},
+	{name:'prefetch order = the director\'s stop order (ids and days, today and a clamping today), so the first approaches are cached first',run(c){
+		for(const today of [todayISO(),'2020-01-01']){const plan=prefetchPlan(SCRIPTS,dayOfDate(today)),stops=stopsFor(SCRIPTS,today);
+			c.assert(plan.length===stops.length&&plan.every((p,i)=>p.id===stops[i].id&&p.day===stops[i].day),`${today}: plan ${plan.slice(0,4).map(p=>p.id)} vs stops ${stops.slice(0,4).map(s=>s.id)}`);}
+	}},
+	{name:'prefetchSlice: prefetch only (no settle), respects its 1.5 ms budget (one vertex chunk at least), completes in stop order, then every stop hits',async run(c){
+		const g=await c.geometry(),{engine}=nodeEngine(g),end=dayOfDate(todayISO()),plan=prefetchPlan(SCRIPTS,end);engine.update(frame('2012-01-01'));
+		const first=plan[0];let slices=0,worst=0,firstAt=-1;
+		for(;;){const t=performance.now(),done=engine.prefetchSlice(1.5);worst=Math.max(worst,performance.now()-t);slices++;
+			if(firstAt<0&&engine.stats().boxes.cached>0)firstAt=slices;if(done)break;c.assert(slices<20000,'prefetch never finished');}
+		const st=engine.stats().boxes;c.assert(st.pending===0&&st.misses===0&&st.cached>=new Set(plan.map(p=>`${p.id}|${Math.floor(p.day)}`)).size,`after ${slices} slices: ${JSON.stringify(st)}`);
+		c.assert(worst<12,`slowest slice ${worst.toFixed(1)} ms for a 1.5 ms budget`);c.assert(slices>5,`${slices} slices: the budget sliced the work`);
+		const h0=engine.stats().boxes.hits;engine.focusBox(first.id,first.day);c.assert(engine.stats().boxes.hits===h0+1,'the first stop hits');
+		c.assert(engine.settle()>0,'prefetchSlice left the settle to settleSlice / settle (parts still to re-warp)');
+		for(const p of plan)engine.focusBox(p.id,p.day);c.assert(engine.stats().boxes.misses===0,'every stop hits');
+	}},
+	{name:'a sub-day step recomputes the issue fx alone: body / warp are cached by date (bodyAt not called), a new whole date recomputes them, and the settle stays exact',async run(c){
+		const g=await c.geometry(),A=nodeEngine(g),B=nodeEngine(g),date='2009-09-02',d=toDays(date)-BIRTH;
+		A.engine.update(frame(date,{day:d}));const b0=A.engine.stats().bodies,a0=A.engine.stats().applies;
+		for(let k=1;k<=10;k++)A.engine.update(frame(date,{day:d+k/12,now:k}));const s1=A.engine.stats();
+		c.assert(s1.applies===a0+10&&s1.bodies===b0,`10 sub-day steps: ${s1.applies-a0} applies, ${s1.bodies-b0} body recomputes`);
+		A.engine.update(frame('2009-09-03',{day:d+1,now:20}));c.assert(A.engine.stats().bodies===b0+1,'a new whole date recomputes the body');
+		// Settle after sub-day steps (a pass interrupted by fx-only changes) equals a fresh settle at the final day.
+		A.engine.update(frame(date,{day:d+.2,now:30}));A.engine.settleSlice(0);A.engine.update(frame(date,{day:d+.9,now:31}));A.engine.settleSlice(0);A.engine.update(frame(date,{day:d+.95,now:32}));A.engine.settle();
+		B.engine.update(frame(date,{day:d+.95}));B.engine.settle();let worst=0;A.bounds.forEach((b,i)=>{for(const k of ['min','max'] as const)for(const ax of ['x','y','z'] as const)worst=Math.max(worst,Math.abs(b[k][ax]-B.bounds[i][k][ax]));});
+		c.assert(worst<=1e-9,`settled bounds after fx-only steps differ from a fresh settle by ${worst}`);
 	}},
 ];

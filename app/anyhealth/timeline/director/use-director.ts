@@ -15,8 +15,8 @@ function ownKey(e:KeyboardEvent){
 	return !document.querySelector('dialog[open],[role="dialog"][aria-modal="true"]');
 }
 
-/** `scrubbed`: set by seekDay (free mode), cleared by play / continue / seekStop. */
-interface View {sample:Sample;playing:boolean;holding:number|null;scrubbed:boolean}
+/** `scrubbed`: set by seekDay / seekMs (free mode), cleared by play / continue / seekStop. `seq`: seeks so far (CameraCue.seq). */
+interface View {sample:Sample;playing:boolean;holding:number|null;scrubbed:boolean;seq:number}
 
 /** Guided playback for the timeline: the schedule for `today`, the clock state, and the actions the bar, tracker and scene call. */
 export function useDirector(today:string):DirectorApi{
@@ -24,10 +24,10 @@ export function useDirector(today:string):DirectorApi{
 	const clockRef=useRef<{schedule:typeof schedule;clock:Clock}|null>(null);
 	if(clockRef.current?.schedule!==schedule)clockRef.current={schedule,clock:createClock(schedule)};
 	const clock=clockRef.current.clock;
-	const [view,setView]=useState<View>(()=>({sample:clock.tick(0),playing:false,holding:null,scrubbed:false}));
-	const scrubbed=useRef(false);
+	const [view,setView]=useState<View>(()=>({sample:clock.tick(0),playing:false,holding:null,scrubbed:false,seq:0}));
+	const scrubbed=useRef(false),seq=useRef(0);
 	/** Tick to now and publish the clock state. */
-	const publish=useCallback(()=>{const sample=clock.tick(performance.now());setView({sample,playing:clock.playing,holding:clock.holding,scrubbed:scrubbed.current});},[clock]);
+	const publish=useCallback(()=>{const sample=clock.tick(performance.now());setView({sample,playing:clock.playing,holding:clock.holding,scrubbed:scrubbed.current,seq:seq.current});},[clock]);
 	useEffect(()=>{publish();},[publish]);
 	useEffect(()=>{
 		if(!view.playing)return;let raf=0;
@@ -37,8 +37,9 @@ export function useDirector(today:string):DirectorApi{
 	const play=useCallback(()=>{scrubbed.current=false;clock.play(performance.now());publish();},[clock,publish]);
 	const pause=useCallback(()=>{clock.pause(performance.now());publish();},[clock,publish]);
 	const cont=useCallback(()=>{if(clock.holding!==null)scrubbed.current=false;clock.continue(performance.now());publish();},[clock,publish]);
-	const seekDay=useCallback((day:number)=>{scrubbed.current=true;clock.seekDay(day);publish();},[clock,publish]);
-	const seekStop=useCallback((i:number)=>{if(Number.isInteger(i)&&i>=0&&i<schedule.holdMs.length)scrubbed.current=false;clock.seekStop(i,performance.now());publish();},[clock,publish,schedule]);
+	const seekDay=useCallback((day:number)=>{scrubbed.current=true;seq.current++;clock.seekDay(day);publish();},[clock,publish]);
+	const seekMs=useCallback((ms:number)=>{scrubbed.current=true;seq.current++;clock.seekMs(ms);publish();},[clock,publish]);
+	const seekStop=useCallback((i:number)=>{if(Number.isInteger(i)&&i>=0&&i<schedule.holdMs.length){scrubbed.current=false;seq.current++;}clock.seekStop(i,performance.now());publish();},[clock,publish,schedule]);
 	const manualCamera=useCallback(()=>{if(clock.playing){clock.pause(performance.now());publish();}},[clock,publish]);
 	useEffect(()=>{
 		const onKey=(e:KeyboardEvent)=>{
@@ -48,8 +49,8 @@ export function useDirector(today:string):DirectorApi{
 		};
 		window.addEventListener('keydown',onKey);return ()=>window.removeEventListener('keydown',onKey);
 	},[clock,cont,pause,play]);
-	const {sample,playing,holding}=view,free=view.scrubbed,stops=schedule.stops;
+	const {sample,playing,holding,seq:n}=view,free=view.scrubbed,stops=schedule.stops;
 	// Guided unless scrubbed: pausing mid-shot freezes it; only a scrub (or reset) drops to free mode, where the scene follows the default pose unghosted.
-	const cue=useMemo(()=>({day:sample.day,guided:!free,phase:sample.phase,stop:sample.stop!==null?{id:stops[sample.stop].id,view:stops[sample.stop].view}:null,ghost:free?0:sample.ghost,zoom:free?0:sample.zoom}),[sample,free,stops]);
-	return {sample,stops,schedule,playing,holding,cue,play,pause,continue:cont,seekDay,seekStop,manualCamera};
+	const cue=useMemo(()=>({day:sample.day,guided:!free,phase:sample.phase,stop:sample.stop!==null?{id:stops[sample.stop].id,view:stops[sample.stop].view}:null,ghost:free?0:sample.ghost,zoom:free?0:sample.zoom,seq:n}),[sample,free,stops,n]);
+	return {sample,stops,schedule,playing,holding,cue,play,pause,continue:cont,seekDay,seekMs,seekStop,manualCamera};
 }

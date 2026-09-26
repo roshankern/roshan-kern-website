@@ -8,8 +8,9 @@ import {SCRIPTS,scriptFor} from '../issues';
 import {bodyAt} from '../growth/proportions';
 import {toDays,fromDays} from '../../health/dates';
 import {BIRTH_DATE} from '../../health/types';
-import {REJOIN_MS,APPROACH_MS} from '../director/types';
-import {lerpPose,scalePose,adultPose,defaultPoseFor,focusPose,projectBox,projectedHeight,statureAt,dayOfDate,smootherstep,fitPose,elevationOf,climaxDay,stopBoxDay,DEFAULT_DIRECTION,type Pose,type Open,type Box} from '../camera/pose';
+import {REJOIN_MS,APPROACH_MS,RELEASE_MS} from '../director/types';
+import {buildSchedule,stopsFor} from '../director/schedule';
+import {lerpPose,scalePose,adultPose,defaultPoseFor,focusPose,projectBox,projectedHeight,statureAt,dayOfDate,smootherstep,fitPose,elevationOf,climaxDay,stopBoxDay,needsRejoin,focusGap,blendFocus,DEFAULT_DIRECTION,type Pose,type Open,type Box,type Focus} from '../camera/pose';
 
 const FOV=34,TODAY='2026-09-26',TODAY_DAY=dayOfDate(TODAY),MIN_DISTANCE=.04;
 /** Open areas as scene.tsx openArea measures them (atlas.css / tracker.css). Desktop 1440×900: Systems panel 30 + 254 (+24), tracker footprint 340 + 30 (+24), title above, timeline bar below.
@@ -56,7 +57,7 @@ export const checks:Check[]=[
 	}},
 	{name:'focus pose fits the open area (tracker footprint excluded) with ≥ 4% margin: every script\'s focusBox at its climax, from its view, 1440×900 and 390×844',async run(c){
 		const g=await c.geometry(),{engine}=nodeEngine(g),missing:string[]=[];
-		const stops=SCRIPTS.map(s=>({s,day:climaxDay(s)})).sort((a,b)=>a.day-b.day);
+		const stops=SCRIPTS.map(s=>({s,day:climaxDay(s,TODAY_DAY)})).sort((a,b)=>a.day-b.day);
 		for(const {s,day} of stops){
 			engine.update({date:fromDays(toDays(BIRTH_DATE)+Math.floor(day)),day,visible:DEFAULT_VISIBLE,isolate:null,now:0});const b=engine.focusBox(s.id,day);
 			if(!b||b.isEmpty()){missing.push(s.id);continue;}const box=boxOf(b);
@@ -89,9 +90,38 @@ export const checks:Check[]=[
 			c.assert(worst<=.005,`${what}: worst step ${(worst*100).toFixed(3)}% of distance`);
 		}
 	}},
-	{name:'the scene freezes a stop\'s focus box at its climax day (stopBoxDay = onset + climax, the day the focus-fit check frames)',run(c){
-		for(const s of SCRIPTS){c.assert(stopBoxDay(s.id,-123.5,scriptFor)===dayOfDate(s.onset)+(s.climax??0),`${s.id}: stopBoxDay ${stopBoxDay(s.id,-123.5,scriptFor)}`);c.assert(climaxDay(s)===stopBoxDay(s.id,0,scriptFor),`${s.id}: climaxDay`);}
-		c.assert(stopBoxDay('no-such-issue',42.25,scriptFor)===42.25,'unknown id falls back to the cue day');
+	{name:'the scene freezes a stop\'s focus box at its climax day (stopBoxDay = onset + climax clamped to [0, today] exactly as stopsFor places the stop, the day the focus-fit check frames)',run(c){
+		for(const s of SCRIPTS){c.assert(stopBoxDay(s.id,-123.5,scriptFor,TODAY_DAY)===Math.min(TODAY_DAY,dayOfDate(s.onset)+(s.climax??0)),`${s.id}: stopBoxDay ${stopBoxDay(s.id,-123.5,scriptFor,TODAY_DAY)}`);c.assert(climaxDay(s,TODAY_DAY)===stopBoxDay(s.id,0,scriptFor,TODAY_DAY),`${s.id}: climaxDay`);}
+		c.assert(stopBoxDay('no-such-issue',42.25,scriptFor,TODAY_DAY)===42.25,'unknown id falls back to the cue day');
+		// A today that clamps later climaxes (as the director check's 2020-01-01 schedule does): the box day is still each stop's day.
+		for(const today of [TODAY,'2020-01-01','2010-01-01']){const end=dayOfDate(today),stops=stopsFor(SCRIPTS,today);let clamped=0;
+			for(const st of stops){const d=stopBoxDay(st.id,-1,scriptFor,end);c.assert(d===st.day,`${today} ${st.id}: box day ${d} vs stop day ${st.day}`);if(d===end)clamped++;}
+			if(today!==TODAY)c.assert(clamped>0,`${today}: some climaxes clamp to today`);}
+	}},
+	{name:'needsRejoin: a guided/free switch or a seek while guided rejoins; a seek within free mode, a steady cue or the first frame does not',run(c){
+		const k=(seq:number,guided:boolean)=>({seq,guided});
+		c.assert(!needsRejoin(null,k(0,true)),'first frame');c.assert(!needsRejoin(k(3,true),k(3,true))&&!needsRejoin(k(3,false),k(3,false)),'steady');
+		c.assert(needsRejoin(k(3,true),k(4,true)),'stop tick from a hold (guided seek)');c.assert(needsRejoin(k(3,true),k(4,false)),'scrub from guided');c.assert(needsRejoin(k(3,false),k(4,true)),'stop tick from free mode');
+		c.assert(needsRejoin(k(3,true),k(3,false))&&needsRejoin(k(3,false),k(3,true)),'mode switch alone (Play after a scrub)');c.assert(!needsRejoin(k(3,false),k(9,false)),'dragging in free mode: zoom 0 both sides, no restart');
+	}},
+	{name:'focus handover never steps: blendFocus is exact at the ends, continuous (≤ 0.02 per 1/1000), fades a different id out before the new one in',run(c){
+		const A:Focus={id:'a',ghost:1},B:Focus={id:'b',ghost:.8},A3:Focus={id:'a',ghost:.3};const g=(f:Focus|null)=>f?.ghost??0;
+		for(const [what,from,to] of [['A → B',A,B],['A → null',A,null],['null → B',null,B],['A → A 0.3',A,A3],['A 0.3 → B',A3,B]] as [string,Focus|null,Focus|null][]){
+			c.assert(JSON.stringify(blendFocus(from,to,0))===JSON.stringify(from)&&blendFocus(from,to,1)===to,`${what}: endpoints`);
+			let prev=blendFocus(from,to,0),worst=0;for(let i=1;i<=1000;i++){const f=blendFocus(from,to,i/1000);worst=Math.max(worst,focusGap(prev,f));
+				if(from&&to&&from.id!==to.id)c.assert(i/1000<.5?!f||f.id===from.id:!f||f.id===to.id,`${what} at ${i/1000}: id ${f?.id}`);prev=f;}
+			c.assert(worst<=.02,`${what}: worst step ${worst}`);c.near(focusGap(from,to),from&&to&&from.id!==to.id?g(from)+g(to):Math.abs(g(from)-g(to)),1e-12,`${what}: gap`);
+		}
+	}},
+	{name:'reduced motion: the cue zoom is a cut (a step at the ghost ramp midpoint), the ghost still a ≈ 0.2 s ramp',run(c){
+		const s=buildSchedule(SCRIPTS,'2026-09-25',{reducedMotion:true});let checked=0;
+		s.holdMs.forEach((h,i)=>{
+			const a0=h-APPROACH_MS,cut=a0+.96*APPROACH_MS;if(i>0&&a0<s.holdMs[i-1]+RELEASE_MS)return;checked++;
+			c.assert(s.sample(cut-.01,false).zoom===0&&s.sample(cut,false).zoom===1,`stop ${i}: approach zoom steps at 0.96 of the leg`);
+			const gs=[.92,.94,.96,.98].map(u=>s.sample(a0+u*APPROACH_MS,false).ghost);c.assert(gs[0]===0&&gs[1]>0&&gs[1]<.5&&Math.abs(gs[2]-.5)<1e-9&&gs[3]>.5&&gs[3]<1,`stop ${i}: approach ghost ramps ${gs}`);
+			if(i+1<s.holdMs.length&&s.holdMs[i+1]-h>=RELEASE_MS+APPROACH_MS){const rc=h+.04*RELEASE_MS;c.assert(s.sample(rc-.01,false).zoom===1&&s.sample(rc,false).zoom===0,`stop ${i}: release zoom steps at 0.04 of the leg`);
+				const rg=[.02,.04,.06].map(u=>s.sample(h+u*RELEASE_MS,false).ghost);c.assert(rg[0]>.5&&rg[0]<1&&Math.abs(rg[1]-.5)<1e-9&&rg[2]<.5&&rg[2]>0,`stop ${i}: release ghost ramps ${rg}`);}
+		});c.assert(checked>5,`checked ${checked} stops`);
 	}},
 	{name:'scalePose scales target and position about the origin and keeps the view offset',run(c){
 		const p=scalePose(DEF,.3);c.near(p.position[1],DEF.position[1]*.3,1e-12,'position');c.near(p.target[2],DEF.target[2]*.3,1e-12,'target');c.assert(p.ox===DEF.ox&&p.oy===DEF.oy,'offset');

@@ -7,7 +7,10 @@ import {makeWarp,type Density} from '../../health/warp';
 import {toDays,fromDays} from '../../health/dates';
 import {BIRTH_DATE} from '../../health/types';
 import type {Phase,Sample,Schedule} from '../director/types';
-import {YEAR_GAP,dayAtFraction,stopTicks,yearMarks} from '../bar-model';
+import {YEAR_GAP,msAtFraction,stopTicks,yearMarks} from '../bar-model';
+import {buildSchedule} from '../director/schedule';
+import {createClock} from '../director/clock';
+import {SCRIPTS} from '../issues';
 const T0='2026-09-25';
 // Quiet share of the birth..today track under a density list (days outside every range, weighted by the warp).
 const quietShare=(dens:Density[],today:string)=>{const min=toDays(BIRTH_DATE),max=toDays(today),w=makeWarp(min,max,dens);let quiet=0;for(let d=min;d<max;d++){const inDense=dens.some(r=>d>=toDays(r.from)&&d<toDays(r.to));if(!inDense)quiet+=w.toT(d+1)-w.toT(d);}return quiet;};
@@ -88,6 +91,12 @@ export const checks:Check[]=[
 		const s=linear(T0),t=stopTicks(s);c.assert(t.length===2&&t[0].title==='A',`ticks ${JSON.stringify(t)}`);c.near(t[0].t,.25,1e-9,'tick a');c.near(t[1].t,.5,1e-9,'tick b');
 		const y=yearMarks(s,T0);c.assert(y.length>=3,`years ${y.length}`);
 		for(let i=0;i<y.length;i++){c.assert(y[i].t>=0&&y[i].t<=1,'in track');if(i)c.assert(y[i].year>y[i-1].year&&y[i].t-y[i-1].t>=YEAR_GAP,`gap ${y[i-1].year}→${y[i].year}`);}
-		c.near(dayAtFraction(s,.5),s.totalMs*.5,1e-9,'fraction → day');c.near(dayAtFraction(s,2),s.totalMs,1e-9,'clamped');c.near(dayAtFraction(s,-1),0,1e-9,'clamped low');
+		c.assert(msAtFraction(s,.5)===s.totalMs*.5&&msAtFraction(s,2)===s.totalMs&&msAtFraction(s,-1)===0,'fraction → story ms, clamped');
+	}},
+	{name:'bar: a drag fraction → seekMs → the handle (storyMs / totalMs) round-trips exactly, over same-day flats too, and seeks free (paused, not holding)',run(c){
+		const s=buildSchedule(SCRIPTS,T0),k=createClock(s);let worst=0;
+		const fr=[...Array.from({length:401},(_,i)=>i/400),...s.holdMs.flatMap(h=>[h,h+1,h+900].map(ms=>ms/s.totalMs))];
+		for(const t of fr){const ms=msAtFraction(s,t);k.seekMs(ms);c.assert(k.storyMs===ms&&!k.playing&&k.holding===null,`seekMs(${ms}) → ${k.storyMs}`);worst=Math.max(worst,Math.abs(k.storyMs/s.totalMs-Math.min(1,t)));}
+		c.assert(worst<=1e-15,`handle drift ${worst}`);
 	}},
 ];

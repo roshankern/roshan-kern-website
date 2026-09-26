@@ -17,5 +17,5 @@ export function yearMarks(s:Schedule,today:string,gap=YEAR_GAP):{year:number;t:n
 	return out;
 }
 
-/** A drag position (track fraction) → the day it shows, for seekDay. */
-export const dayAtFraction=(s:Schedule,t:number)=>s.sample(Math.max(0,Math.min(1,t))*s.totalMs,false).day;
+/** A drag / arrow-key position (track fraction, clamped to [0,1]) → its story time, for seekMs: the handle lands exactly where it was dragged, even over the same-day flats (a day would map back to the flat's first instant). */
+export const msAtFraction=(s:Schedule,t:number)=>Math.max(0,Math.min(1,t))*s.totalMs;

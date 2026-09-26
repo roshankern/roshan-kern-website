@@ -17,7 +17,7 @@ import {toDays,todayISO} from '../health/dates';
 import {BIRTH_DATE} from '../health/types';
 import {FRACTURE_PART,TIMELINE_DENSITY,fractureAt} from '../fracture/model';
 import {parseDateParam} from '../timeline/url-date';
-import {dayAtFraction,stopTicks,yearMarks} from '../timeline/bar-model';
+import {msAtFraction,stopTicks,yearMarks} from '../timeline/bar-model';
 import type {CameraCue} from '../timeline/director/types';
 const initial:SceneState={visible:DEFAULT_VISIBLE};
 const ISSUES=[...(issuesData as Issue[])].sort((a,b)=>a.date.localeCompare(b.date)),GROWTH=growthData as GrowthPoint[];
@@ -25,7 +25,7 @@ const noSelect=()=>{};
 /** The timeline runtime (engine, catalog, pacing, tracker, rig), passed in by the timeline page's client entry (timeline/timeline-app.tsx) so the default page never bundles it. */
 type TimelineKit=typeof import('../timeline/runtime');
 
-/** Timeline mode's playback (v2 director): owns kit.useDirector (a child component, so the hook is called unconditionally while AtlasApp's kit may be null) and renders the bar and the Issue tracker from it. Each frame it lifts the date and camera cue up to AtlasApp for the scene and body stats; `manual` receives the scene's manual-camera handler. A manual Isolate pauses the director; guided playback resuming clears it. */
+/** Timeline mode's playback (v2 director): owns kit.useDirector (a child component, so the hook is called unconditionally while AtlasApp's kit may be null) and renders the bar and the Issue tracker from it. Each frame it lifts the date and camera cue up to AtlasApp for the scene and body stats; `manual` receives the scene's manual-camera handler. A manual Isolate pauses the director; Play, Continue and a stop tick clear it (as does playing or holding by any other route, e.g. the keyboard). */
 function TimelineDirector({kit,startDate,isolated,onIsolate,onFrame,manual}:{kit:TimelineKit;startDate:string;isolated:string|null;onIsolate:(id:string|null)=>void;onFrame:(date:string,cue:CameraCue)=>void;manual:{current:()=>void}}){
  const [today]=useState(todayISO),d=kit.useDirector(today),{schedule,sample}=d;
  useEffect(()=>{manual.current=d.manualCamera;},[manual,d.manualCamera]);
@@ -33,13 +33,15 @@ function TimelineDirector({kit,startDate,isolated,onIsolate,onFrame,manual}:{kit
  // ?date=: start there, paused (free mode).
  const start=useRef(startDate);useEffect(()=>{const day=toDays(start.current)-toDays(BIRTH_DATE);if(day>0)d.seekDay(day);},[]);
  // Keyed on the cue's values, not its identity: lifting it re-renders this component, and a hook that rebuilt the object each render would otherwise loop. A layout effect, so the scene gets the cue in the same frame as the bar and tracker.
- const c=d.cue;useLayoutEffect(()=>{onFrame(sample.date,c);},[onFrame,sample.date,c.day,c.guided,c.phase,c.stop?.id,c.ghost,c.zoom]);
- useEffect(()=>{if(d.playing&&isolated)onIsolate(null);},[d.playing,isolated,onIsolate]);
- // A manual Isolate pauses guided play; at a hold it leaves guided mode (free mode at the same day), so Play returns to that climax.
- const isolate=(id:string|null)=>{if(id){if(d.holding!=null)d.seekDay(sample.day);else if(d.playing)d.pause();}onIsolate(id);};
+ const c=d.cue;useLayoutEffect(()=>{onFrame(sample.date,c);},[onFrame,sample.date,c.day,c.guided,c.phase,c.stop?.id,c.ghost,c.zoom,c.seq]);
+ // Guided playback and a manual Isolate never coexist: the director actions below clear it in the same update; this catches the keyboard (Space / Enter go straight to the hook).
+ useEffect(()=>{if((d.playing||d.holding!=null)&&isolated)onIsolate(null);},[d.playing,d.holding,isolated,onIsolate]);
+ const play=()=>{onIsolate(null);d.play();},cont=()=>{onIsolate(null);d.continue();},seekStop=(i:number)=>{onIsolate(null);d.seekStop(i);};
+ // A manual Isolate pauses guided play; at a hold it leaves guided mode at that hold's exact story time (free mode), so Play holds that very stop again (seekDay would map a same-day pair's day to its first stop).
+ const isolate=(id:string|null)=>{if(id){if(d.holding!=null)d.seekMs(schedule.holdMs[d.holding]);else if(d.playing)d.pause();}onIsolate(id);};
  return <>
-  <TimelineBar issues={[]} date={sample.date} onDate={noSelect} selected={null} onSelect={noSelect} director={{fraction:schedule.totalMs>0?sample.storyMs/schedule.totalMs:0,ticks,years,playing:d.playing,holding:d.holding!=null,onPlay:()=>d.play(),onPause:()=>d.pause(),onContinue:()=>d.continue(),onSeekFraction:t=>d.seekDay(dayAtFraction(schedule,t)),onSeekStop:i=>d.seekStop(i),onReset:()=>d.seekDay(0)}}/>
-  <kit.IssueTracker date={sample.date} today={today} isolated={isolated} onIsolate={isolate} focus={sample.focusId?{id:sample.focusId,phase:sample.phase}:null} phase={sample.phase} onContinue={()=>d.continue()}/>
+  <TimelineBar issues={[]} date={sample.date} onDate={noSelect} selected={null} onSelect={noSelect} director={{fraction:schedule.totalMs>0?sample.storyMs/schedule.totalMs:0,ticks,years,playing:d.playing,holding:d.holding!=null,onPlay:play,onPause:()=>d.pause(),onContinue:cont,onSeekFraction:t=>d.seekMs(msAtFraction(schedule,t)),onSeekStop:seekStop,onReset:()=>d.seekDay(0)}}/>
+  <kit.IssueTracker date={sample.date} today={today} isolated={isolated} onIsolate={isolate} focus={sample.focusId?{id:sample.focusId,phase:sample.phase}:null} phase={sample.phase} onContinue={cont}/>
  </>;
 }
 /** `fracture` (the /anyhealth/test page): draws the 2009 humerus fracture, warps the timeline around it and reads ?date=YYYY-MM-DD.

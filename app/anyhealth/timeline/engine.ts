@@ -24,7 +24,7 @@ import {FX_PARS,FX_APPLY,FX_DISCARD,FX_GHOST} from './fx/part-fx-glsl';
 import {BIRTH_DATE} from '../health/types';
 import {twinOf} from './issues/layer-fade';
 import {climaxDay} from './camera/pose';
-import {toDays,fromDays} from '../health/dates';
+import {toDays,fromDays,todayISO} from '../health/dates';
 
 export interface EngineFrame {date:string;visible:SystemId[];isolate:string|null;now:number;
 	/** v2: fractional days since BIRTH_DATE; when present it wins over `date` for issue fx days (smooth sub-day animation). Growth still follows `date`. */
@@ -43,11 +43,13 @@ export interface Engine {
 	settle():number;
 	/** One time slice of the settle (scene.tsx calls it each frame once the date has rested): re-warps from a cursor for about `budgetMs` (at least one vertex chunk), resuming where the last slice stopped; a date change mid-way carries on from the cursor with the skip rules against each part's own last settle. Then, within the same budget, the focusBox prefetch queued by ready() (every script's climax box). True when nothing is left (settle and prefetch; while false, keep calling it). */
 	settleSlice(budgetMs:number):boolean;
+	/** v2: the focusBox prefetch alone (no settle), for about `budgetMs` (at least one vertex chunk); scene.tsx calls it every frame while it returns false, playing or not, so the first stops' boxes are cached before their approaches. True when the queue is empty (and before ready()). */
+	prefetchSlice(budgetMs:number):boolean;
 	/** Complete a sliced settle in progress synchronously (scene.tsx calls it before every pick); returns how many parts the pass re-warped, 0 when none is in progress. */
 	finishSettle():number;
 	/** Warped union box of an issue's parts and layer (and those of its focusAlso scripts), for Isolate; null before ready() (an Isolate made then flies once ready). */
 	isolateBox(id:string):T.Box3|null;
-	/** v2: warped union box of a script's parts and layer (and those of its focusAlso scripts) on whole day floor(`day`) since BIRTH_DATE (the date fromDays(BIRTH + floor(day)), as the director's Sample.date): the part vertices through that day's merged fx and body warp (settle's math, on rest positions, touching no engine state) plus the layer boxes warped with that day's body. Memoised by (id, floor(day)); ready() queues every script's climax day for idle prefetch (settleSlice). Null before ready() or for an unknown id. On the applied whole day it equals isolateBox after a settle. */
+	/** v2: warped union box of a script's parts and layer (and those of its focusAlso scripts) on whole day floor(`day`) since BIRTH_DATE (the date fromDays(BIRTH + floor(day)), as the director's Sample.date): the part vertices through that day's merged fx and body warp (settle's math, on rest positions, touching no engine state) plus the layer boxes warped with that day's body. Memoised by (id, floor(day)); ready() queues every script's climax day for idle prefetch (settleSlice). Null before ready() or for an unknown id. On the applied whole day it equals isolateBox after a settle. ready() queues prefetchPlan (stop order). */
 	focusBox(id:string,day:number):T.Box3|null;
 	/** v2: the ghost pass (non-focus atlas parts as translucent rim-lit silhouettes), drawn over the current render target without clearing it; scene.tsx calls it right after its normal render whenever the current ghost > 0 (a no-op at ghost ≤ 0.001). Only partFx meshes draw; every renderer, scene, object and material state it touches is restored. */
 	renderGhostPass(renderer:T.WebGLRenderer,scene:T.Scene,camera:T.Camera):void;
@@ -55,8 +57,8 @@ export interface Engine {
 	prewarm(renderer:T.WebGLRenderer,scene:T.Scene,camera:T.Camera):Promise<void>;
 	/** Default pivot of atlas part `i`: its rest bounds centre, from the decoded vertices once ready() has them (atlas.json bounds are corrupt for a few parts, e.g. Right cornea), else from atlas bounds. */
 	restCenter(i:number):Vec3;
-	/** Performance fallback state: tier 0 normal, 1 pixel ratio 1, 2 also throttled date applies; lowRes = the engine set pixel ratio 1 (the scene keeps 1 on resize); applies = date recomputes so far. */
-	stats():{tier:0|1|2;lowRes:boolean;applies:number;/** focusBox memo: boxes cached, prefetch jobs left, and lookups served from / missing the cache. */boxes:{cached:number;pending:number;hits:number;misses:number}};
+	/** Performance fallback state: tier 0 normal, 1 pixel ratio 1, 2 also throttled date applies; lowRes = the engine set pixel ratio 1 (the scene keeps 1 on resize); applies = date recomputes so far (a new fractional day included); bodies = of those, the body / warp recomputes (a new whole date only: a sub-day step recomputes the issue fx alone). */
+	stats():{tier:0|1|2;lowRes:boolean;applies:number;bodies:number;/** focusBox memo: boxes cached, prefetch jobs left, and lookups served from / missing the cache. */boxes:{cached:number;pending:number;hits:number;misses:number}};
 	/** Final fx row-0 visibility of atlas part `i` (switches × focus × merged PartFx visible), as the shader sees it, and 0 for a non-focus part while ghost ≥ 0.5: picking treats < 0.5 as hidden. */
 	partVisible(i:number):number;
 	dispose():void;
@@ -79,6 +81,9 @@ export const focusedParts=(id:string|null)=>{const l=focusedScripts(id);return l
 export const frameFocus=(f:Pick<EngineFrame,'isolate'|'focus'>):{id:string;ghost:number}|null=>{
 	const r=f.focus!==undefined?f.focus:f.isolate?{id:f.isolate,ghost:1}:null;return r&&scriptFor(r.id)?{id:r.id,ghost:Math.min(1,Math.max(0,r.ghost||0))}:null;
 };
+
+/** The focus boxes ready() prefetches, in stop order (day, then id, as director/schedule.ts stopsFor sorts the stops), each at its script's climax day clamped to [0, endDay] (pose.ts climaxDay: the day scene.tsx freezes that stop's box at), so the first stops are cached first and every guided lookup hits. */
+export const prefetchPlan=(scripts:IssueScript[],endDay:number)=>scripts.map(s=>({id:s.id,day:climaxDay(s,endDay)})).sort((a,b)=>a.day-b.day||(a.id<b.id?-1:a.id>b.id?1:0));
 
 /** What the engine needs of the renderer (performance fallback): the GL context for WEBGL_debug_renderer_info, and the pixel ratio. */
 export interface EngineRenderer {getContext():{getExtension(name:string):unknown;getParameter(p:number):unknown};setPixelRatio(r:number):void}
@@ -169,8 +174,8 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 
 	// settle(): per part, a bit mask of the segments its vertices use; the fx and warp it was last settled with (undefined: never, or re-warp interrupted).
 	let segMask=new Uint16Array(0),settledFx:(ResolvedFx|undefined)[]=[],partWs:(WarpState|undefined)[]=[],unsettled=true,isReady=false,gen=0,flyIso:string|null=null;
-	// The sliced settle in progress: the part at `cursor` (re-warped up to vertex `vert`), parts `left` to visit, parts re-warped `count`, for fx / warp generation `gen`.
-	let pass:{cursor:number;left:number;vert:number;count:number;gen:number}|null=null;const movedBy=new Map<WarpState,number>();
+	// The sliced settle in progress: the part at `cursor` (re-warped up to vertex `vert`, with fx `fx`), parts `left` to visit, parts re-warped `count`, for warp generation `gen` and fx generation `fxGen`.
+	let pass:{cursor:number;left:number;vert:number;count:number;gen:number;fxGen:number;fx:ResolvedFx|undefined}|null=null,fxGen=0;const movedBy=new Map<WarpState,number>();
 	const sameFx=(a:ResolvedFx|undefined,b:ResolvedFx|undefined)=>a===b||!!a&&!!b&&a.visible===b.visible&&a.swell===b.swell&&a.swellBand?.[0]===b.swellBand?.[0]&&a.swellBand?.[1]===b.swellBand?.[1]&&(['tint','scale','rotate','translate','pivot'] as const).every(k=>a[k].every((v,j)=>v===b[k][j]));
 	/** Bit mask of the segments whose warp parameters differ between two states (all of them when the ground moved; trunk / neck / head when the axial remap changed; a limb when its scales, new joint or joint taper did). */
 	const changedSegments=(a:WarpState|null,b:WarpState)=>{
@@ -187,10 +192,12 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 		const k=v*3,m=v*SEG_STRIDE;pn[0]=r[k];pn[1]=r[k+1];pn[2]=r[k+2];nn[0]=nrm[k]/127;nn[1]=nrm[k+1]/127;nn[2]=nrm[k+2]/127;
 		applyFxPoint(f,pn,nn,out);warpPoint(w,out,sg?sg[m]&15:0,sg?sg[m]>>4:0,sg?sg[m+1]/255:1,soft[i],out,sg?(sg[m+2]|sg[m+3]<<8)*D_UNIT:0);
 	};
-	/** Start a pass, or re-aim the one in progress at the current date: applies a pending date first; a part interrupted mid-way restarts (its settle record is already cleared). */
+	/** Start a pass, or re-aim the one in progress at the current date: applies a pending date first. A new warp restarts the part interrupted mid-way (its settle record is already cleared); new fx alone (a sub-day step) revisit every part under the skip rules but keep the part in progress when its own fx are unchanged. */
 	const begin=()=>{
 		if(seen&&(seen!==applied||remerge)){applyDate(seenDate,seenDay);if(lastVis)writeVisibility(lastVis,lastFocus);forceChange=true;}
-		if(!pass){pass={cursor:0,left:n,vert:0,count:0,gen};movedBy.clear();}else if(pass.gen!==gen){pass.gen=gen;pass.left=n;pass.vert=0;movedBy.clear();}
+		if(!pass){pass={cursor:0,left:n,vert:0,count:0,gen,fxGen,fx:undefined};movedBy.clear();}
+		else if(pass.gen!==gen){pass.gen=gen;pass.fxGen=fxGen;pass.left=n;pass.vert=0;movedBy.clear();}
+		else if(pass.fxGen!==fxGen){pass.fxGen=fxGen;pass.left=n;if(pass.vert>0&&!sameFx(pass.fx,fxMap.get(pass.cursor)))pass.vert=0;}
 	};
 	/** Advance the pass until `deadline` (performance.now() ms), always at least one vertex chunk; true when it is complete. */
 	const work=(deadline:number)=>{
@@ -198,7 +205,7 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 		const next=()=>{P.cursor=(P.cursor+1)%n;P.left--;P.vert=0;};
 		while(P.left>0){
 			const i=P.cursor,mesh=pickers[i],r=rest[i];if(!mesh||!r){next();continue;}const fi=fxMap.get(i);
-			if(P.vert===0){const w=partWs[i];if(w&&!(segMask[i]&moved(w))&&sameFx(settledFx[i],fi)){next();continue;}partWs[i]=undefined;}
+			if(P.vert===0){const w=partWs[i];if(w&&!(segMask[i]&moved(w))&&sameFx(settledFx[i],fi)){next();continue;}partWs[i]=undefined;P.fx=fi;}
 			if(worked&&performance.now()>=deadline)return false;
 			const g=mesh.geometry,pos=g.getAttribute('position') as T.BufferAttribute,arr=pos.array as Float32Array,nrm=g.getAttribute('normal').array as Int8Array,sg=g.getAttribute('seg')?.array as Uint8Array|undefined,f=fi??identityFx(restCenters[i]),nv=r.length/3,end=Math.min(nv,P.vert+CHUNK);
 			for(let v=P.vert,k=v*3;v<end;v++,k+=3){warpVertex(i,r,nrm,sg,f,ws,v,q);arr[k]=q[0];arr[k+1]=q[1];arr[k+2]=q[2];}
@@ -214,6 +221,7 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 		if(pass||unsettled||remerge||(seen&&seen!==applied)){begin();if(!work(deadline))return false;if(performance.now()>=deadline)return !prefetchQueue.length&&!boxJob;}
 		return prefetch(deadline);
 	};
+	const prefetchSlice=(budgetMs:number)=>!isReady||prefetch(performance.now()+budgetMs);
 
 	const keyOf=(date:string,day:number|undefined)=>day===undefined?date:`${date}@${day}`;
 	/** Every script's fx (at its fx day), growth and eruption, merged per part. */
@@ -221,10 +229,11 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 		const list:PartFx[]=[];for(const s of SCRIPTS){try{const l=s.fxAt(fxDayOf(s,date,day),c);list.push(...(noLayer.has(s.id)?l.map(({visible:_,...r})=>r):l));}catch(e){console.warn(`AnyHealth timeline: ${s.id} fxAt failed`,e);}}
 		list.push(...growthFx(c.body),...eruptionFx(c.body));return mergeFx(list,indicesOf,restCenter);
 	};
-	/** Recompute the body, warp uniforms and merged fx for `date` (growth) and `day` (fractional days since birth for issue fx; absent: `date`), the heavy part of a date change. */
+	/** Recompute the merged fx for `date` (growth) and `day` (fractional days since birth for issue fx; absent: `date`), the heavy part of a date change; the body, warp uniforms and settle warp generation only when the whole date changed (cached by date: a sub-day step during play recomputes the fx alone). */
 	const applyDate=(date:string,day:number|undefined)=>{
-		const t=day??toDays(date)-BIRTH;if(applied&&t!==appliedT)direction=t>appliedT?1:-1;remerge=false;unsettled=true;gen++;applied=keyOf(date,day);appliedDate=date;appliedDay=day;appliedT=t;perf.applies++;
-		const body=bodyAt(date);ws=warpState(rig,body);writeWarpUniforms(warpU,ws);ctx={body,date};fxMap=fxFor(date,day,ctx);
+		const t=day??toDays(date)-BIRTH;if(applied&&t!==appliedT)direction=t>appliedT?1:-1;remerge=false;unsettled=true;fxGen++;
+		if(!ctx||date!==ctx.date){const body=bodyAt(date);ws=warpState(rig,body);writeWarpUniforms(warpU,ws);ctx={body,date};gen++;perf.bodies++;}
+		applied=keyOf(date,day);appliedDate=date;appliedDay=day;appliedT=t;perf.applies++;fxMap=fxFor(date,day,ctx);
 	};
 	/** Write the fx texture: the merged fx × the switches / focus visibility, and the focus flags (row 4 .w). */
 	const writeVisibility=(visible:SystemId[],focusId:string|null)=>{
@@ -237,7 +246,7 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 	// Performance fallback: software GL renders at pixel ratio 1 from the start. During play (a frame whose date differs from the last frame's), an exponential
 	// average of the frame time below 30 fps for 2 s drops to pixel ratio 1 (tier 1); 2 s more below 30 fps throttles date applies to one per 100 ms (tier 2), and a pending date always applies on pause or settle.
 	const SLOW_MS=1000/30,SLOW_FOR=2000,THROTTLE_MS=100,EMA=0.1;
-	const perf={tier:0 as 0|1|2,lowRes:false,applies:0,ema:-1,prevNow:-1,slowSince:-1,lastApply:-Infinity};
+	const perf={tier:0 as 0|1|2,lowRes:false,applies:0,bodies:0,ema:-1,prevNow:-1,slowSince:-1,lastApply:-Infinity};
 	const lowResNow=()=>{if(perf.lowRes)return;perf.lowRes=true;o.renderer?.setPixelRatio(1);};
 	const perfTick=(now:number,play:boolean)=>{
 		const dt=perf.prevNow<0?0:Math.min(250,now-perf.prevNow);perf.prevNow=now;
@@ -348,7 +357,7 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 	return {
 		patchMaterial,segAttribute,isolateBox,focusBox,renderGhostPass,prewarm,
 		// Picking: a non-focus part is ghosted (not pickable) from ghost 0.5; only the focus flags are 1 while something is focused.
-		partVisible:i=>ghostU.tfxGhost.value>=.5&&fx.data[(4*fx.width+i)*4+3]<.5?0:fx.data[i*4],restCenter,stats:()=>({tier:perf.tier,lowRes:perf.lowRes,applies:perf.applies,boxes:{cached:boxCache.size,pending:prefetchQueue.length+(boxJob?1:0),...boxStats}}),
+		partVisible:i=>ghostU.tfxGhost.value>=.5&&fx.data[(4*fx.width+i)*4+3]<.5?0:fx.data[i*4],restCenter,stats:()=>({tier:perf.tier,lowRes:perf.lowRes,applies:perf.applies,bodies:perf.bodies,boxes:{cached:boxCache.size,pending:prefetchQueue.length+(boxJob?1:0),...boxStats}}),
 		ready(p){
 			isReady=true;pickers=p;rest=p.map(m=>(m?.geometry.getAttribute('position').array as Float32Array|undefined)?.slice());
 			// Default pivots from the decoded vertices (atlas.json bounds carry stray vertices for a few parts).
@@ -356,14 +365,14 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 			rest.forEach((r,i)=>{if(!r||!r.length)return;const lo=[Infinity,Infinity,Infinity],hi=[-Infinity,-Infinity,-Infinity];for(let k=0;k<r.length;k+=3)for(let j=0;j<3;j++){const v=r[k+j];if(v<lo[j])lo[j]=v;if(v>hi[j])hi[j]=v;}restCenters[i]=[(lo[0]+hi[0])/2,(lo[1]+hi[1])/2,(lo[2]+hi[2])/2];});
 			for(const s of SCRIPTS){if(!s.layer)continue;let ok=false;try{const layer=s.layer();ok=layer.init(layerCtx);if(ok)layers.push({script:s,layer});else layer.dispose();}catch(e){console.warn(`AnyHealth timeline: layer ${s.id} failed`,e);}if(!ok)noLayer.add(s.id);}
 			forceChange=true;remerge=true;boxCache.clear();boxJob=null;
-			// Prefetch every script's climax focus box (the guided stops) in idle time after the settle (settleSlice).
-			// The day is pose.ts climaxDay, the one scene.tsx freezes each stop's box at (stopBoxDay), so every guided stop's lookup hits this key.
-			prefetchQueue=SCRIPTS.map(s=>({id:s.id,day:climaxDay(s)}));
+			// Prefetch every script's climax focus box (the guided stops), in stop order, in prefetchSlice (every frame) and after the settle (settleSlice).
+			// The day is pose.ts climaxDay clamped to today, the one scene.tsx freezes each stop's box at (stopBoxDay), so every guided stop's lookup hits this key.
+			prefetchQueue=prefetchPlan(SCRIPTS,toDays(todayISO())-BIRTH);
 			// Software GL (SwiftShader, llvmpipe): pixel ratio 1 from the start.
 			if(o.renderer)try{const gl=o.renderer.getContext(),ext=gl.getExtension('WEBGL_debug_renderer_info') as {UNMASKED_RENDERER_WEBGL:number}|null,name=String(gl.getParameter(ext?ext.UNMASKED_RENDERER_WEBGL:0x1f01/* RENDERER */));if(/SwiftShader|llvmpipe/i.test(name))lowResNow();}catch{/* no GPU info: keep the ratio */}
 		},
 		update,
-		settle,settleSlice,finishSettle:()=>pass?settle():0,
+		settle,settleSlice,prefetchSlice,finishSettle:()=>pass?settle():0,
 		dispose(){
 			layers.forEach(l=>l.layer.dispose());layers.length=0;layerMaterials.forEach(m=>m.dispose());restGeoms.forEach(g=>g.dispose());restGeoms.clear();fx.texture.dispose();ghostTwins.forEach(t=>{t.color.dispose();t.depth?.dispose();});ghostTwins.clear();layerMaterials.forEach(m=>twinOf(m)?.dispose());boxCache.clear();prefetchQueue=[];boxJob=null;ghostU.tfxGhost.value=0;pickers=[];rest=[];pass=null;isReady=false;
 		},
