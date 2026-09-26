@@ -5,6 +5,7 @@ import {BIRTH_DATE} from '../../../health/types';
 import {smoothstep,dayHighlight,prng,PRE_ROLL} from '../airway/shape';
 import {croupFx,activeEpisode,croupAcute,CROUP_TINT,CROUP_PACE,PICU_PACE} from '../airway/croup';
 import {BRONCHIAL_TREES,MAIN_BRONCHI,SEGMENTAL_TREES,VOCAL_FOLDS,EPIGLOTTIS_BASE} from '../airway/parts';
+import {LEFT_SIDE} from '../views';
 
 const HIGHLIGHT:[number,number,number]=[0.55,0.8,1];
 const INFLAMED:[number,number,number]=[0.85,0.35,0.3];
@@ -54,21 +55,30 @@ const COVID_PATCH:{part:string;a:number}[]=(()=>{const r=prng(20200828),pool=[..
 
 export const SCRIPTS:IssueScript[]=[
 	{id:'infant-laryngomalacia-2003',parts:['Epiglottis'],onset:LM_ONSET,resolve:'2004-09-22',fxAt:d=>laryngomalacia(d), // basis: airway#laryngomalacia-course
+		climax:LM_PEAK[0]-ageDays(LM_ONSET,0),approachDays:LM_PEAK[0]-LM_START,view:LEFT_SIDE, // basis: airway#climax-laryngomalacia
 		status:d=>{const a=ageDays(LM_ONSET,d);return a<LM_START||a>=LM_END?null:a<LM_PEAK[1]?'Floppy epiglottis · peak':'Outgrowing it';}},
 	{id:'infant-croup-neck-xray-2003',parts:['Trachea'],onset:'2003-09-08',resolve:'2003-09-12',acute:croupAcute('infant-croup-neck-xray-2003','2003-09-08',CROUP_PACE),fxAt:d=>croupFx('infant-croup-neck-xray-2003',abs('2003-09-08',d)), // basis: airway#croup-course
+		climax:0.25,approachDays:0.25+PRE_ROLL, // basis: airway#climax-croup
 		status:d=>d>=0&&d<4?`Subglottic narrowing · day ${Math.floor(d)+1}`:null},
 	{id:'recurrent-croup-childhood',parts:['Trachea'],onset:'2004-01-15',resolve:'2016-12-15',acute:croupAcute('recurrent-croup-childhood','2004-01-15',CROUP_PACE),fxAt:d=>croupFx('recurrent-croup-childhood',abs('2004-01-15',d)),
+		climax:0.25,approachDays:0.25+PRE_ROLL, // basis: airway#climax-croup-recurrent
 		status:croupStatus('recurrent-croup-childhood','2004-01-15')},
 	{id:'sky-ridge-er-airway-2016',parts:['Trachea','Epiglottis',...VOCAL_FOLDS],onset:'2016-11-02',resolve:'2016-11-03',acute:[{from:-PRE_ROLL,to:1,k:PICU_PACE}],fxAt:d=>tinted(['Epiglottis',...VOCAL_FOLDS],CROUP_TINT,0.6*dayHighlight(d)), // basis: airway#er-2016
+		climax:0.1,approachDays:0.1+PRE_ROLL, // basis: airway#climax-er-picu-2016
 		status:d=>d>=0&&d<1?'Stridor, blue lips · epinephrine':null},
 	{id:'chco-picu-subglottitis-2016',parts:['Trachea',...VOCAL_FOLDS],onset:'2016-11-02',resolve:'2016-11-04',acute:croupAcute('chco-picu-subglottitis-2016','2016-11-02',PICU_PACE),fxAt:d=>{const fx=croupFx('chco-picu-subglottitis-2016',abs('2016-11-02',d));return fx.length?[...fx,...tinted(VOCAL_FOLDS,CROUP_TINT,fx[0].tint![3])]:[];}, // basis: airway#picu-2016
+		climax:0.5,approachDays:0.5+PRE_ROLL, // basis: airway#climax-er-picu-2016
 		status:d=>d>=0&&d<3?`PICU · day ${Math.floor(d)+1}`:null},
-	{id:'microlaryngoscopy-bronchoscopy-2016',parts:['Epiglottis','Trachea',...MAIN_BRONCHI],onset:'2016-12-15',resolve:'2016-12-16',fxAt:d=>tinted(['Epiglottis','Trachea',...MAIN_BRONCHI],HIGHLIGHT,0.5*dayHighlight(d))}, // basis: airway#bronchoscopy-2016
+	{id:'microlaryngoscopy-bronchoscopy-2016',parts:['Epiglottis','Trachea',...MAIN_BRONCHI],onset:'2016-12-15',resolve:'2016-12-16',fxAt:d=>tinted(['Epiglottis','Trachea',...MAIN_BRONCHI],HIGHLIGHT,0.5*dayHighlight(d)),
+		climax:0.125,approachDays:0.125+PRE_ROLL}, // basis: airway#bronchoscopy-2016, airway#climax-visit-day
 	{id:'asthma-diagnosis-chronic',parts:[...BRONCHIAL_TREES],onset:ASTHMA_ONSET,chronic:true,fxAt:d=>asthma(d),
+		climax:FLARES[2]-toDays(ASTHMA_ONSET)+FLARE_HOLD/2,approachDays:FLARE_HOLD/2+PRE_ROLL, // basis: airway#climax-asthma
 		status:d=>{const t=abs(ASTHMA_ONSET,d);return d<0?null:icsEffect(t)>0.05?'Easing on budesonide':flareAt(t)>0.05?'Flare':'Mild asthma · baseline';}},
-	{id:'spirometry-asthma-confirmed-2022',parts:[...BRONCHIAL_TREES],onset:'2022-08-01',resolve:fromDays(toDays('2022-08-01')+PFT_WINDOW),fxAt:d=>visitHighlight(d)}, // basis: airway#pft-window
-	{id:'pulmonary-reeval-2024',parts:[...BRONCHIAL_TREES],onset:'2024-12-05',resolve:fromDays(toDays('2024-12-05')+PFT_WINDOW),fxAt:d=>visitHighlight(d)}, // basis: airway#pft-window
-	{id:'budesonide-formoterol-rx-2026',parts:[...BRONCHIAL_TREES],onset:'2026-09-02',resolve:'2026-09-15',fxAt:d=>tinted(BRONCHIAL_TREES,ICS_TINT,0.2*smoothstep(-PRE_ROLL,0,d)*(1-smoothstep(13,14,d)))}, // basis: airway#ics-easing
+	{id:'spirometry-asthma-confirmed-2022',parts:[...BRONCHIAL_TREES],onset:'2022-08-01',resolve:fromDays(toDays('2022-08-01')+PFT_WINDOW),fxAt:d=>visitHighlight(d),climax:0.125,approachDays:0.125+PRE_ROLL}, // basis: airway#pft-window, airway#climax-visit-day
+	{id:'pulmonary-reeval-2024',parts:[...BRONCHIAL_TREES],onset:'2024-12-05',resolve:fromDays(toDays('2024-12-05')+PFT_WINDOW),fxAt:d=>visitHighlight(d),climax:0.125,approachDays:0.125+PRE_ROLL}, // basis: airway#pft-window, airway#climax-visit-day
+	{id:'budesonide-formoterol-rx-2026',parts:[...BRONCHIAL_TREES],onset:'2026-09-02',resolve:'2026-09-15',fxAt:d=>tinted(BRONCHIAL_TREES,ICS_TINT,0.2*smoothstep(-PRE_ROLL,0,d)*(1-smoothstep(13,14,d))),
+		climax:ICS_ONSET,approachDays:ICS_ONSET}, // basis: airway#ics-easing, airway#climax-ics
 	{id:'covid-19-infection-2020',parts:COVID_PATCH.map(p=>p.part),onset:'2020-08-28',resolve:'2020-09-11',illustrative:true, // basis: airway#covid
+		climax:0.5,approachDays:0.5+PRE_ROLL, // basis: airway#climax-covid
 		fxAt:d=>{const k=smoothstep(-PRE_ROLL,0,d)*(1-smoothstep(COVID_DAYS-4,COVID_DAYS,d));return k>0?COVID_PATCH.map(p=>({part:p.part,tint:[...COVID_TINT,p.a*k] as [number,number,number,number]})):[];}},
 ];

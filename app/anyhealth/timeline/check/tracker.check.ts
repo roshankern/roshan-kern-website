@@ -10,7 +10,7 @@ const T0='2026-09-25';
 // Quiet share of the birth..today track under a density list (days outside every range, weighted by the warp).
 const quietShare=(dens:Density[],today:string)=>{const min=toDays(BIRTH_DATE),max=toDays(today),w=makeWarp(min,max,dens);let quiet=0;for(let d=min;d<max;d++){const inDense=dens.some(r=>d>=toDays(r.from)&&d<toDays(r.to));if(!inDense)quiet+=w.toT(d+1)-w.toT(d);}return quiet;};
 // Synthetic scripts, so the model's rules are checked independently of what the area catalogs hold.
-const fake=(id:string,onset:string,o:Partial<IssueScript>={}):IssueScript=>({id,parts:['Left humerus'],onset,fxAt:()=>[],...o});
+const fake=(id:string,onset:string,o:Partial<IssueScript>={}):IssueScript=>({id,parts:['Left humerus'],onset,climax:0,fxAt:()=>[],...o});
 export const checks:Check[]=[
 	{name:'fracture is active on 2009-09-10 and gone by 2011',run(c){c.assert(trackerEntries('2009-09-10',T0,null).some(e=>e.issue.id==='left-humerus-fracture-2009'&&e.state==='active'),'active');c.assert(!trackerEntries('2011-01-01',T0,null).some(e=>e.issue.id==='left-humerus-fracture-2009'),'gone');}},
 	{name:'resolved issues linger 7 days with state resolved',run(c){const s=scriptFor('chco-picu-subglottitis-2016')!;const d=fromDays(toDays(s.resolve!)+3);c.assert(trackerEntries(d,T0,null).find(e=>e.issue.id===s.id)?.state==='resolved','resolved chip');c.assert(!trackerEntries(fromDays(toDays(s.resolve!)+8),T0,null).some(e=>e.issue.id===s.id),'faded');}},

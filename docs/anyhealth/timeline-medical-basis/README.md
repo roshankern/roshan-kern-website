@@ -14,6 +14,8 @@ Every medical number used in `app/anyhealth/timeline/**` code carries a comment 
 | Skin | [skin.md](skin.md) | Lacerations, acne, eczema, warts |
 | Systemic | [systemic.md](systemic.md) | Thalassemia, food allergy, anaphylaxis, rhinitis |
 
+Each area file also has a `climax-*` row for every issue: where the v2 director's guided playback holds (`IssueScript.climax`, days since onset), how much lead-in the approach covers (`approachDays`), the camera direction when the default view hides the finding (`view`), and why. `app/anyhealth/timeline/check/climax.check.ts` checks each climax against the script's peak (`fxMagnitude` from `issues/magnitude.ts`, plus Σ mark alpha for the skin marks layers), and lists the deliberate exceptions in `CLIMAX_NOT_PEAK`.
+
 ## Row format
 
 Each area file is one table:

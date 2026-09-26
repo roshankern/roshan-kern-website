@@ -2,7 +2,9 @@
 import type {IssueScript,PartFx,Vec3} from '../../types';
 import {toDays,fromDays} from '../../../health/dates';
 import {ARTERIAL_PARTS} from '../systemic/arterial-parts';
-import {smooth,envelope,windowGlow,pollenSeason,immunoFactor} from '../systemic/curves';
+import {smooth,envelope,windowGlow,preRolled,pollenSeason,immunoFactor} from '../systemic/curves';
+import {PRE_ROLL} from '../airway/shape';
+import {FRONT,LEFT_SIDE} from '../views';
 
 type Rgb=[number,number,number];
 const tint=(part:string,rgb:Rgb,a:number):PartFx=>({part,tint:[rgb[0],rgb[1],rgb[2],a]});
@@ -25,10 +27,12 @@ const CBC_PARTS=[...HEART_PARTS,...AORTA_PARTS];
 /** The chronic trait: every arterial part tinted from 2004-07-01; the amount steps up slightly at the 2024 confirmation. */
 const thalassemia:IssueScript={
 	id:'microcytosis-suspected-thalassemia-2004',parts:[...HEART_PARTS,...ARTERIAL_PARTS],onset:'2004-07-01',chronic:true,illustrative:true,
+	// The first CBC at age 1 (the lowest absolute MCV, 55.5: first detection of a congenital trait), not the brighter post-2024 tint, which marks diagnostic certainty rather than severity.
+	climax:0,approachDays:PRE_ROLL, // basis: systemic#climax-thalassemia
 	fxAt(day,ctx){
-		if(day<=0)return [];
+		if(day<=-PRE_ROLL)return [];
 		const confirmed=smooth(0,THAL_RAMP,toDays(ctx.date)-toDays(THAL_CONFIRMED));
-		const a=smooth(0,THAL_RAMP,day)*(THAL_A+(THAL_A_CONFIRMED-THAL_A)*confirmed);
+		const a=preRolled(day)*(THAL_A+(THAL_A_CONFIRMED-THAL_A)*confirmed);
 		return ARTERIAL_PARTS.map(p=>tint(p,THAL_RGB,a));
 	},
 	status:day=>day<0?null:dateOf('2004-07-01',day)>=THAL_CONFIRMED?'Beta-thalassemia minor · HbA2 4.9%':'Microcytosis · MCV 55.5 fL',
@@ -36,6 +40,7 @@ const thalassemia:IssueScript={
 /** A 30-day window for one CBC or hematology visit: the heart and aorta tint a little more strongly, rising and falling over 7 days. */
 const cbc=(id:string,onset:string,status:string):IssueScript=>({
 	id,parts:CBC_PARTS,onset,resolve:fromDays(toDays(onset)+CBC_LEN),illustrative:true,
+	climax:0,approachDays:PRE_ROLL, // basis: systemic#climax-record-window
 	fxAt(day){const a=THAL_WINDOW_A*windowGlow(day,THAL_RAMP,CBC_LEN);return a>0?CBC_PARTS.map(p=>tint(p,THAL_RGB,a)):[];},
 	status:()=>status,
 });
@@ -44,7 +49,6 @@ const cbc=(id:string,onset:string,status:string):IssueScript=>({
 const ORAL=['Tongue','Lip'];
 const ALLERGY_RGB:Rgb=[0.88,0.34,0.38]; // basis: systemic#food-allergy-tint
 const FOOD_A=0.08; // basis: systemic#food-allergy-tint
-const FOOD_RAMP=14; // basis: systemic#food-allergy-tint
 const GLOW_A=0.26; // basis: systemic#allergy-test-glow
 const GLOW_LEN=14; // basis: systemic#allergy-test-glow
 const GLOW_RAMP=4; // basis: systemic#allergy-test-glow
@@ -52,12 +56,14 @@ const CONCHAE=['Left inferior nasal concha','Right inferior nasal concha'];
 
 const foodAllergy:IssueScript={
 	id:'peanut-tree-nut-food-allergy',parts:ORAL,onset:'2003-12-22',chronic:true,illustrative:true,
-	fxAt(day){const a=FOOD_A*smooth(0,FOOD_RAMP,day);return day>0?ORAL.map(p=>tint(p,ALLERGY_RGB,a)):[];},
+	climax:0,approachDays:PRE_ROLL,view:FRONT, // basis: systemic#climax-food-allergy
+	fxAt(day){const a=FOOD_A*preRolled(day);return a>0?ORAL.map(p=>tint(p,ALLERGY_RGB,a)):[];},
 	status:()=>'Peanut & tree nuts · IgE-mediated',
 };
 /** A 14-day glow for an allergy test: skin tests and CAP-RAST (2004), the specific-IgE panel (2016). */
-const allergyTest=(id:string,onset:string,parts:string[],status:string):IssueScript=>({
+const allergyTest=(id:string,onset:string,parts:string[],status:string,view:Vec3):IssueScript=>({
 	id,parts,onset,resolve:fromDays(toDays(onset)+GLOW_LEN),illustrative:true,
+	climax:0,approachDays:PRE_ROLL,view, // basis: systemic#climax-record-window
 	fxAt(day){const a=GLOW_A*windowGlow(day,GLOW_RAMP,GLOW_LEN);return a>0?parts.map(p=>tint(p,ALLERGY_RGB,a)):[];},
 	status:()=>status,
 });
@@ -75,6 +81,8 @@ const AIRWAY_PARTS=['Tongue','Lip',...PHARYNX,'Epiglottis','Trachea'];
 const ANA_RISE=0.02,ANA_HOLD=0.25,ANA_END=2; // basis: systemic#anaphylaxis-timing
 const WALNUT_SEVERITY=0.4,WALNUT_END=1; // basis: systemic#walnut
 const ACUTE={from:-0.5,to:3,k:60}; // basis: systemic#anaphylaxis-timing
+/** Guided-playback approach to a reaction's peak: the 2.4 h before it, so the half-hour rise plays in focus. */
+const ANA_APPROACH=0.1; // basis: systemic#climax-anaphylaxis
 
 const uni=(s:number):Vec3=>[s,s,s];
 /** The angioedema pattern at strength `e` (0..1). */
@@ -90,11 +98,13 @@ const reactionStatus=(day:number,rise:number,end:number)=>day<0||day>=end?null:d
 
 const eggAnaphylaxis:IssueScript={
 	id:'egg-anaphylaxis-daycare',parts:AIRWAY_PARTS,onset:'2005-05-02',resolve:'2005-05-04',illustrative:true,acute:[ACUTE],
+	climax:ANA_RISE,approachDays:ANA_APPROACH,view:LEFT_SIDE, // basis: systemic#climax-anaphylaxis
 	fxAt:day=>angioedema(envelope(day,ANA_RISE,ANA_HOLD,ANA_END)),
 	status:day=>reactionStatus(day,ANA_RISE,ANA_END),
 };
 const walnut:IssueScript={
 	id:'walnut-accidental-exposure-2026',parts:AIRWAY_PARTS,onset:'2026-03-01',resolve:'2026-03-02',illustrative:true,acute:[ACUTE],
+	climax:ANA_RISE,approachDays:ANA_APPROACH,view:LEFT_SIDE, // basis: systemic#climax-anaphylaxis
 	fxAt:day=>angioedema(WALNUT_SEVERITY*envelope(day,ANA_RISE,ANA_RISE,WALNUT_END)),
 	status:day=>reactionStatus(day,ANA_RISE,WALNUT_END),
 };
@@ -108,6 +118,8 @@ const IMMUNO_START='2022-08-01',IMMUNO_YEARS=3,IMMUNO_FLOOR=0.5; // basis: syste
 
 const rhinitis:IssueScript={
 	id:'allergic-rhinitis-oral-allergy-syndrome-2016',parts:CONCHAE,onset:'2016-07-11',chronic:true,illustrative:true,
+	// The first spring tree-pollen peak after diagnosis (day of year 120, before immunotherapy damps the season).
+	climax:toDays('2017-05-01')-toDays('2016-07-11'),approachDays:60,view:LEFT_SIDE, // basis: systemic#climax-rhinitis
 	fxAt(day,ctx){
 		if(day<=0)return [];
 		const on=smooth(0,RHINITIS_RAMP,day),swell=on*(RHINITIS_BASE+RHINITIS_SEASONAL*pollenSeason(ctx.date)*immunoFactor(ctx.date,IMMUNO_START,IMMUNO_YEARS,IMMUNO_FLOOR));
@@ -119,11 +131,11 @@ const rhinitis:IssueScript={
 /** Every systemic script (one per issue id this area owns). */
 export const SCRIPTS:IssueScript[]=[
 	foodAllergy,
-	allergyTest('allergy-workup-tree-nuts-egg-2004','2004-07-01',ORAL,'Peanut class 5 · total IgE 524'),
+	allergyTest('allergy-workup-tree-nuts-egg-2004','2004-07-01',ORAL,'Peanut class 5 · total IgE 524',FRONT),
 	eggAnaphylaxis,
 	rhinitis,
-	allergyTest('allergy-ige-panel-2016','2016-12-21',[...ORAL,...CONCHAE],'Molds, cat, pollens · peanut class IV'),
-	allergyTest('allergic-rhinitis-immunotherapy-eval','2022-08-01',CONCHAE,'Skin tests · allergy shots planned'),
+	allergyTest('allergy-ige-panel-2016','2016-12-21',[...ORAL,...CONCHAE],'Molds, cat, pollens · peanut class IV',FRONT),
+	allergyTest('allergic-rhinitis-immunotherapy-eval','2022-08-01',CONCHAE,'Skin tests · allergy shots planned',LEFT_SIDE),
 	walnut,
 	thalassemia,
 	cbc('first-abnormal-cbc-2023','2023-12-29','MCV 64 fL · RDW 18.9%'),

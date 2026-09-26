@@ -67,6 +67,7 @@ const reflux=(esophagus:number,stomach:number):PartFx[]=>[{part:'Esophagus',tint
 
 export const SCRIPTS:IssueScript[]=[
 	{id:'encopresis-constipation-childhood',parts:['Rectum','Descending colon'],onset:ENC_ONSET,resolve:ENC_END,
+		climax:0,approachDays:LEAD_DAYS['encopresis-constipation-childhood'], // basis: digestive#climax-encopresis
 		fxAt(d){
 			const {wall,load}=encopresis(d);if(wall<=0&&load<=0)return [];
 			const r=1+(RECTUM_PEAK-1)*wall;
@@ -78,12 +79,14 @@ export const SCRIPTS:IssueScript[]=[
 		},
 		status(d){if(d<0)return 'Stool withholding';if(d<MIRALAX_STOP)return 'Miralax + behaviour plan';if(d<CLEAN_OUT)return 'Relapse off Miralax';if(d<CLEAN_OUT+CLEAN_OUT_DAYS)return 'Clean-out';return d<ENC_LAST?'Maintenance Miralax':null;}},
 	{id:'silent-reflux-lpr-omeprazole',parts:['Esophagus'],onset:'2026-01-03',resolve:'2026-03-28',illustrative:true,
+		climax:0,approachDays:LEAD_DAYS['silent-reflux-lpr-omeprazole'], // basis: digestive#climax-lpr
 		fxAt(d){
 			const a=d<0?smooth((d+LEAD_DAYS['silent-reflux-lpr-omeprazole'])/LEAD_DAYS['silent-reflux-lpr-omeprazole']):1-smooth(d/LPR_FADE);
 			return a>0?[{part:'Esophagus',tint:[...INFLAMED,LPR_TINT*a],swell:LPR_SWELL*a,swellBand:LPR_BAND}]:[];
 		},
 		status(d){return d<0?null:d<LPR_FADE?`Omeprazole · week ${Math.floor(d/7)+1}`:null;}},
 	{id:'gerd-diagnosis-pantoprazole-famotidine-2026',parts:['Esophagus','Stomach'],onset:GERD_ONSET,resolve:'2026-08-28',illustrative:true,
+		climax:(GERD_RAMP+PPI_START)/2,approachDays:(GERD_RAMP+PPI_START)/2, // basis: digestive#climax-gerd
 		fxAt(d){
 			// Ramps in at diagnosis, holds until the course starts, fades over the 15-day course to the famotidine residual, then hands over when famotidine starts (merged tint = the higher, so the handoff is seamless).
 			if(d<=0||d>=FAM_START)return [];
@@ -92,6 +95,7 @@ export const SCRIPTS:IssueScript[]=[
 		},
 		status(d){return d<PPI_START?'Diagnosed · no esophagitis':d<=PPI_END?`Pantoprazole + famotidine · day ${Math.floor(d-PPI_START)+1} of 15`:null;}},
 	{id:'famotidine-nightly-rx-2026',parts:['Esophagus','Stomach'],onset:'2026-09-02',chronic:true,illustrative:true,
+		climax:0.5,approachDays:0.5, // basis: digestive#climax-famotidine
 		fxAt(d){return d<0?[]:reflux(RESID_ESOPHAGUS,RESID_STOMACH);},
 		status(){return 'Famotidine 40 mg nightly';}},
 ];
