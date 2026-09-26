@@ -1,5 +1,5 @@
 'use client';
-import {useCallback,useEffect,useMemo,useRef,useState} from 'react';
+import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import {Activity,ArrowUpRight,Layers3,X} from 'lucide-react';
 import {Button} from './ui/button';
 import {Switch} from './ui/switch';
@@ -28,14 +28,15 @@ type TimelineKit=typeof import('../timeline/runtime');
 /** Timeline mode's playback (v2 director): owns kit.useDirector (a child component, so the hook is called unconditionally while AtlasApp's kit may be null) and renders the bar and the Issue tracker from it. Each frame it lifts the date and camera cue up to AtlasApp for the scene and body stats; `manual` receives the scene's manual-camera handler. A manual Isolate pauses the director; guided playback resuming clears it. */
 function TimelineDirector({kit,startDate,isolated,onIsolate,onFrame,manual}:{kit:TimelineKit;startDate:string;isolated:string|null;onIsolate:(id:string|null)=>void;onFrame:(date:string,cue:CameraCue)=>void;manual:{current:()=>void}}){
  const [today]=useState(todayISO),d=kit.useDirector(today),{schedule,sample}=d;
- manual.current=d.manualCamera;
+ useEffect(()=>{manual.current=d.manualCamera;},[manual,d.manualCamera]);
  const ticks=useMemo(()=>stopTicks(schedule),[schedule]),years=useMemo(()=>yearMarks(schedule,today),[schedule,today]);
  // ?date=: start there, paused (free mode).
  const start=useRef(startDate);useEffect(()=>{const day=toDays(start.current)-toDays(BIRTH_DATE);if(day>0)d.seekDay(day);},[]);
- // Keyed on the cue's values, not its identity: lifting it re-renders this component, and a hook that rebuilt the object each render would otherwise loop.
- const c=d.cue;useEffect(()=>{onFrame(sample.date,c);},[onFrame,sample.date,c.day,c.guided,c.phase,c.stop?.id,c.ghost,c.zoom]);
+ // Keyed on the cue's values, not its identity: lifting it re-renders this component, and a hook that rebuilt the object each render would otherwise loop. A layout effect, so the scene gets the cue in the same frame as the bar and tracker.
+ const c=d.cue;useLayoutEffect(()=>{onFrame(sample.date,c);},[onFrame,sample.date,c.day,c.guided,c.phase,c.stop?.id,c.ghost,c.zoom]);
  useEffect(()=>{if(d.playing&&isolated)onIsolate(null);},[d.playing,isolated,onIsolate]);
- const isolate=(id:string|null)=>{if(id&&d.playing)d.pause();onIsolate(id);};
+ // A manual Isolate pauses guided play; at a hold it leaves guided mode (free mode at the same day), so Play returns to that climax.
+ const isolate=(id:string|null)=>{if(id){if(d.holding!=null)d.seekDay(sample.day);else if(d.playing)d.pause();}onIsolate(id);};
  return <>
   <TimelineBar issues={[]} date={sample.date} onDate={noSelect} selected={null} onSelect={noSelect} director={{fraction:schedule.totalMs>0?sample.storyMs/schedule.totalMs:0,ticks,years,playing:d.playing,holding:d.holding!=null,onPlay:()=>d.play(),onPause:()=>d.pause(),onContinue:()=>d.continue(),onSeekFraction:t=>d.seekDay(dayAtFraction(schedule,t)),onSeekStop:i=>d.seekStop(i),onReset:()=>d.seekDay(0)}}/>
   <kit.IssueTracker date={sample.date} today={today} isolated={isolated} onIsolate={isolate} focus={sample.focusId?{id:sample.focusId,phase:sample.phase}:null} phase={sample.phase} onContinue={()=>d.continue()}/>

@@ -27,9 +27,12 @@ export default function IssueTracker({date,today,isolated,onIsolate,focus=null,p
 	// A new guided focus, or its hold: bring its card into view.
 	useEffect(()=>{if(fid)list.current?.querySelector('.tracker-card.focused')?.scrollIntoView({block:'nearest',behavior:reduced()?'auto':'smooth'});},[fid,holding]);
 	// Phones: the sheet opens to the focused card at a hold.
-	useEffect(()=>{if(holding&&matchMedia('(max-width:767px)').matches)setOpen(true);},[holding,fid]);
+	// …and collapses when the hold ends, however it was continued (tracker, bar, keyboard).
+	const wasHolding=useRef(false);
+	useEffect(()=>{if(holding&&matchMedia('(max-width:767px)').matches)setOpen(true);else if(!holding&&wasHolding.current)setOpen(false);wasHolding.current=holding;},[holding,fid]);
 	// Hold arrival: Continue takes keyboard focus. After the sheet opens on phones (a closed sheet's list is visibility:hidden, so unfocusable), hence `open` and the frame delay.
-	useEffect(()=>{if(!holding)return;const r=requestAnimationFrame(()=>contRef.current?.focus({preventScroll:true}));return()=>cancelAnimationFrame(r);},[holding,fid,open]);
+	const focusable=holding&&(open||!matchMedia('(max-width:767px)').matches);
+	useEffect(()=>{if(!focusable)return;const r=requestAnimationFrame(()=>contRef.current?.focus({preventScroll:true}));return()=>cancelAnimationFrame(r);},[focusable,fid]);
 	// Collapse the mobile sheet on Isolate / Continue so the camera is visible.
 	const isolate=(id:string|null)=>{setOpen(false);onIsolate(id);},cont=()=>{setOpen(false);onContinue?.();};
 	return <aside className={`issue-tracker glass${open?' open':''}`} aria-label="Issue tracker" data-phase={phase??pinned?.phase??'none'}>

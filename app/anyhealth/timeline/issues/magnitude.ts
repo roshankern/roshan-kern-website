@@ -1,4 +1,4 @@
-/** How much a set of part effects changes the body, as one number: the v2 director's autoClimax measure and check/climax.check.ts's peak test. */
+/** How much a set of part effects changes the body, as one number: check/climax.check.ts's peak test (each climax sits at, or is a listed exception to, this measure's peak). */
 import type {PartFx} from '../types';
 
 /** Σ over effects of |swell|·100 + |translate|·100 (metres) + rotation angle (rad) + tint amount + (1 − visible) + max|scale − 1|·10. The scale term lets scale-only findings (myopia's axial elongation) register; ·10 puts a 10% scale on a par with a 1 mm swell. */

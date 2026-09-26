@@ -3,7 +3,7 @@ import type {Check,CheckContext} from './harness';
 import type {IssueScript} from '../types';
 import type {Schedule} from '../director/types';
 import {RELEASE_MS,APPROACH_MS,CRUISE_MIN_MS,CRUISE_MAX_MS} from '../director/types';
-import {buildSchedule,autoClimax} from '../director/schedule';
+import {buildSchedule} from '../director/schedule';
 import {createClock} from '../director/clock';
 import {SCRIPTS} from '../issues';
 import {toDays} from '../../health/dates';
@@ -93,10 +93,10 @@ export const checks:Check[]=[
 			c.assert(s.storyMsForDay(-5)===0&&s.storyMsForDay(end+5)===s.totalMs,'clamped');
 		}
 	}},
-	{name:'director: autoClimax fallback lands on the peak of the fx',run(c){
-		const bump:IssueScript={id:'bump',parts:['Heart'],onset:'2012-01-01',resolve:'2012-02-01',fxAt:d=>d<0||d>31?[]:[{part:'Heart',swell:0.01*(1-Math.abs(d-9)/31)}]};
-		c.assert(autoClimax(bump,TODAY)===9,`autoClimax ${autoClimax(bump,TODAY)}`);
-		const s=buildSchedule([bump],TODAY);c.near(s.stops[0].day,toDays('2012-01-01')-toDays(BIRTH_DATE)+9,0,'stop at the auto climax');c.assert(s.stops[0].approachDays===9,`default approachDays ${s.stops[0].approachDays}`);
+	{name:'director: approachDays defaults to min(30, climax + lead)',run(c){
+		const bump:IssueScript={id:'bump',parts:['Heart'],onset:'2012-01-01',resolve:'2012-02-01',climax:9,fxAt:d=>d<0||d>31?[]:[{part:'Heart',swell:0.001}]};
+		const s=buildSchedule([bump],TODAY);c.near(s.stops[0].day,toDays('2012-01-01')-toDays(BIRTH_DATE)+9,0,'stop at the climax');c.assert(s.stops[0].approachDays===9,`default approachDays ${s.stops[0].approachDays}`);
+		c.assert(buildSchedule([{...bump,climax:60}],TODAY).stops[0].approachDays===30,'capped at 30');
 	}},
 	{name:'director clock: plays to a hold and stays',run(c){
 		const s=syn(),k=createClock(s);k.play(0);let x=k.tick(1);c.assert(x.phase==='cruise',`playing from 0 reads cruise, not ${x.phase}`);

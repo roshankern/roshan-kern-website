@@ -72,9 +72,15 @@ export const checks:Check[]=[
 		const e=entriesFrom(S,'2010-06-05',T0,null,{id:'a',phase:'approach'});c.assert(e[0].script.id==='a'&&e[0].state==='isolated-inactive'&&e.length===2,'inactive focus pinned');
 		c.assert(entriesFrom(S,'2010-06-05',T0,null,{id:'nope',phase:'hold'}).length===1,'unknown focus id ignored');
 	}},
+	{name:'a guided focus inside its lead lists as active (wisdom teeth the eve of extraction); outside it, isolated-inactive',run(c){
+		const w=scriptFor('wisdom-teeth-extraction')!,day=(n:number)=>fromDays(toDays(w.onset)+n);
+		c.assert(trackerEntries(day(-1),T0,null,{id:w.id,phase:'hold'})[0].state==='active','eve of onset: active');
+		c.assert(trackerEntries(day(-1),T0,w.id,null)[0].state==='isolated-inactive','manual isolate before onset: unchanged');
+		c.assert(trackerEntries('2010-01-01',T0,null,{id:w.id,phase:'hold'})[0].state==='isolated-inactive','years before its lead: isolated-inactive');
+	}},
 	{name:'no focus: order unchanged from v1',run(c){
 		for(const d of ['2009-09-10','2016-12-23','2020-01-01',T0]){const v1=trackerEntries(d,T0,null).map(e=>e.issue.id).join();
-			c.assert(trackerEntries(d,T0,null,null).map(e=>e.issue.id).join()===v1,`${d}: null focus`);
+			const es=trackerEntries(d,T0,null,null);c.assert(es.every((e,i)=>!i||es[i-1].script.onset>e.script.onset||es[i-1].script.onset===e.script.onset&&es[i-1].issue.title.localeCompare(e.issue.title)<=0),`${d}: newest onset first, then title`);
 			// Outside approach/hold/release a focus does not pin (cruise/idle/end carry no focus).
 			for(const phase of ['idle','cruise','end'] as Phase[])c.assert(trackerEntries(d,T0,null,{id:'left-humerus-fracture-2009',phase}).map(e=>e.issue.id).join()===v1,`${d}: ${phase}`);}
 	}},

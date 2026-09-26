@@ -1,48 +1,24 @@
 /** The director's story schedule (pure, node-testable): one stop per issue script at its climax, trips between holds, and day / ghost / zoom as functions of story time. See docs/superpowers/specs/2026-09-26-anyhealth-timeline-director-design.md §2. */
-import type {Body,IssueScript,PartFx} from '../types';
+import type {IssueScript} from '../types';
 import type {Phase,Sample,Schedule,Stop} from './types';
 import {RELEASE_MS,APPROACH_MS,CRUISE_MS_PER_YEAR,CRUISE_MIN_MS,CRUISE_MAX_MS} from './types';
 import {smootherstep,hermite} from './ease';
 import {toDays,fromDays} from '../../health/dates';
 import {BIRTH_DATE,type Issue} from '../../health/types';
 import issuesData from '../../health/issues.json';
-import {bodyAt} from '../growth/proportions';
-import {LEAD_DAYS as boneLead} from '../issues/catalog/bones';
-import {LEAD_DAYS as airwayLead} from '../issues/catalog/airway';
-import {LEAD_DAYS as digestiveLead} from '../issues/catalog/digestive';
-import {LEAD_DAYS as skinLead} from '../issues/catalog/skin';
+import {leadDays} from '../issues';
 
-/** Days of anatomy each script shows before its onset (every catalog's LEAD_DAYS); 0 when absent. */
-export const LEAD:Record<string,number>={...boneLead,...airwayLead,...digestiveLead,...skinLead};
 const TITLES=new Map((issuesData as Issue[]).map(i=>[i.id,i.title]));
 const BIRTH=toDays(BIRTH_DATE);
 const clamp=(x:number,a:number,b:number)=>Math.max(a,Math.min(b,x));
 
-/** How strongly a set of effects changes the anatomy: Σ |swell|·100 + |translate|·100 + rotation angle + tint amount + (1 − visible). */
-export function fxMagnitude(fx:PartFx[]){let m=0;for(const f of fx){
-	if(f.swell)m+=Math.abs(f.swell)*100;if(f.translate)m+=Math.hypot(...f.translate)*100;if(f.rotate)m+=2*Math.acos(Math.min(1,Math.abs(f.rotate[3])));
-	if(f.tint)m+=f.tint[3];if(f.visible!==undefined)m+=1-f.visible;}return m;}
-
-const autoCache=new Map<string,number>(),autoScripts=new Map<string,IssueScript>(),bodies=new Map<string,Body>();
-/** Fallback climax (days since onset) for a script without `climax`: the whole day in [−lead, end] (clipped to birth..today) where fxMagnitude peaks, earliest on ties; 0 when nothing shows. Memoised per script and today. Task 2 gives every catalog script an explicit climax, so the real build never uses this. */
-export function autoClimax(s:IssueScript,today:string){
-	const key=`${s.id}|${s.onset}|${today}`,hit=autoCache.get(key);if(hit!==undefined&&autoScripts.get(key)===s)return hit;
-	const on=toDays(s.onset),lo=Math.ceil(Math.max(-(LEAD[s.id]??0),BIRTH-on)),hi=Math.floor(Math.min(s.chronic||!s.resolve?toDays(today)-on:toDays(s.resolve)-on,toDays(today)-on));
-	let best=0,at=clamp(0,lo,Math.max(lo,hi));
-	for(let d=lo;d<=hi;d++){const date=fromDays(on+d);let body=bodies.get(date);if(!body)bodies.set(date,body=bodyAt(date));const m=fxMagnitude(s.fxAt(d,{body,date}));if(m>best){best=m;at=d;}}
-	autoCache.set(key,at);autoScripts.set(key,s);return at;
-}
-
-let warned=false;
 /** Stops for `scripts`: one each at onset + climax (days since BIRTH_DATE, clipped to birth..today), sorted by day then id. */
 export function stopsFor(scripts:IssueScript[],today:string):Stop[]{
-	const end=toDays(today)-BIRTH,auto:string[]=[];
+	const end=toDays(today)-BIRTH;
 	const stops=scripts.map(s=>{
-		let climax=s.climax;if(climax===undefined){climax=autoClimax(s,today);auto.push(s.id);}
-		const lead=LEAD[s.id]??0;
+		const climax=s.climax,lead=leadDays(s.id);
 		return {id:s.id,day:clamp(toDays(s.onset)-BIRTH+climax,0,Math.max(0,end)),approachDays:s.approachDays??Math.max(0,Math.min(30,climax+lead)),view:s.view??null,title:TITLES.get(s.id)??s.id};
 	}).sort((a,b)=>a.day-b.day||(a.id<b.id?-1:a.id>b.id?1:0));
-	if(auto.length&&!warned&&process.env.NODE_ENV!=='production'){warned=true;console.warn(`director: ${auto.length} script(s) have no climax; using autoClimax (fx peak) for ${auto.join(', ')}`);}
 	return stops;
 }
 

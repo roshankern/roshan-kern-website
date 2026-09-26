@@ -4,7 +4,7 @@ import type {Issue} from '../../health/types';
 import type {IssueScript} from '../types';
 import type {Phase} from '../director/types';
 import {toDays} from '../../health/dates';
-import {SCRIPTS,activeWindow,dayOf} from '../issues';
+import {SCRIPTS,activeWindow,dayOf,leadDays} from '../issues';
 
 const ISSUES=new Map((issuesData as Issue[]).map(i=>[i.id,i]));
 /** Days a resolved issue stays listed (with a "Resolved" chip) after its resolve date. */
@@ -39,9 +39,10 @@ export function entriesFrom(scripts:IssueScript[],date:string,today:string,isola
 		if(state)out.push({issue:issueOf(s),script:s,state,day:dayOf(s,date)});
 	}
 	out.sort((a,b)=>b.script.onset.localeCompare(a.script.onset)||a.issue.title.localeCompare(b.issue.title));
-	const pin=(s:IssueScript):TrackerEntry=>({issue:issueOf(s),script:s,state:stateOf(s,date,today)??'isolated-inactive',day:dayOf(s,date)});
+	const pin=(s:IssueScript,lead=false):TrackerEntry=>({issue:issueOf(s),script:s,state:stateOf(s,date,today)??(lead&&date<s.onset&&-dayOf(s,date)<=leadDays(s.id)?'active':'isolated-inactive'),day:dayOf(s,date)});
 	if(iso)out.unshift(pin(iso));
-	if(foc)out.unshift(pin(foc));
+	// A guided stop inside its lead (the anatomy shows before the record date, e.g. wisdom teeth the eve of extraction) lists as active.
+	if(foc)out.unshift(pin(foc,true));
 	return out;
 }
 
