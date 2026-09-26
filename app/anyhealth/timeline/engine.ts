@@ -13,7 +13,7 @@ import {SCRIPTS,scriptFor,dayOf} from './issues';
 import {bodyAt} from './growth/proportions';
 import {growthFx} from './growth/organs';
 import {eruptionFx} from './issues/teeth/eruption';
-import {warpState,warpPoint,SEG_STRIDE,D_UNIT,type WarpState} from './growth/warp';
+import {warpState,warpPoint,SEG_STRIDE,D_UNIT,AXIAL_SEGMENTS,type WarpState} from './growth/warp';
 import {WARP_PARS,WARP_APPLY,TW_SEG,TW_SEG_ATTRS,warpUniforms,writeWarpUniforms} from './growth/warp-glsl';
 import {FX_ROWS,createFxTexture,mergeFx,writeFx,applyFxPoint,identityFx,type ResolvedFx} from './fx/part-fx';
 import {FX_PARS,FX_APPLY} from './fx/part-fx-glsl';
@@ -130,10 +130,12 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 	// settle(): per part, a bit mask of the segments its vertices use; the fx and warp it was last settled with.
 	let segMask=new Uint16Array(0),settledFx:(ResolvedFx|undefined)[]=[],settledWs:WarpState|null=null,unsettled=true;
 	const sameFx=(a:ResolvedFx|undefined,b:ResolvedFx|undefined)=>a===b||!!a&&!!b&&a.visible===b.visible&&a.swell===b.swell&&a.swellBand?.[0]===b.swellBand?.[0]&&a.swellBand?.[1]===b.swellBand?.[1]&&(['tint','scale','rotate','translate','pivot'] as const).every(k=>a[k].every((v,j)=>v===b[k][j]));
-	/** Bit mask of the segments whose warp parameters differ between two states (all of them when the ground moved). */
+	/** Bit mask of the segments whose warp parameters differ between two states (all of them when the ground moved; trunk / neck / head when the axial remap changed). */
 	const changedSegments=(a:WarpState|null,b:WarpState)=>{
 		if(!a||a.ground!==b.ground)return 0xffff;let m=0;
-		for(let i=0;i<SEGMENTS.length;i++){const k=i*3;if(a.alongScale[i]!==b.alongScale[i]||a.boneScale[i]!==b.boneScale[i]||a.softScale[i]!==b.softScale[i]||a.newJoint[k]!==b.newJoint[k]||a.newJoint[k+1]!==b.newJoint[k+1]||a.newJoint[k+2]!==b.newJoint[k+2])m|=1<<i;}
+		// The axial remap (trunk, neck, head) has its own parameters (face / cranium rates, girth steps): any change re-warps all three.
+		for(let k=0;k<a.axial.length;k++)if(a.axial[k]!==b.axial[k]){m|=(1<<AXIAL_SEGMENTS)-1;break;}
+		for(let i=0;i<SEGMENTS.length;i++){const k=i*3;if(a.alongScale[i]!==b.alongScale[i]||a.boneScale[i]!==b.boneScale[i]||a.softScale[i]!==b.softScale[i]||a.rootGirth[i]!==b.rootGirth[i]||a.newJoint[k]!==b.newJoint[k]||a.newJoint[k+1]!==b.newJoint[k+1]||a.newJoint[k+2]!==b.newJoint[k+2])m|=1<<i;}
 		return m;
 	};
 	const settle=()=>{

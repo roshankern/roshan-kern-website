@@ -5,7 +5,7 @@ import {growthFx,GLOBE_CENTRE} from '../growth/organs';
 import {toDays,fromDays} from '../../health/dates';
 import growth from '../../health/growth.json';
 import rigJson from '../growth/rig.json';
-import {warpState,warpPoint,segAt,SEG_STRIDE} from '../growth/warp';
+import {warpState,warpPoint,segAt,axialRates,SEG_STRIDE} from '../growth/warp';
 import {SOFT_SYSTEMS} from '../engine';
 import type {Vec3} from '../types';
 
@@ -17,7 +17,9 @@ const fxOf=(d:string,part:string)=>growthFx(bodyAt(d)).find(x=>x.part===part)?.s
 /** growth.md grid ages (years) and the date at each. */
 const GRID=[0,0.5,1,2,3,4,6,8,10,12,14,16,18],dateAt=(age:number)=>fromDays(toDays('2003-06-22')+Math.round(age*365.25));
 /** An organ's absolute linear size relative to the adult (last measurement): its fx times the warp's local size over the adult warp's. */
-const sizeOf=(d:string,part:string,seg:'head'|'trunk')=>{const b=bodyAt(d),A=bodyAt(LAST_MEASURED),loc=(x:typeof b)=>x.scale*Math.cbrt(x.length[seg]*x.boneGirth[seg]**2);return fxOf(d,part)*loc(b)/loc(A);};
+/** The real warp's local size at a rest point: ∛det of the axial remap there (warp.ts axialRates: f′·g²), independent of organs.ts. */
+const warpLocal=(b:ReturnType<typeof bodyAt>,y:number)=>{const [fp,g]=axialRates(warpState(R,b),y);return Math.cbrt(fp*g*g);};
+const sizeOf=(d:string,part:string,seg:'head'|'trunk')=>{const b=bodyAt(d),A=bodyAt(LAST_MEASURED),loc=(x:typeof b)=>seg==='head'?warpLocal(x,GLOBE_CENTRE.Left[1]):x.scale*Math.cbrt(x.length[seg]*x.boneGirth[seg]**2);return fxOf(d,part)*loc(b)/loc(A);};
 /** Rozema 2023 axial length, mm. */
 const rozema=(a:number)=>23.61-3.340*Math.exp(-3.006*a)-3.217*Math.exp(-0.187*a);
 
@@ -48,7 +50,7 @@ export const checks:Check[]=[
 		c.assert(fxOf('2013-01-01','Left lobe of thymus')>fxOf('2026-01-01','Left lobe of thymus'),'thymus involutes');
 		c.near(fxOf('2026-01-01','Left sclera'),1,0.02,'adult eye');
 		// A newborn eye is ~71% of adult axial length while the warped newborn head is ~55-60% of adult size, so relative to the warp the infant eye is LARGER (fx > 1); the absolute size is what must be small.
-		const b0=bodyAt('2003-06-22'),bA=bodyAt('2026-01-02'),loc=(b:typeof b0)=>b.scale*Math.cbrt(b.length.head*b.boneGirth.head**2);
+		const b0=bodyAt('2003-06-22'),bA=bodyAt('2026-01-02'),loc=(b:typeof b0)=>warpLocal(b,GLOBE_CENTRE.Left[1]);
 		const abs0=fxOf('2003-06-22','Left sclera')*loc(b0)/loc(bA);c.assert(abs0<0.8,`infant eye smaller in absolute size: ${abs0}`);c.near(abs0,rozema(0)/rozema(bA.ageYears),0.005,'infant eye = Rozema axial length ratio');
 		c.assert(fxOf('2012-01-01','Left testis')<fxOf('2020-01-01','Left testis'),'puberty');
 		c.assert(fxOf('2008-01-01','Glans penis')<fxOf('2020-01-01','Glans penis'),'penis grows in puberty');
@@ -86,5 +88,6 @@ export const checks:Check[]=[
 		for(const [age,m] of PRO){c.near(sizeOf(dateAt(age),'Prostate','trunk'),Math.cbrt(m/17),0.01,`prostate ${age} y`);c.near(sizeOf(dateAt(age),'Left seminal vesicle','trunk'),Math.cbrt(m/17),0.01,`seminal vesicle ${age} y`);}
 		for(const [age,m] of EPI)c.near(sizeOf(dateAt(age),'Left epididymis','trunk'),Math.cbrt(m/4),0.01,`epididymis ${age} y`);
 	}},
-	{name:'neck carries the explicit 2 y node (R3)',run(c){c.near(bodyAt(dateAt(2)).length.neck,0.050/0.064,0.003,'neck factor at 2 y');}},
+	// The stature renormalisation scales every vertical factor by one k (0.98 at 2 y since Task 14c applies the head factor to the whole menton → vertex height), so the node is checked against the head factor (2 y: 0.1891 / 0.1255 = 1.507, growth.md ratio-head), where k cancels.
+	{name:'neck carries the explicit 2 y node (R3)',run(c){const b=bodyAt(dateAt(2));c.near(b.length.neck/b.length.head,(0.050/0.064)/(0.1891/0.1255),0.003,'neck ÷ head factor at 2 y');}},
 ];

@@ -32,6 +32,12 @@ export interface Body {
 	scale:number;
 	/** Per segment: along-axis length factor, relative to `scale` (1 = adult-model proportion). */
 	length:Record<SegmentId,number>;
+	/** Axial remap (growth/warp.ts) rate of the face interval, rest menton → atlanto-occipital joint, relative to `scale`. Absent (hand-built bodies): length.head. bodyAt sets it (with craniumLength) so vertex→menton = length.head × the rest head height (growth.md growth#face-cranium). */
+	faceLength?:number;
+	/** Axial remap rate of the cranium interval, atlanto-occipital joint → vertex, relative to `scale`. Absent: length.head. */
+	craniumLength?:number;
+	/** Axial remap bone girth (lateral / AP scale) of the face interval, relative to `scale`. Absent: boneGirth.head (which then drives the cranium interval alone). */
+	faceGirth?:number;
 	/** Per segment: perpendicular factor for bone and organ tissue, relative to `scale`. */
 	boneGirth:Record<SegmentId,number>;
 	/** Per segment: perpendicular factor for soft tissue (muscular, integumentary, connective), relative to `scale`. */

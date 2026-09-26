@@ -37,7 +37,7 @@ let seed=0x2003_0622;const rnd=()=>{seed=(seed*1664525+1013904223)>>>0;return se
 /** A hand-built, deliberately non-identity body (not from bodyAt): every segment gets its own factors. */
 function testBody():Body{
 	const f=(lo:number,hi:number)=>Object.fromEntries(SEGMENTS.map(s=>[s,lo+(hi-lo)*rnd()])) as Record<SegmentId,number>;
-	const b:Body={date:'2006-06-22',ageYears:3,statureM:0.95,weightKg:14,scale:0.55,length:f(0.7,1.3),boneGirth:f(0.8,1.1),softGirth:f(0.9,1.4)};b.length.head=2.0;b.length.lThigh=b.length.rThigh=0.7;return b;
+	const b:Body={date:'2006-06-22',ageYears:3,statureM:0.95,weightKg:14,scale:0.55,length:f(0.7,1.3),boneGirth:f(0.8,1.1),softGirth:f(0.9,1.4)};b.length.head=2.0;b.length.lThigh=b.length.rThigh=0.7;b.faceLength=1.6;b.craniumLength=2.2;b.faceGirth=1.3;b.softGirth.trunk=0.8*b.boneGirth.trunk;return b; // a deflating trunk exercises the axial deflation clamp
 }
 const unit=(v:Vec3):Vec3=>{const l=Math.hypot(...v);return [v[0]/l,v[1]/l,v[2]/l];};
 const quat=(axis:Vec3,deg:number):Quat=>{const a=unit(axis),h=deg*Math.PI/360,s=Math.sin(h);return [a[0]*s,a[1]*s,a[2]*s,Math.cos(h)];};
@@ -62,6 +62,8 @@ function testPoints(){
 		// Bone distance: 0 (bone), 1-9 cm (often past the axis offset, so the min(1, dBone/ρ) clamp is exercised); whole D_UNITs so the bytes are exact.
 		dist[i]=i%5===0?0:Math.round(rnd()*0.09/D_UNIT)*D_UNIT;
 		part[i]=i%FX.length;if(i%16===5)pos[i*3+1]=0.6+(i%3)*0.002; // points on the band's lower edge
+		// Axial remap: every 4th point sits in or near a knot window (C7/T1 1.454, menton 1.500, AO 1.556) on trunk / neck / head, off-axis by up to ±6 cm.
+		if(i%4===2){pos[i*3+1]=1.40+0.2*rnd();seg[i*3]=Math.floor(rnd()*3);seg[i*3+1]=Math.min(2,seg[i*3]+(rnd()<0.5?0:1));}
 	}
 	return {pos,nrm,seg,dist,part};
 }
@@ -149,8 +151,8 @@ async function main(){
 	const reference=(kind:Kind)=>[0,1].map(soft=>{const P:number[]=[],M:number[]=[];for(let i=0;i<N;i++){
 		const p:Vec3=[pos[i*3],pos[i*3+1],pos[i*3+2]],n:Vec3=[nrm[i*3],nrm[i*3+1],nrm[i*3+2]],m:Vec3=[0,0,0],q:Vec3=[0,0,0];
 		const [a,b,w]=kind==='fixed'?[FIXED,FIXED,1]:[seg[i*3],seg[i*3+1],seg[i*3+2]];
-		if(kind!=='atlas'){q[0]=p[0];q[1]=p[1];q[2]=p[2];m[0]=n[0];m[1]=n[1];m[2]=n[2];}else applyFxPoint(FX[part[i]],p,n,q,m);
-		warpPoint(ws,q,a,b,w,!!soft,q,kind==='atlas'||kind==='float'?dist[i]:0);warpNormal(ws,m,a,b,w,m);P.push(...q);M.push(...m);
+		if(kind!=='atlas'){q[0]=p[0];q[1]=p[1];q[2]=p[2];m[0]=n[0];m[1]=n[1];m[2]=n[2];}else applyFxPoint(FX[part[i]],p,n,q,m);const q0:Vec3=[q[0],q[1],q[2]];
+		warpPoint(ws,q,a,b,w,!!soft,q,kind==='atlas'||kind==='float'?dist[i]:0);warpNormal(ws,q0,m,a,b,w,m);P.push(...q);M.push(...m);
 	}return [P,M];}).flat();
 
 	const browser=await pw.chromium.launch({executablePath:exe,headless:true,args:['--use-angle=swiftshader','--enable-unsafe-swiftshader','--ignore-gpu-blocklist']});
@@ -162,7 +164,7 @@ async function main(){
 		const bytes=Array.from({length:N},(_,i)=>{const d=Math.round(dist[i]/D_UNIT);return [seg[i*3]|seg[i*3+1]<<4,Math.round(seg[i*3+2]*255),d&255,d>>8];}).flat();
 		for(const [label,kind] of [['atlas parts (part fx + byte seg attribute)','atlas'],[`custom layer (TW_FIXED_SEG ${FIXED})`,'fixed'],['custom layer (float seg + segD, TW_SEG_D)','float'],['custom layer (float seg, no TW_SEG_D: segD compiled out, no inflation)','floatNoD']] as const){
 			const want=reference(kind);
-			const r=await page.evaluate(gpu,{vs:vsFor(kind),fs:fsFor(kind),n:N,pos:[...pos],nrm:[...nrm],seg:kind==='atlas'?bytes:[...seg],segD:[...dist],segBytes:kind==='atlas',part:[...part],tex:[...tex.data],texW:tex.width,rows:FX_ROWS,u:{twJ:flat('twJ'),twA:flat('twA'),twN:flat('twN'),twS:flat('twS'),twGround:[ws.ground]}});
+			const r=await page.evaluate(gpu,{vs:vsFor(kind),fs:fsFor(kind),n:N,pos:[...pos],nrm:[...nrm],seg:kind==='atlas'?bytes:[...seg],segD:[...dist],segBytes:kind==='atlas',part:[...part],tex:[...tex.data],texW:tex.width,rows:FX_ROWS,u:{twJ:flat('twJ'),twA:flat('twA'),twN:flat('twN'),twS:flat('twS'),twX:flat('twX'),twGround:[ws.ground]}});
 			if('error' in r){console.error(`GLSL check failed (${label}):\n${r.error}`);process.exit(1);}
 			let posErr=0,nrmErr=0,worst='';
 			r.out.forEach((px,pass)=>{const ref=want[pass],isPos=pass%2===0;for(let i=0;i<N;i++)for(let k=0;k<3;k++){const e=Math.abs(px[i*4+k]-ref[i*3+k]);if(isPos&&e>posErr){posErr=e;worst=`point ${i} (${kind==='fixed'?`seg ${FIXED}`:`part ${part[i]}, seg ${seg[i*3]}/${seg[i*3+1]} w ${seg[i*3+2].toFixed(3)} dBone ${(dist[i]*100).toFixed(1)} cm`}, soft ${pass>>1})`;}if(!isPos)nrmErr=Math.max(nrmErr,e);}});
