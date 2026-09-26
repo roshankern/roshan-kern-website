@@ -77,7 +77,7 @@ export interface Clock {
 /** What the scene needs each frame for the camera and ghosting in timeline mode. */
 export interface CameraCue {
 	day:number;
-	/** True while the director drives the camera: playing, or holding at a stop. False: free mode (paused / scrubbing). */
+	/** True unless the viewer scrubbed: playing, holding at a stop, or paused from play (the shot freezes where it is). False: free mode after seekDay (scrub / reset) until play, continue or seekStop; the camera then follows the default pose and cue.ghost / cue.zoom are 0. */
 	guided:boolean;
 	phase:Phase;
 	/** The stop being approached / held / released, else null. */
