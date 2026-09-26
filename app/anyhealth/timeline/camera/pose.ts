@@ -1,7 +1,8 @@
 /** Timeline camera math (spec 2026-09-26 §4), pure and node-checkable (three.js math only); atlas/scene.tsx uses it in timeline mode.
  *  A Pose is what the scene sets on the camera: orbit target, camera position, and the view offset (CSS px) that centres the framed box in the open area.
  *  - Growth framing: scalePose(adult, stature(day)/stature(today)) about the floor origin; the body grows about it too, so its projected height stays put.
- *  - Posed path: lerpPose interpolates target linearly, distance geometrically, direction by slerp and the offset linearly, so a zoom is uniform in perceived scale. */
+ *  - Posed path: lerpPose interpolates target linearly, distance geometrically, direction as azimuth about +y (shortest arc) plus elevation (lerp), and the offset linearly,
+ *    so a zoom is uniform in perceived scale and a front ↔ back move orbits around the body instead of swinging over the top (controller ruling; replaces the spec's slerp). */
 import * as T from 'three';
 import type {Rig,Vec3} from '../types';
 import {makeGrowth} from '../../health/growth';
@@ -11,6 +12,8 @@ import {LAST_MEASURED} from '../growth/proportions';
 import growthJson from '../../health/growth.json';
 import rigJson from '../growth/rig.json';
 import {FOCUS_MARGIN} from '../director/types';
+/** Re-exported so scene.tsx reads them from this dynamically loaded module (a value import of director/types would put it in the /anyhealth bundle). */
+export {REJOIN_MS,ISOLATE_FADE_MS,ISOLATE_FLY_MS} from '../director/types';
 
 export interface Pose {target:Vec3;position:Vec3;ox:number;oy:number}
 /** The screen area left for the anatomy (scene.tsx openArea): canvas size and the open rect, CSS px. */
@@ -24,20 +27,19 @@ const dist=(p:Pose)=>Math.hypot(p.position[0]-p.target[0],p.position[1]-p.target
 /** Target and position scaled by `s` about the world origin (the floor centre); the view offset is unchanged. */
 export const scalePose=(p:Pose,s:number):Pose=>({target:[p.target[0]*s,p.target[1]*s,p.target[2]*s],position:[p.position[0]*s,p.position[1]*s,p.position[2]*s],ox:p.ox,oy:p.oy});
 
-const va=new T.Vector3(),vb=new T.Vector3(),axis=new T.Vector3(),q=new T.Quaternion();
-/** The posed path at t ∈ [0,1]: target lerp, distance a.d^(1−t)·b.d^t, direction (target → camera) slerp, offsets lerp. Endpoints are returned exactly. */
+/** Azimuth about +y (atan2(x, z)) and elevation (asin y) of the unit direction target → camera of a pose. */
+const angles=(p:Pose,d:number)=>{const x=(p.position[0]-p.target[0])/d,y=(p.position[1]-p.target[1])/d,z=(p.position[2]-p.target[2])/d;return {az:Math.atan2(x,z),el:Math.asin(Math.min(1,Math.max(-1,y)))};};
+/** Elevation (radians) of a pose's direction target → camera. */
+export const elevationOf=(p:Pose)=>angles(p,Math.max(1e-9,dist(p))).el;
+/** The posed path at t ∈ [0,1]: target lerp, distance a.d^(1−t)·b.d^t, direction by azimuth (shortest arc about +y; exactly opposite turns by +π) and elevation (lerp), offsets lerp. Endpoints are returned exactly. */
 export function lerpPose(a:Pose,b:Pose,t:number):Pose{
 	if(t<=0)return {target:[...a.target],position:[...a.position],ox:a.ox,oy:a.oy};
 	if(t>=1)return {target:[...b.target],position:[...b.position],ox:b.ox,oy:b.oy};
-	const da=Math.max(1e-9,dist(a)),db=Math.max(1e-9,dist(b)),d=da*Math.pow(db/da,t);
-	va.set(a.position[0]-a.target[0],a.position[1]-a.target[1],a.position[2]-a.target[2]).divideScalar(da);
-	vb.set(b.position[0]-b.target[0],b.position[1]-b.target[1],b.position[2]-b.target[2]).divideScalar(db);
-	// Slerp as a rotation of a's direction about a × b by t·θ; opposite directions turn about a horizontal axis (never through the poles).
-	const angle=Math.acos(Math.min(1,Math.max(-1,va.dot(vb))));axis.crossVectors(va,vb);
-	if(axis.lengthSq()<1e-12){axis.set(-va.z,0,va.x);if(axis.lengthSq()<1e-12)axis.set(1,0,0);}
-	va.applyQuaternion(q.setFromAxisAngle(axis.normalize(),angle*t));
+	const da=Math.max(1e-9,dist(a)),db=Math.max(1e-9,dist(b)),d=da*Math.pow(db/da,t),A=angles(a,da),B=angles(b,db);
+	let dAz=B.az-A.az;dAz-=2*Math.PI*Math.floor((dAz+Math.PI)/(2*Math.PI));
+	const az=A.az+dAz*t,el=A.el+(B.el-A.el)*t,ce=Math.cos(el);
 	const L=(x:number,y:number)=>x+(y-x)*t,target:Vec3=[L(a.target[0],b.target[0]),L(a.target[1],b.target[1]),L(a.target[2],b.target[2])];
-	return {target,position:[target[0]+va.x*d,target[1]+va.y*d,target[2]+va.z*d],ox:L(a.ox,b.ox),oy:L(a.oy,b.oy)};
+	return {target,position:[target[0]+ce*Math.sin(az)*d,target[1]+Math.sin(el)*d,target[2]+ce*Math.cos(az)*d],ox:L(a.ox,b.ox),oy:L(a.oy,b.oy)};
 }
 
 /** A conservative first estimate of the camera distance (to the box centre) at which a box of `size` fits the open area × 1/margin, from any yaw: the height against the open height, the horizontal diagonal against the open width, plus the half diagonal for the near side. fitPose refines it on the projection. */
@@ -81,9 +83,9 @@ export function statureAt(day:number):number{const d=BIRTH+day,f=Math.floor(d),a
 /** Fractional days since BIRTH_DATE of an ISO date. */
 export const dayOfDate=(iso:string)=>toDays(iso)-BIRTH;
 
-/** The default view direction (target → camera): the slightly tilted three-quarter view (scene.tsx fitDirection). */
+/** The default view direction (target → camera): the slightly tilted three-quarter view. Keep in step with scene.tsx `fitDirection` (the v1 defaultPose). */
 export const DEFAULT_DIRECTION:Vec3=[.35,.06,1];
-/** The default pose fits the body to this share of the open area (scene.tsx defaultPose's .98). */
+/** The default pose fits the body to this share of the open area. Keep in step with the `/.98` in scene.tsx defaultPose (v1). */
 export const DEFAULT_FILL=.98;
 /** The adult default pose: the rest body box (atlas bounds: the adult model, feet at y = 0) scaled to today's stature about the origin, fitted from DEFAULT_DIRECTION. */
 export function adultPose(restBody:Box,todayDay:number,fovDeg:number,open:Open):Pose{
@@ -94,3 +96,8 @@ export function adultPose(restBody:Box,todayDay:number,fovDeg:number,open:Open):
 export const defaultPoseFor=(adult:Pose,day:number,todayDay:number)=>scalePose(adult,statureAt(day)/statureAt(todayDay));
 /** A stop's focus pose: the focus box × FOCUS_MARGIN fitted in the open area from `view` (default: DEFAULT_DIRECTION), at least minDistance away. */
 export const focusPose=(box:Box,view:Vec3|null|undefined,fovDeg:number,open:Open,minDistance=0)=>fitPose(box,view??DEFAULT_DIRECTION,fovDeg,open,1/FOCUS_MARGIN,minDistance);
+
+/** A stop's climax day (fractional days since BIRTH_DATE): onset + climax (0 until Task 2 fills every catalog). */
+export const climaxDay=(s:{onset:string;climax?:number})=>dayOfDate(s.onset)+(s.climax??0);
+/** The day the scene freezes a stop's focus box at (at the first frame of its approach): the script's climax day, or the cue's day for an id without a script. */
+export const stopBoxDay=(id:string,cueDay:number,scriptFor:(id:string)=>{onset:string;climax?:number}|undefined)=>{const s=scriptFor(id);return s?climaxDay(s):cueDay;};

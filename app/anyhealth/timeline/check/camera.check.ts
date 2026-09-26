@@ -4,12 +4,12 @@ import type {Check} from './harness';
 import type {Vec3} from '../types';
 import {DEFAULT_VISIBLE} from '../../atlas/anatomy';
 import {nodeEngine} from './engine-node';
-import {SCRIPTS} from '../issues';
+import {SCRIPTS,scriptFor} from '../issues';
 import {bodyAt} from '../growth/proportions';
 import {toDays,fromDays} from '../../health/dates';
 import {BIRTH_DATE} from '../../health/types';
 import {REJOIN_MS,APPROACH_MS} from '../director/types';
-import {lerpPose,scalePose,adultPose,defaultPoseFor,focusPose,projectBox,projectedHeight,statureAt,dayOfDate,smootherstep,fitPose,DEFAULT_DIRECTION,type Pose,type Open,type Box} from '../camera/pose';
+import {lerpPose,scalePose,adultPose,defaultPoseFor,focusPose,projectBox,projectedHeight,statureAt,dayOfDate,smootherstep,fitPose,elevationOf,climaxDay,stopBoxDay,DEFAULT_DIRECTION,type Pose,type Open,type Box} from '../camera/pose';
 
 const FOV=34,TODAY='2026-09-26',TODAY_DAY=dayOfDate(TODAY),MIN_DISTANCE=.04;
 /** Open areas as scene.tsx openArea measures them (atlas.css / tracker.css). Desktop 1440×900: Systems panel 30 + 254 (+24), tracker footprint 340 + 30 (+24), title above, timeline bar below.
@@ -30,7 +30,7 @@ export const checks:Check[]=[
 	{name:'lerpPose endpoints exact',run(c){
 		for(const [a,b] of [[DEF,NEAR],[DEF,BACK],[NEAR,BACK]])for(const [t,p] of [[0,a],[1,b]] as const){const r=lerpPose(a,b,t);c.assert(r.target.every((v,i)=>v===p.target[i])&&r.position.every((v,i)=>v===p.position[i])&&r.ox===p.ox&&r.oy===p.oy,`t=${t} is not exactly the endpoint`);}
 	}},
-	{name:'lerpPose distance is geometric (t=.5 → √(d0·d1)) and the direction is a unit slerp',run(c){
+	{name:'lerpPose distance is geometric (t=.5 → √(d0·d1))',run(c){
 		for(const [a,b] of [[DEF,NEAR],[DEF,BACK]]){const m=lerpPose(a,b,.5);c.near(dist(m),Math.sqrt(dist(a)*dist(b)),1e-9,'midpoint distance');c.near(m.ox,(a.ox+b.ox)/2,1e-9,'ox lerp');
 			for(let k=1;k<10;k++){const p=lerpPose(a,b,k/10),e=Math.log(dist(a))*(1-k/10)+Math.log(dist(b))*k/10;c.near(Math.log(dist(p)),e,1e-9,`log distance at ${k/10}`);}}
 	}},
@@ -56,7 +56,7 @@ export const checks:Check[]=[
 	}},
 	{name:'focus pose fits the open area (tracker footprint excluded) with ≥ 4% margin: every script\'s focusBox at its climax, from its view, 1440×900 and 390×844',async run(c){
 		const g=await c.geometry(),{engine}=nodeEngine(g),missing:string[]=[];
-		const stops=SCRIPTS.map(s=>({s,day:dayOfDate(s.onset)+(s.climax??0)})).sort((a,b)=>a.day-b.day);
+		const stops=SCRIPTS.map(s=>({s,day:climaxDay(s)})).sort((a,b)=>a.day-b.day);
 		for(const {s,day} of stops){
 			engine.update({date:fromDays(toDays(BIRTH_DATE)+Math.floor(day)),day,visible:DEFAULT_VISIBLE,isolate:null,now:0});const b=engine.focusBox(s.id,day);
 			if(!b||b.isEmpty()){missing.push(s.id);continue;}const box=boxOf(b);
@@ -80,6 +80,18 @@ export const checks:Check[]=[
 			c.assert(worst<=.005,`rejoin from ${start.toFixed(0)} ms into the zoom: worst step ${(worst*100).toFixed(3)}% of distance per ms`);
 			c.near(step(lerpPose(user,scripted(start+REJOIN_MS),1),scripted(start+REJOIN_MS)),0,0,'rejoin ends exactly on the scripted pose');
 		}
+	}},
+	{name:'lerpPose orbits about +y: elevation stays within the endpoints\' elevations front → back (default → spine from behind, and exactly opposite directions)',run(c){
+		const at=(dir:Vec3,el=0):Pose=>({target:[0,1,0],position:[dir[0]*3,1+dir[1]*3+el,dir[2]*3],ox:0,oy:0});
+		for(const [what,a,b] of [['default → back',DEF,BACK],['back → default',BACK,DEF],['exactly opposite',at([0,0,1]),at([0,0,-1])],['opposite, tilted',at([.6,.1,.8]),at([-.6,.3,-.8])]] as const){
+			const lo=Math.min(elevationOf(a),elevationOf(b))-1e-9,hi=Math.max(elevationOf(a),elevationOf(b))+1e-9;let prev=lerpPose(a,b,0),worst=0;
+			for(let k=1;k<=1000;k++){const p=lerpPose(a,b,k/1000),e=elevationOf(p);c.assert(e>=lo&&e<=hi,`${what} t=${k/1000}: elevation ${(e*180/Math.PI).toFixed(2)}° outside [${(lo*180/Math.PI).toFixed(2)}, ${(hi*180/Math.PI).toFixed(2)}]°`);worst=Math.max(worst,step(prev,p)/Math.min(dist(prev),dist(p)));prev=p;}
+			c.assert(worst<=.005,`${what}: worst step ${(worst*100).toFixed(3)}% of distance`);
+		}
+	}},
+	{name:'the scene freezes a stop\'s focus box at its climax day (stopBoxDay = onset + climax, the day the focus-fit check frames)',run(c){
+		for(const s of SCRIPTS){c.assert(stopBoxDay(s.id,-123.5,scriptFor)===dayOfDate(s.onset)+(s.climax??0),`${s.id}: stopBoxDay ${stopBoxDay(s.id,-123.5,scriptFor)}`);c.assert(climaxDay(s)===stopBoxDay(s.id,0,scriptFor),`${s.id}: climaxDay`);}
+		c.assert(stopBoxDay('no-such-issue',42.25,scriptFor)===42.25,'unknown id falls back to the cue day');
 	}},
 	{name:'scalePose scales target and position about the origin and keeps the view offset',run(c){
 		const p=scalePose(DEF,.3);c.near(p.position[1],DEF.position[1]*.3,1e-12,'position');c.near(p.target[2],DEF.target[2]*.3,1e-12,'target');c.assert(p.ox===DEF.ox&&p.oy===DEF.oy,'offset');
