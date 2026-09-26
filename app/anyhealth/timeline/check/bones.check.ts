@@ -1,7 +1,8 @@
 /** Checks for the bones area (Task 8): the 2009 left humerus fracture layer, the callus record and upper-thoracic scoliosis. */
 import * as T from 'three';
 import type {Check} from './harness';
-import type {LayerContext,LayerFrame,PartFx,SegmentId} from '../types';
+import type {LayerContext,LayerFrame,PartFx,SegmentId,Vec3} from '../types';
+import {applyFxPoint,identityFx} from '../fx/part-fx';
 import {SCRIPTS as AREA,LEAD_DAYS} from '../issues/catalog/bones';
 import {SCOLIOSIS_LEVELS,SCOLIOSIS_RIBS,SCOLIOSIS_CERVICAL} from '../issues/bones/scoliosis';
 import {bodyAt} from '../growth/proportions';
@@ -112,6 +113,9 @@ export const checks:Check[]=[
 	}},
 	{name:'bones: scoliosis rest levels match the atlas (bounds centres, 1 mm)',async run(c){
 		const {atlas}=await c.geometry(),centre=(n:string)=>{const p=atlas.parts.find(q=>q.name===n);c.assert(!!p,`atlas has ${n}`);return [0,1,2].map(k=>(p!.bounds[0][k]+p!.bounds[1][k])/2);};
+		// Each rib's costovertebral contact is a rib vertex within 1 mm of its vertebra.
+		const g=await c.geometry(),near=(n:string,p:readonly number[])=>{let m=Infinity;for(const i of g.indicesOf(n)){const P=g.parts[i].position;for(let k=0;k<P.length;k+=3)m=Math.min(m,Math.hypot(P[k]-p[0],P[k+1]-p[1],P[k+2]-p[2]));}return m;};
+		SCOLIOSIS_RIBS.forEach((r,i)=>{for(const [part,h] of [[r.left,r.leftJoint],[r.right,r.rightJoint]] as const){c.assert(near(part,h)<1e-4,`${part}: joint point is a rib vertex`);c.assert(near(SCOLIOSIS_LEVELS[i].vertebra,h)<.001,`${part}: joint point within 1 mm of ${SCOLIOSIS_LEVELS[i].vertebra}`);}});
 		[...SCOLIOSIS_CERVICAL,...SCOLIOSIS_LEVELS].forEach(l=>{c.near(centre(l.vertebra)[0],l.x,.001,`${l.vertebra} x`);c.near(centre(l.vertebra)[1],l.y,.001,`${l.vertebra} y`);c.near(centre(l.vertebra)[2],l.z,.001,`${l.vertebra} z`);c.near(centre(l.disk)[1],l.diskY,.001,`${l.disk} y`);});
 	}},
 	{name:'bones: scoliosis at today peaks at T3/T4 and stays within 1.2 cm',run(c){
@@ -119,7 +123,9 @@ export const checks:Check[]=[
 		const [t1,,t3,t4,,t6]=SCOLIOSIS_LEVELS.map(l=>off(l.vertebra)),apex=Math.max(t3,t4);
 		c.assert(apex>0,'the apex moves');c.assert(apex>=t1&&apex>=t6,`apex ${apex} ≥ T1 ${t1}, T6 ${t6}`);c.assert(fx.every(f=>Math.hypot(...(f.translate??[0,0,0]))<=.012),'|offset| ≤ 1.2 cm');
 		c.assert(fx.every(f=>(f.translate?.[0]??0)>=0),'convex to the left (+x), the proximal thoracic side');
-		SCOLIOSIS_RIBS.forEach((r,i)=>{const v=fxOf(fx,SCOLIOSIS_LEVELS[i].vertebra)?.translate?.[0];c.assert(fxOf(fx,r.left)?.translate?.[0]===v&&fxOf(fx,r.right)?.translate?.[0]===v,`${r.left} follows its vertebra`);});
+		// Each rib translates by its costovertebral contact's displacement under its vertebra's shift, tilt and turn (about the vertebra's rest bounds centre).
+		SCOLIOSIS_RIBS.forEach((r,i)=>{const l=SCOLIOSIS_LEVELS[i],v=fxOf(fx,l.vertebra)!,f={...identityFx([l.x,l.y,l.z]),rotate:v.rotate!,translate:v.translate!};
+			for(const [part,h] of [[r.left,r.leftJoint],[r.right,r.rightJoint]] as const){const q:Vec3=[0,0,0];applyFxPoint(f,[...h],[0,0,1],q);const t=fxOf(fx,part)?.translate;c.assert(!!t&&!fxOf(fx,part)?.rotate,`${part} translates only`);for(let j=0;j<3;j++)c.near(t![j],q[j]-h[j],1e-12,`${part} follows its vertebra's joint, axis ${j}`);}});
 		c.assert(fxOf(fx,SCOLIOSIS_LEVELS[2].vertebra)?.rotate!==undefined,'vertebrae rotate');
 	}},
 	{name:'bones: adjacent vertebra translates differ by < 4 mm (no shearing apart)',run(c){

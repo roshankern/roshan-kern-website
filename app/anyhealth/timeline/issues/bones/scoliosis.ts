@@ -1,6 +1,7 @@
-/** Upper-thoracic scoliosis as part effects: T1–T6 and their disks shift sideways (to the left, the classic side of a proximal thoracic curve) along a smooth arc (apex between T3 and T4, end vertebrae T1 and T5), tilt with the arc and turn axially toward the convexity; ribs 1–6 follow their vertebra's shift.
+/** Upper-thoracic scoliosis as part effects: T1–T6 and their disks shift sideways (to the left, the classic side of a proximal thoracic curve) along a smooth arc (apex between T3 and T4, end vertebrae T1 and T5), tilt with the arc and turn axially toward the convexity; ribs 1–6 move with their vertebra's joint (the rib point that meets it follows the vertebra's shift, tilt and turn).
  * C5–C7 and their disks take the upper flank of the arc, the cervical compensation that keeps the head level (Task 15b: with C7 held neutral, T1's 4° tilt against it closed the left C7/T1 facet by 1.7 mm). It develops from 2020 to the 2025-07-08 record and then holds (chronic). The record has no imaging, so the angle, side and apex are typical values (see docs/anyhealth/timeline-medical-basis/bones.md). */
-import type {PartFx,Quat} from '../../types';
+import type {PartFx,Quat,Vec3} from '../../types';
+import {applyFxPoint,identityFx} from '../../fx/part-fx';
 import {toDays} from '../../../health/dates';
 
 /** One thoracic level: vertebra and the disk below it, with the rest bounds centre (x, y, z) of the vertebra and y of the disk (atlas.json, checked in bones.check.ts). */
@@ -10,8 +11,9 @@ const REST:[number,number,number,number][]=// [vertebra x, vertebra y, vertebra 
 [[-.0007,1.4402,-.048,1.4264],[-.0007,1.4216,-.0526,1.4063],[-.0006,1.4002,-.061,1.3852],[-.0006,1.3777,-.0651,1.3628],[-.0006,1.3466,-.067,1.3379],[-.0007,1.3173,-.0668,1.3112]];
 /** T1–T6, top to bottom. */
 export const SCOLIOSIS_LEVELS:SpineLevel[]=ORD.map((o,i)=>({vertebra:`${Ord[i]} thoracic vertebra`,disk:`Intervertebral disk of ${o} thoracic vertebra`,x:REST[i][0],y:REST[i][1],z:REST[i][2],diskY:REST[i][3]}));
-/** Ribs 1–6, paired with T1–T6. */
-export const SCOLIOSIS_RIBS=ORD.map(o=>({left:`Left ${o} rib`,right:`Right ${o} rib`}));
+/** Ribs 1–6, paired with T1–T6, with the rib vertex nearest its vertebra (the costovertebral contact; atlas geometry, checked in bones.check.ts). */
+const RIB_JOINT:[Vec3,Vec3][]=[[[.0161,1.44,-.029],[-.0168,1.444,-.0255]],[[.0288,1.4323,-.0457],[-.0338,1.4318,-.049]],[[.0128,1.4117,-.047],[-.0141,1.411,-.0474]],[[.0332,1.392,-.0726],[-.0319,1.3893,-.0687]],[[.0332,1.3567,-.0767],[-.0327,1.3556,-.0752]],[[.0297,1.3328,-.0801],[-.0356,1.3335,-.087]]];
+export const SCOLIOSIS_RIBS=ORD.map((o,i)=>({left:`Left ${o} rib`,right:`Right ${o} rib`,leftJoint:RIB_JOINT[i][0],rightJoint:RIB_JOINT[i][1]}));
 /** C5–C7, top to bottom: the lower cervical levels inside the arc's upper flank (bounds centres, atlas.json, checked in bones.check.ts). */
 export const SCOLIOSIS_CERVICAL:SpineLevel[]=[['Fifth',-.0007,1.484,-.0366,1.4761],['Sixth',-.0007,1.4713,-.0396,1.4601],['Seventh',-.0006,1.4564,-.0444,1.4439]].map(([o,x,y,z,d])=>({vertebra:`${o} cervical vertebra`,disk:`Intervertebral disk of ${String(o).toLowerCase()} cervical vertebra`,x:x as number,y:y as number,z:z as number,diskY:d as number}));
 /** Every part the scoliosis moves (the script's `parts`). */
@@ -63,7 +65,10 @@ export function scoliosisFx(day:number):PartFx[]{
 		const v=levelFx(l.vertebra,l.y,k);out.push(v);
 		// The disk turns about the same vertical axis as its vertebra (the vertebra's rest bounds-centre x/z, which the vertebra pivots on by default), so the two stay together.
 		out.push(levelFx(l.disk,l.diskY,k,[l.x,l.diskY,l.z]));
-		const r=SCOLIOSIS_RIBS[i];out.push({part:r.left,translate:[...v.translate!]},{part:r.right,translate:[...v.translate!]});
+		// Each rib translates rigidly so its costovertebral contact moves with the vertebra (shift + tilt + turn about the vertebra's pivot). Task 15b: with the shift alone the tilted vertebrae pressed 1–2 mm deeper into the rib heads
+		// (right 1st rib into the C7/T1 disk, 6th ribs into T6); a rigid rib turn would carry its sternal end centimetres off the costal cartilage, so the rib keeps its orientation.
+		const r=SCOLIOSIS_RIBS[i],f={...identityFx([l.x,l.y,l.z]),rotate:v.rotate!,translate:v.translate!},at=(h:Vec3):Vec3=>{const q:Vec3=[0,0,0];applyFxPoint(f,h,[0,0,1],q);return [q[0]-h[0],q[1]-h[1],q[2]-h[2]];};
+		out.push({part:r.left,translate:at(r.leftJoint)},{part:r.right,translate:at(r.rightJoint)});
 	});
 	return out;
 }
