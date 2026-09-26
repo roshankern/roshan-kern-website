@@ -61,6 +61,10 @@ const VERTEBRAE=['Atlas','Axis',...['Third','Fourth','Fifth','Sixth','Seventh'].
 const HULL_FRAC=0.02,HULL_MM=3;
 /** Thymus lobes (exempt from HULL_*): superior exits through the thoracic inlet are anatomically normal for the large infant thymus (Task 15b brief); an exit on any other side (anterior, lateral, posterior, inferior) at most 1 mm. */
 const THYMUS_SIDE_MM=1,THYMUS=/lobe of thymus$/;
+/** Ratchets on the allowed superior exits (Task 15b fix round 1: the values measured in Task 15b + 0.5 mm / + 0.5 percentage points), so a later change can only keep or shrink them: [farthest out (mm), fraction of positions out]. */
+const THYMUS_CAP:Record<string,[number,number]>={'Right lobe of thymus':[15.9,0.237],'Left lobe of thymus':[2.4,0.039]};
+/** No thymus exit may lean more anterior than superior (exit face normal n_z ≤ n_y), so an anterosuperior exit cannot pass as superior. The anterior component d·max(0, n_z) is printed but not gated: the thoracic inlet slopes
+ * anteroinferiorly (its hull face normal is ≈ 30° forward of vertical), so every exit straight up through it has one (up to 8.7 mm on the right lobe at 1 y; Task 15b fix round 1). */
 /** Parts with fewer vertices than this are measured on every vertex, not every SAMPLE-th: a single vertex of a small part (a segmental bronchial tree, a toe phalanx) would otherwise count several %. */
 const SMALL=3000;
 /** Skin containment counts a vertex as newly outside when it was inside the Skin at rest and is now more than this far outside it. */
@@ -143,7 +147,7 @@ function testDates():{date:string;label:string}[]{
 // ── The per-date measurements (one pass per date, cached) ──
 /** Hull containment: vertices out, the farthest out, and the exit side of each out vertex (dominant axis of the exit face normal). Each rest position counts once: the atlas repeats a vertex along normal / UV seams (the left apical
  * segmental bronchial tree has 722 vertices at 507 positions, and its seam runs through its apex), which would weight the fractions by where the seams happen to run. */
-interface HullStat {out:number;maxOut:number;n:number;/** per exit side: vertices out through it and the farthest (metres) */exits:Record<string,{n:number;max:number}>}
+interface HullStat {out:number;maxOut:number;n:number;/** the largest anterior component of an exit, d·max(0, n_z) (metres), and how many exits lean more anterior than superior (n_z > n_y) */ant:number;antOverSup:number;/** per exit side: vertices out through it and the farthest (metres) */exits:Record<string,{n:number;max:number}>}
 /** Skin containment of a vertex set: n tested, outside now, `inRest` = inside at rest, newly outside (inside at rest, now more than OUT_MM outside) and the farthest of those (mm, over all of them). */
 interface SkinStat {n:number;outside:number;inRest:number;newOut:number;worstMM:number}
 interface Measure {
@@ -197,7 +201,7 @@ function measureNow(s:Setup,date:string|null,rest:Measure|null):Measure{
 	const hullFrom=(names:string[],extraZ=0):Hull=>{const pts=concat(s.byName(names).map(W));if(!extraZ)return hullOf(pts);const sh=pts.slice();for(let k=2;k<sh.length;k+=3)sh[k]+=extraZ;return hullOf(concat([pts,sh]));};
 	const inHull=(h:Hull,names:string[],inflate=0,sel?:(i:number)=>ArrayLike<number>):Map<string,HullStat>=>{
 		const out=new Map<string,HullStat>();
-		for(const nm of names){let o=0,n=0,mx=0,any=false;const exits:HullStat['exits']={};for(const i of g.indicesOf(nm)){if(!visibleOn(pose,i))continue;any=true;const P=sel?sel(i):W(i),st=sel||P.length/3<SMALL?1:SAMPLE,F=s.first[i];for(let k=0;k<P.length;k+=3*st){if(!sel&&!F[k/3])continue;const d=h.dist(P[k],P[k+1],P[k+2])-inflate;n++;if(d>0){o++;if(d>mx)mx=d;const e=exitSide(h.exitNormal(P[k],P[k+1],P[k+2])),x=exits[e]??={n:0,max:0};x.n++;x.max=Math.max(x.max,d);}}}if(any)out.set(nm,{out:o,n,maxOut:mx,exits});}
+		for(const nm of names){let o=0,n=0,mx=0,any=false,ant=0,aos=0;const exits:HullStat['exits']={};for(const i of g.indicesOf(nm)){if(!visibleOn(pose,i))continue;any=true;const P=sel?sel(i):W(i),st=sel||P.length/3<SMALL?1:SAMPLE,F=s.first[i];for(let k=0;k<P.length;k+=3*st){if(!sel&&!F[k/3])continue;const d=h.dist(P[k],P[k+1],P[k+2])-inflate;n++;if(d>0){o++;if(d>mx)mx=d;const en=h.exitNormal(P[k],P[k+1],P[k+2]),e=exitSide(en),x=exits[e]??={n:0,max:0};x.n++;x.max=Math.max(x.max,d);ant=Math.max(ant,d*Math.max(0,en[2]));if(en[2]>en[1])aos++;}}}if(any)out.set(nm,{out:o,n,maxOut:mx,exits,ant,antOverSup:aos});}
 		return out;
 	};
 	// 1 · organs in the rib cage; 2 · abdominal organs in the pelvis / abdomen hull (+1 cm anterior).
@@ -206,11 +210,11 @@ function measureNow(s:Setup,date:string|null,rest:Measure|null):Measure{
 	const abd=inHull(hullFrom(ABD_HULL,0.01),ABD_ORGANS);
 	// Skin grid (all of it; the other parts test against it). The shell's inner / outer triangle classes come from the rest mesh.
 	const skinI=g.indicesOf('Skin')[0],skin=new TriGrid(W(skinI),g.parts[skinI].index,SKIN_CELL,{shell:true,outer:rest?.skinOuter??undefined}),flags=new Map<number,Uint8Array>();
-	/** Skin containment of the named parts' visible vertices (every `stride`-th), per vertex against the rest flags. */
+	/** Skin containment of the named parts' visible vertices (every `stride`-th; each rest position once, as the hull fractions: seam duplicates are skipped), per vertex against the rest flags. */
 	const skinStat=(names:string[],stride:number):SkinStat=>{
 		let n=0,outside=0,inRest=0,newOut=0,worst=0;
 		for(const nm of names)for(const i of g.indicesOf(nm)){if(!visibleOn(pose,i))continue;const P=W(i),rf=rest?.flags.get(i),st=P.length/3<SMALL?1:stride,f=new Uint8Array(Math.ceil(P.length/3/st));
-			for(let k=0,v=0;k<P.length;k+=3*st,v++){n++;const inside=skin.inside(P[k],P[k+1],P[k+2]);f[v]=+inside;if(rf?rf[v]:inside)inRest++;if(inside)continue;outside++;
+			const F=s.first[i];for(let k=0,v=0;k<P.length;k+=3*st,v++){if(!F[k/3]){f[v]=1;continue;}n++;const inside=skin.inside(P[k],P[k+1],P[k+2]);f[v]=+inside;if(rf?rf[v]:inside)inRest++;if(inside)continue;outside++;
 				// Newly outside: inside at rest, now > OUT_MM from the Skin, and confirmed by the generalized winding number of the Skin's outer surface (≥ 0.5 at rest, < 0.5 now). The fast test is a ray vote, and a ray that also crosses
 				// another sheet (an arm on the flank, the thighs at the perineum, the eye pocket) flips it: Task 15b found rib 7, hip bone and ethmoid vertices 4–18 mm deep inside the body (winding 0.97–1.00) voted outside.
 				if(rf&&rf[v]){const d=skin.nearest(P[k],P[k+1],P[k+2],0.05),R=g.parts[i].position;if(d*MM>OUT_MM&&skin.winding(P[k],P[k+1],P[k+2])<0.5&&rest!.skinGrid!.winding(R[k],R[k+1],R[k+2])>=0.5){newOut++;if(d>worst)worst=d;}}}
@@ -283,7 +287,9 @@ const sidesOf=(e:HullStat['exits'])=>Object.entries(e).sort((a,b)=>b[1].max-a[1]
 function hullRow(m:Map<string,HullStat>,rest:Map<string,HullStat>,tolMM:number,fracTol:number):Row{
 	let wv=-Infinity,line='';const breaches:string[]=[],thy:string[]=[];
 	for(const [nm,st] of m){const r=rest.get(nm)??{out:0,n:1,maxOut:0,exits:{}};
-		if(THYMUS.test(nm)){const side=Math.max(0,...Object.entries(st.exits).filter(([k])=>k!=='superior').map(([,v])=>v.max));thy.push(`${nm.split(' ')[0]} ${pct(st.out/st.n)}% out, max ${mm(st.maxOut)} mm${st.out?` [${sidesOf(st.exits)}]`:''}`);if(side*MM>THYMUS_SIDE_MM)breaches.push(`${nm} ${mm(side)} mm out on a non-superior side`);continue;}
+		if(THYMUS.test(nm)){const side=Math.max(0,...Object.entries(st.exits).filter(([k])=>k!=='superior').map(([,v])=>v.max));thy.push(`${nm.split(' ')[0]} ${pct(st.out/st.n)}% out, max ${mm(st.maxOut)} mm, anterior ≤${mm(st.ant)} mm${st.out?` [${sidesOf(st.exits)}]`:''}`);if(side*MM>THYMUS_SIDE_MM)breaches.push(`${nm} ${mm(side)} mm out on a non-superior side`);
+			const cap=THYMUS_CAP[nm];if(cap&&(st.maxOut*MM>cap[0]||st.out/st.n>cap[1]))breaches.push(`${nm} superior exit ${mm(st.maxOut)} mm / ${pct(st.out/st.n)}% > ratchet ${cap[0]} mm / ${pct(cap[1])}%`);
+			if(st.antOverSup)breaches.push(`${nm} ${st.antOverSup} exits lean more anterior than superior`);continue;}
 		const df=st.out/st.n-r.out/r.n,dm=st.maxOut-r.maxOut;
 		if(dm>wv){wv=dm;line=`worst ${nm}: out ${mm(st.maxOut)} mm (rest ${mm(r.maxOut)}), ${pct(st.out/st.n)}% out (rest ${pct(r.out/r.n)}%)${st.out?`; exits ${sidesOf(st.exits)}`:''}`;}
 		if(dm*MM>tolMM||df>fracTol)breaches.push(`${nm} +${mm(dm)} mm / +${pct(df)}%`);}

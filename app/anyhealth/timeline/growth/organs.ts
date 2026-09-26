@@ -31,10 +31,10 @@ export const GLOBE_CENTRE:Record<'Left'|'Right',Vec3>={Left:[0.0291,1.5962,0.051
 export const GLOBE_FRONT:Record<'Left'|'Right',Vec3>={Left:[0.0291,1.5956,0.0660],Right:[-0.0301,1.5958,0.0660]};
 /** Eye growth is anchored EYE_ANCHOR of the way from the globe centre to the anterior pole. Relative to the warp the infant globe is large (fx 1.26 at birth, 1.14–1.17 at 3–10 y). About the centre (0) it pushed the cornea 0.7–2.5 mm into the lids
  * and 2–4% of the globe out through them (Task 14c controller note; Task 15b clipping check); about the anterior pole (1, Task 14c) it sank the globe centre 1.5–2.1 mm behind the orbit's (the brief: ≤ 1 mm). 0.45 keeps the centre within
- * 0.8 mm of the orbit's and the globe inside the lids (≤ 0.6% newly outside), and leaves the relatively larger young globe a little more prominent, as it is. */
+ * 0.8 mm of the orbit's and the globe inside the lids (≤ 0.6% newly outside): a fit between those two gates, not an anatomical landmark. */
 export const EYE_ANCHOR=0.45; // basis: growth#eye-axial
 /** The eyelid tarsal plates are moulded on the globe (the tarsus follows the curvature of the eye it rests on), so they take the eye's growth transform: with the plates warped alone the grown globe pressed 0.4–0.6 mm into them
- * (Task 15b clipping check: cornea 0.2–0.3 mm, sclera 0.4–0.6 mm; merely riding the displacement at each plate's centre left 0.6 mm at the ends), and with the transform they meet exactly as at rest while staying inside the lid Skin. */
+ * (Task 15b clipping check: cornea 0.2–0.3 mm, sclera 0.4–0.6 mm; merely riding the displacement at each plate's centre left 0.6 mm at the ends), and with the transform they meet exactly as at rest while staying inside the lid Skin. They scale with the globe (up to 1.26× at birth), so in infancy they may run large relative to the lids. */
 const TARSAL_PLATES=(s:'Left'|'Right')=>['upper','lower'].map(u=>`Tarsal plate of ${s.toLowerCase()} ${u} eyelid`);
 /** The fixed point of a side's eye growth (EYE_ANCHOR). */
 export const eyeAnchor=(s:'Left'|'Right'):Vec3=>{const c=GLOBE_CENTRE[s],f=GLOBE_FRONT[s];return [c[0]+EYE_ANCHOR*(f[0]-c[0]),c[1]+EYE_ANCHOR*(f[1]-c[1]),c[2]+EYE_ANCHOR*(f[2]-c[2])];};
