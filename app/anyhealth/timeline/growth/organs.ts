@@ -3,8 +3,10 @@
  * The warp already scales every part by `scale` × its segment factors, so each factor here is only the deviation: the organ's linear size
  * relative to its adult size, over the warp's local size relative to the adult warp (uniform, the cube root of along × girth²). "Adult" is the
  * body on the last measurement, so every factor is exactly 1 there and the adult model is unchanged. */
-import type {Body,GrowthFx,PartFx,SegmentId,Vec3} from '../types';
+import type {Body,GrowthFx,PartFx,Rig,SegmentId,Vec3} from '../types';
 import {bodyAt,LAST_MEASURED,monotone} from './proportions';
+import {warpState,axialRates} from './warp';
+import rig from './rig.json';
 
 /** Piecewise-linear interpolation through [x,y] nodes, held constant outside them: how growth.md fills the grid between ICRP reference ages. */
 const linear=(t:[number,number][])=>(v:number)=>{if(v<=t[0][0])return t[0][1];for(let i=1;i<t.length;i++)if(v<=t[i][0]){const [x0,y0]=t[i-1],[x1,y1]=t[i];return y0+(y1-y0)*(v-x0)/(x1-x0);}return t[t.length-1][1];};
@@ -38,8 +40,8 @@ const TESTIS_CENTRE:Record<'Left'|'Right',Vec3>={Left:[0.0175,0.7823,0.0524],Rig
 
 /** The warp's uniform local size for a segment (bone girth): scale × ∛(along × girth²). The reproductive parts use the trunk here although they sit where the trunk and thigh weights blend: an approximation (the two segments' local sizes differ by a few % at most ages). */
 const local=(b:Body,s:SegmentId)=>b.scale*Math.cbrt(b.length[s]*b.boneGirth[s]**2);
-/** The warp's local size at the eyes: the axial remap's cranium interval (rest AO joint → vertex; the globe centres sit 4 cm above the AO joint, past the face → cranium windows), S·∛(craniumLength × head girth²) (Task 14c). */
-export const eyeLocal=(b:Body)=>b.scale*Math.cbrt((b.craniumLength??b.length.head)*b.boneGirth.head**2);
+/** The warp's real local size at the globe centre (rest y 1.5962): the axial remap's ∛(f′·g²) there (growth/warp.ts axialRates), which sits inside the face → cranium girth window, so it is neither the face nor the head girth alone (fix round 1: head girth left the newborn eye 4.4% under Rozema). */
+export const eyeLocal=(b:Body)=>{const [fp,g]=axialRates(warpState(rig as Rig,b),GLOBE_CENTRE.Left[1]);return Math.cbrt(fp*g*g);};
 let adult:Body|null=null;
 const adultBody=()=>adult??=bodyAt(LAST_MEASURED);
 

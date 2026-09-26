@@ -34,9 +34,9 @@ const SEAM_X=0.0006;
  * The goal is 0; lower the entries as the warp improves, never raise them. '±2%' counts every triangle. */
 const SEAM_RATCHET:Record<string,[number,number,number]>={
 	'hand-built child (S .75, head 1.2, legs .9)':[54,73,0],
-	'bodyAt 2003-06-22':[4422,7100,434],
-	'bodyAt 2004-06-22':[3068,6761,287],
-	'bodyAt 2006-06-22':[411,1750,12],
+	'bodyAt 2003-06-22':[4422,7083,434],
+	'bodyAt 2004-06-22':[3068,6715,287],
+	'bodyAt 2006-06-22':[411,1744,12],
 	'bodyAt 2009-06-22':[145,3127,0],
 	'bodyAt 2013-06-22':[57,1078,0],
 	'bodyAt 2017-06-22':[28,1201,0],
@@ -45,15 +45,16 @@ const SEAM_RATCHET:Record<string,[number,number,number]>={
 	'±2%':[8,207,0],
 };
 /** Axial residual (Task 14c): [flipped, torn, out-of-ratio] of the trunk / neck / head triangles, per seam body. The goal was 0 and the remap cannot fold (det = g²·f′ > 0), but a discrete triangle can still invert or over-stretch:
- * - flipped: slivers (altitude 0.01–1.5 mm on 12–58 mm edges: sternocleidomastoid, splenius, trachea, esophagus, pharyngeal constrictors) that span the C7/T1 window, where f′ drops 2.5× at birth (S·ℓ 0.34 → 0.13) within ±3 cm; on the hand-built infants the same at the neck → head step (ℓ 1 → 2).
- *   A sliver of length L and altitude h inverts once the curvature's sag f″·L²/8 exceeds its warped altitude ≈ f′·h; at birth f″ ≈ 5 /m, so a 58 mm sliver with h = 1.5 mm needs a window ≥ 30 cm, and the C7 window cannot pass the menton knot 4.6 cm above.
- * - torn: at birth – 3 y one long edge (septal nasal cartilage at birth, 19.5 mm, 11% over) in the face → cranium girth window. (The 14 y deflation tears of the papillary muscle and diaphragm went with the axial deflation clamp, growth/warp.ts.)
+ * - flipped (R25: accepted as a mesh-sliver limit; the gate asserts each is a sliver, rest altitude < 1.6 mm and aspect > 15): at birth 39 = 17 in the C7/T1 f′ window, 15 in the menton window (the steepest f″: ℓ_neck → ℓ_face),
+ *   1 in the AO window and 6 below every f′ window (g curvature in the first girth window, 1.365–1.495 m); max altitude 1.52 mm, min aspect 28 (sternocleidomastoid, splenius, trachea, esophagus, pharyngeal constrictors).
+ *   The hand-built infants: 8 menton, 3 AO, 2 C7, 2 below. A sliver of length L and altitude h inverts once the sag f″·L²/8 exceeds its warped altitude ≈ f′·h; slivers reach h/L = 1.6e-4, which no smooth f′ that lands on the knots can clear.
+ * - torn: 0 since fix round 1 (face → cranium girth window widened to 1.54–1.72 m). The 14 y deflation tears of the papillary muscle and diaphragm went with the axial deflation clamp (growth/warp.ts).
  * Lower the entries as the warp improves, never raise them. */
 const AXIAL_RESIDUAL:Record<string,[number,number,number]>={
 	'hand-built child (S .75, head 1.2, legs .9)':[2,0,0],
-	'bodyAt 2003-06-22':[39,1,0],
-	'bodyAt 2004-06-22':[15,1,0],
-	'bodyAt 2006-06-22':[6,1,0],
+	'bodyAt 2003-06-22':[39,0,0],
+	'bodyAt 2004-06-22':[15,0,0],
+	'bodyAt 2006-06-22':[6,0,0],
 	'bodyAt 2009-06-22':[4,0,0],
 	'bodyAt 2013-06-22':[1,0,0],
 	'bodyAt 2017-06-22':[0,0,0],
@@ -126,6 +127,11 @@ checks.push(
 			const [f,t,o]=ratchetFor(c,label),ax=AXIAL_RESIDUAL[label];c.assert(!!ax,`AXIAL_RESIDUAL has no entry for "${label}"`);c.assert(d.bridged===SEAM_BRIDGED,`${label}: ${d.bridged} welded hand / forearm ↔ thigh / trunk Skin triangles excluded, expected exactly ${SEAM_BRIDGED}`);
 			console.log(`     ${label}: axial ${A.flipped}/${A.torn}/${A.ratioOut} of ${A.triangles} (residual ${ax.join('/')}); limb ${L.flipped}/${L.torn}/${L.ratioOut} of ${L.triangles} (ratchet ${f}/${t}/${o}; ${d.bridged} welded excluded)${top?`; most in ${top}`:''}`);
 			if(A.flipped>ax[0]||A.torn>ax[1]||A.ratioOut>ax[2])bad.push(`${label}: axial ${A.flipped}/${A.torn}/${A.ratioOut} > ${ax.join('/')}`);
+			// R25: every axial flip left must be a mesh sliver (rest altitude < 1.6 mm and aspect > 15), so a real fold fails even while under the count. Where they sit: the f′ windows (C7/T1, menton, AO) or below them all (g curvature in the first girth window).
+			const J=(id:SegmentId)=>R.segments[SEGMENTS.indexOf(id)].joint[1],ky=[J('neck'),MENTON_Y,J('head')],where=new Map<string,number>();
+			for(const f of d.axialFlips){const k=ky.findIndex((y,j)=>Math.abs(f.y-y)<=AXIAL_WINDOW[j]),at=k>=0?['C7','menton','AO'][k]:f.y<ky[0]-AXIAL_WINDOW[0]?'below':'between';where.set(at,(where.get(at)??0)+1);
+				if(!(f.alt<0.0016&&f.aspect>15))bad.push(`${label}: axial flip in ${f.part} at y ${f.y.toFixed(3)} is not a sliver (altitude ${(f.alt*1000).toFixed(2)} mm, aspect ${f.aspect.toFixed(1)})`);}
+			if(d.axialFlips.length)console.log(`       axial flips by f′ window: ${[...where].map(([k,n])=>`${k} ${n}`).join(', ')}; max altitude ${(Math.max(...d.axialFlips.map(f=>f.alt))*1000).toFixed(2)} mm, min aspect ${Math.min(...d.axialFlips.map(f=>f.aspect)).toFixed(0)}`);
 			if(L.flipped>f||L.torn>t||L.ratioOut>o)bad.push(`${label}: limb ${L.flipped}/${L.torn}/${L.ratioOut} > ${f}/${t}/${o}`);}
 		c.assert(!bad.length,`seam defects (flipped/torn/out-of-ratio): ${bad.join('; ')}`);
 	}},

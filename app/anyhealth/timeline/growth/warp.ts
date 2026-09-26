@@ -9,7 +9,7 @@
  *   piecewise-linear knot heights outside the windows and f′ stays between its neighbours' rates. g is blended, not integrated.
  *   det ∂R/∂p = g²·f′ > 0 everywhere, so the remap cannot fold (Task 14a review: the per-segment head map stretched the 5.6 cm below the AO joint by ℓ_head and sank the chin into the chest).
  *   A limb whose parent is axial (upper arms, thighs) starts at N_i = R(J_i); each segment term of a vertex uses R for an axial segment and T_i for a limb, so limbs blend into the remap at shoulders and hips.
- *   The normal of R is its inverse transpose (times S): (n_x/g, (n_y − (A n_x + B n_z)/g)/f′, n_z/g)·S, A = ∂x′/∂y = c0_x′(f′ − g) + g′(x − c0_x), B the same in z.
+ *   The normal of R is its inverse transpose: (n_x/g, (n_y − (A n_x + B n_z)/g)/f′, n_z/g) (the same scale as a limb's, so blends are consistent), A = ∂x′/∂y = c0_x′(f′ − g) + g′(x − c0_x), B the same in z.
  *
  * Segment i (SEGMENTS order): rest joint J_i, unit axis a_i, global scale S = body.scale, along factor ℓ_i = body.length, bone perpendicular factor γb_i = body.boneGirth, soft factor γs_i = body.softGirth.
  *   T_i(p) = N_i + S·(ℓ_i (d·a_i) a_i + γb_i (d − (d·a_i) a_i)),  d = p − J_i: ONE map (bone girth) for every vertex, so parent and child agree at their joint for soft tissue too (Task 14a).
@@ -39,10 +39,11 @@ export const AXIAL_SEGMENTS=3;
 export const MENTON_Y=1.4997412;
 /** Half-widths (metres) of the f′ / c0′ smoothstep windows at the C7/T1, menton and atlanto-occipital knots. Non-overlapping: w1 + w2 ≤ menton − C7 (4.585 cm), w2 + w3 ≤ AO − menton (5.590 cm), both used in full.
  * The split was swept (Task 14c report); the seam counts barely move with it. */
-export const AXIAL_WINDOW:[number,number,number]=[0.03,0.0158,0.04];
+export const AXIAL_WINDOW:readonly [number,number,number]=[0.03,0.0158,0.04];
 /** Girth windows [centre y, half-width] (metres) of the trunk → neck, neck → face and face → cranium steps of g (and of the soft girth gs). Wider than the f′ windows and allowed to overlap (g is blended, not integrated, so any g > 0 keeps det > 0):
- * the lateral scale's shear A = g′·(x − c0_x) acts on tissue up to 11 cm from the spine (the chin), and with the f′ windows it tore up to 725 triangles at birth (Task 14c report). g stays between its neighbours' values where the steps share a sign. */
-export const AXIAL_GIRTH_WINDOW:[number,number][]=[[1.43,0.065],[1.51,0.08],[1.60,0.06]];
+ * the lateral scale's shear A = g′·(x − c0_x) acts on tissue up to 11 cm from the spine (the chin), and with the f′ windows it tore up to 725 triangles at birth (Task 14c report). g stays between its neighbours' values where the steps share a sign.
+ * The face → cranium step reaches up to 1.72 m: narrower, its shear tore 25–33 long Skin / hair edges on the back of the head at 3–6 y once the seam bound used the blended soft girth (fix round 1). */
+export const AXIAL_GIRTH_WINDOW:readonly (readonly [number,number])[]=[[1.43,0.065],[1.51,0.08],[1.63,0.09]];
 /** Length of WarpState.axial in vec4s. */
 export const AXIAL_VEC4=14;
 /** Limb-root girth taper [start, end], rest metres along the segment axis from its joint (rootGirth): past the femoral / humeral head (adult radius ≈ 2.4 cm), done by mid-neck / upper shaft. */
@@ -86,8 +87,8 @@ function axialNormal(ws:WarpState,x:number,y:number,z:number,nx:number,ny:number
 	axialCurves(ws,y,cv);const g=cv[1],fp=cv[6],A=cv[8]*(fp-g)+cv[7]*(x-cv[2]),B=cv[9]*(fp-g)+cv[7]*(z-cv[3]);
 	out[0]=nx/g;out[1]=(ny-(A*nx+B*nz)/g)/fp;out[2]=nz/g;
 }
-/** The remap's local stretch at rest height y: [f′, g] (absolute, S included), for the seam check's scale bound. */
-export function axialRates(ws:WarpState,y:number):[number,number]{axialCurves(ws,y,cv);return [cv[6],cv[1]];}
+/** The remap's local rates at rest height y: [f′, g, gs] (absolute, S included; gs = the blended soft girth), for the seam check's scale bound and the eye's local size. */
+export function axialRates(ws:WarpState,y:number):[number,number,number]{axialCurves(ws,y,cv);return [cv[6],cv[1],cv[10]];}
 
 /** Per-segment warp parameters for one body: absolute scales, new joints (parents first) and the floor shift. */
 export function warpState(rig:Rig,body:Body):WarpState{
