@@ -3,7 +3,7 @@ import rig from '../growth/rig.json';
 import {SEGMENTS,type Body,type Rig,type SegmentId,type Vec3} from '../types';
 import {bodyAt} from '../growth/proportions';
 import {warpState,warpPoint,warpNormal,segAt,axialRates,taperOf,MENTON_Y,AXIAL_WINDOW,AXIAL_GIRTH_WINDOW,SEG_STRIDE,AXIAL_SEGMENTS,TAPER_STRIDE,type WarpState} from '../growth/warp';
-import {growthFx,GLOBE_FRONT} from '../growth/organs';
+import {growthFx,GLOBE_FRONT,eyeAnchor} from '../growth/organs';
 import {eruptionFx,TEETH} from '../issues/teeth/eruption';
 import {mergeFx,applyFxPoint,type ResolvedFx} from '../fx/part-fx';
 import {toDays,fromDays} from '../../health/dates';
@@ -234,16 +234,17 @@ checks.push(
 			c.near(f*hF+k*hC,b.length.head*(hF+hC),1e-9,`head height at ${age} y`);c.near((f/k)*((1-phi)/phi)*(0.548/(1-0.548)),1,1e-3,`face : cranium rate at ${age} y`);}
 		const A=bodyAt('2026-01-02');c.near(A.faceLength!,1,1e-9,'adult face');c.near(A.craniumLength!,1,1e-9,'adult cranium');c.near(A.faceGirth!,1,1e-9,'adult face girth');
 	}},
-	{name:'axial remap: eyes and teeth stay seated (eye growth keeps the corneal apex vertex, which lands on the warped anterior pole; every tooth within its rest gap + 0.5 mm of its jaw bone)',async run(c){
+	{name:'axial remap: eyes and teeth stay seated (eye growth keeps its anchor, EYE_ANCHOR of the way from the globe centre to the corneal apex, which lands on the warped anchor; every tooth within its rest gap + 0.5 mm of its jaw bone)',async run(c){
 		const g=await c.geometry(),fs=await import('node:fs'),bin=fs.readFileSync(SEG_BIN),offs:number[]=[];let off=0;g.parts.forEach(p=>{offs.push(off);off+=p.position.length/3*SEG_STRIDE;});
 		const warpPart=(ws:WarpState,i:number,fx?:ResolvedFx)=>{const P=g.parts[i].position,n=P.length/3,out=new Float64Array(n*3),q:Vec3=[0,0,0],z:Vec3=[0,0,1];for(let v=0;v<n;v++){const p:Vec3=[P[v*3],P[v*3+1],P[v*3+2]];if(fx)applyFxPoint(fx,p,z,p);const s=segAt(bin,offs[i],v);warpPoint(ws,p,s[0],s[1],s[2],false,q,s[3]);out.set(q,v*3);}return out;};
 		const gap=(A:ArrayLike<number>,B:ArrayLike<number>)=>{let worst=0;for(let a=0;a<A.length;a+=9){let m=Infinity;for(let b=0;b<B.length;b+=3){const d=(A[a]-B[b])**2+(A[a+1]-B[b+1])**2+(A[a+2]-B[b+2])**2;if(d<m)m=d;}worst=Math.max(worst,Math.sqrt(m));}return worst;};
 		const rest=(i:number)=>g.parts[i].position;
 		for(const d of ['2003-06-22','2006-06-22','2009-06-22','2017-06-22']){const b=bodyAt(d),ws=warpState(R,b),fx=mergeFx([...growthFx(b),...eruptionFx(b)],g.indicesOf,i=>{const P=g.parts[i].position;let lo=[Infinity,Infinity,Infinity],hi=[-Infinity,-Infinity,-Infinity];for(let k=0;k<P.length;k+=3)for(let j=0;j<3;j++){lo[j]=Math.min(lo[j],P[k+j]);hi[j]=Math.max(hi[j],P[k+j]);}return [0,1,2].map(j=>(lo[j]+hi[j])/2) as Vec3;});
-			for(const side of ['Left','Right'] as const){const i=g.indicesOf(`${side} cornea`)[0],f=fx.get(i)!,A=GLOBE_FRONT[side],q:Vec3=[0,0,0],W=warpPart(ws,i,f);
-				applyFxPoint(f,[...A],[0,0,1],q);for(let j=0;j<3;j++)c.near(q[j],A[j],1e-9,`${d} ${side} eye growth keeps the anterior pole axis ${j}`);
-				const R0=g.parts[i].position;let best=0;for(let k=3;k<R0.length;k+=3)if(R0[k+2]>R0[best+2])best=k; // the rest apex vertex (GLOBE_FRONT)
-				warpPoint(ws,A,2,2,1,false,q);for(let j=0;j<3;j++)c.near(W[best+j],q[j],0.0005,`${d} ${side} warped corneal apex axis ${j}`);}
+			for(const side of ['Left','Right'] as const){const i=g.indicesOf(`${side} cornea`)[0],f=fx.get(i)!,A=eyeAnchor(side),q:Vec3=[0,0,0],W=warpPart(ws,i,f);
+				applyFxPoint(f,[...A],[0,0,1],q);for(let j=0;j<3;j++)c.near(q[j],A[j],1e-9,`${d} ${side} eye growth keeps its anchor axis ${j}`);
+				// The rest apex vertex (GLOBE_FRONT) moves forward by (k − 1)(apex − anchor) before the warp: its warped place is the warp of that point.
+				const R0=g.parts[i].position;let best=0;for(let k=3;k<R0.length;k+=3)if(R0[k+2]>R0[best+2])best=k;const F=GLOBE_FRONT[side],k0=f.scale[0],e:Vec3=[0,1,2].map(j=>A[j]+k0*(F[j]-A[j])) as Vec3;
+				warpPoint(ws,e,2,2,1,false,q);for(let j=0;j<3;j++)c.near(W[best+j],q[j],0.0005,`${d} ${side} warped corneal apex axis ${j}`);}
 			for(const t of TEETH){const i=g.indicesOf(t.part)[0],f=fx.get(i);if(f&&f.visible<1)continue;const jaw=t.arch==='lower'?g.indicesOf('Mandible'):g.indicesOf(`${t.part.startsWith('Left')?'Left':'Right'} maxilla`);
 				const r=gap(rest(i),jaw.length===1?rest(jaw[0]):new Float32Array(0)),w=gap(warpPart(ws,i,f?{...f,scale:[1,1,1],translate:[0,0,0]}:undefined),warpPart(ws,jaw[0]));c.assert(w<=r+0.0005,`${d} ${t.part}: warped gap to its jaw ${(w*1000).toFixed(2)} mm > rest ${(r*1000).toFixed(2)} mm + 0.5`);}
 		}

@@ -8,6 +8,7 @@ import {boneSegment,trunkOnly} from '../app/anyhealth/timeline/growth/segment-ma
 import {SEG_STRIDE,D_UNIT} from '../app/anyhealth/timeline/growth/warp';
 import {SEGMENTS,type Rig,type Segment,type SegmentId,type Vec3} from '../app/anyhealth/timeline/types';
 import {SOFT_SYSTEMS} from '../app/anyhealth/timeline/engine';
+import {TriGrid} from '../app/anyhealth/timeline/check/clip-geom';
 
 const RIG_OUT='app/anyhealth/timeline/growth/rig.json',BIN_OUT='public/anyhealth/models/segments.bin';
 /** Contact radius for joints, widened step by step if two bones never come that close. */
@@ -50,6 +51,10 @@ const FACE=pair('FACE','0.3,0.7'),BEHIND=pair('BEHIND','0,0.4');
 /** The rule fades in along the limb root's axis (rest metres from the shoulder / hip joint): the axilla and groin keep their distance-field weights (there the Skin turns from trunk to limb and the joint taper blends the two maps). */
 const FACE_ROOT=pair('FACE_ROOT','0.18,0.28'),AXIAL_N=3;
 const FACING_CHANGED=95;
+/** Skin on bone (Task 15b): where a Skin triangle of a limb passes within CONTACT_SKIN of a bone at rest (the coarse Skin mesh lies on the lateral malleolus, knuckles, fingertips and toes), its vertices' dBone (tens of mm: the vertices
+ * are far from the bone, the face is not) is lowered to that face distance, so the soft-girth term leaves them on the bone's map there. Otherwise the infant shank's soft deflation (γs 1.02 vs γb 1.59 at birth) drew the Skin
+ * 0.6 mm inside the lateral malleolus (clipping check, bones in the Skin). Shank vertices only (dominant segment a shank: the malleoli and the shin): the trunk and head inflate in infancy, and on the fingertips and toes the small Skin triangles flipped (2 at 10 y, 2 on each hand-built infant). Counted and asserted (CONTACT_SKIN_CHANGED). */
+const CONTACT_SKIN=env('CONTACT_SKIN',0.001),CONTACT_SKIN_CHANGED=4,LEG=new Set(['lShank','rShank'].map(s=>SEGMENTS.indexOf(s as SegmentId)));
 /** One sliver-safe pass over a part (see SLIVER_BETA); returns how many constraints moved a vertex by more than D_UNIT. */
 function sliverPass(pos:Float32Array,index:Uint32Array,D:Float64Array,beta:number):number{
 	let m=0;const L=(i:number,j:number)=>Math.hypot(pos[i*3]-pos[j*3],pos[i*3+1]-pos[j*3+1],pos[i*3+2]-pos[j*3+2]);
@@ -218,6 +223,14 @@ async function main(){
 		parts.forEach((g,pi)=>{const nv=g.position.length/3;
 			if(!boneSegment(atlas.parts[pi].name)&&SOFT_SYSTEMS.includes(atlas.parts[pi].system)){const D=dB.subarray(vo,vo+nv),D0=D.slice();let m=1;for(let it=0;it<SLIVER_ITERS&&m;it++)m=sliverPass(g.position,g.index,D,SLIVER_BETA);left+=m;for(let v=0;v<nv;v++)maxMove=Math.max(maxMove,Math.abs(D[v]-D0[v]));}
 			vo+=nv;});
+		// Skin on bone (CONTACT_SKIN above), after the sliver-safe pass (which would lift the lowered vertices straight back to their neighbours' level).
+		{let vo=0,changed=0;parts.forEach((g,pi)=>{const nv=g.position.length/3;if(atlas.parts[pi].name==='Skin'){
+			const grid=new TriGrid(g.position,g.index,0.005),faceD=new Float64Array(g.index.length/3).fill(Infinity);
+			parts.forEach((b,bi)=>{if(!boneSegment(atlas.parts[bi].name))return;const P=b.position;for(let v=0;v<P.length/3;v++){const h=grid.nearestHit(P[v*3],P[v*3+1],P[v*3+2],CONTACT_SKIN);if(h&&h.d<faceD[h.t])faceD[h.t]=h.d;}});
+			for(let t=0;t<faceD.length;t++){if(!(faceD[t]<CONTACT_SKIN))continue;for(let k=0;k<3;k++){const v=g.index[t*3+k],q=(vo+v)*SEG_STRIDE,a=out[q]&15,b=out[q]>>4,wa=out[q+1]/255,dom=wa>=0.5?a:b;if(!LEG.has(dom))continue;if(faceD[t]<dB[vo+v]){dB[vo+v]=faceD[t];changed++;}}}}
+			vo+=nv;});
+		console.log(`Skin on bone (CONTACT_SKIN): ${changed} shank Skin vertices with dBone lowered (expected ${CONTACT_SKIN_CHANGED})`);
+		if(changed!==CONTACT_SKIN_CHANGED&&!process.env.ANYHEALTH_ANY_CLEAN)throw new Error(`CONTACT_SKIN changed ${changed} vertices, expected ${CONTACT_SKIN_CHANGED} (update the constant deliberately, or set ANYHEALTH_ANY_CLEAN=1 to sweep)`);}
 		for(let v=0;v<dB.length;v++){const du=Math.min(65535,Math.round(dB[v]/D_UNIT));out[v*SEG_STRIDE+2]=du&255;out[v*SEG_STRIDE+3]=du>>8;}
 		console.log(`sliver-safe dBone (beta ${SLIVER_BETA}): largest change ${(maxMove*1000).toFixed(2)} mm, ${left} constraints still moving after ${SLIVER_ITERS} passes (${Date.now()-t1} ms)`);}
 	console.log(`trunk-only parts (TRUNK_ONLY): ${cleanedParts} parts, ${cleaned} vertices moved onto the trunk (expected ${TRUNK_ONLY_CHANGED})`);
