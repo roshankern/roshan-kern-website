@@ -150,6 +150,15 @@ export class TriGrid {
 			return Math.acos(Math.max(-1,Math.min(1,(ux*wx+uy*wy+uz*wz)/((Math.hypot(ux,uy,uz)*Math.hypot(wx,wy,wz))||1))));}
 		return 1;
 	}
+	/** Generalized winding number (Jacobson et al. 2013: the summed signed solid angles of the triangles / 4π, Van Oosterom–Strackee) of the outer surface (a shell: its outer-class triangles only; a plain mesh: every triangle, signed by its
+	 * volume): ≈ 1 inside, ≈ 0 outside, and it degrades gracefully at holes and where two sheets touch, unlike ray parity. Brute force over every triangle (the Skin has 44,744), so it only confirms the few points a fast test flags. */
+	winding(x:number,y:number,z:number):number{
+		const P=this.pos,I=this.index,nt=I.length/3;let w=0;
+		for(let t=0;t<nt;t++){if(this.outer&&!this.outer[t])continue;const a=I[t*3]*3,b=I[t*3+1]*3,c=I[t*3+2]*3;
+			const ax=P[a]-x,ay=P[a+1]-y,az=P[a+2]-z,bx=P[b]-x,by=P[b+1]-y,bz=P[b+2]-z,cx=P[c]-x,cy=P[c+1]-y,cz=P[c+2]-z,la=Math.hypot(ax,ay,az),lb=Math.hypot(bx,by,bz),lc=Math.hypot(cx,cy,cz);
+			const det=ax*(by*cz-bz*cy)-ay*(bx*cz-bz*cx)+az*(bx*cy-by*cx),den=la*lb*lc+(ax*bx+ay*by+az*bz)*lc+(bx*cx+by*cy+bz*cz)*la+(cx*ax+cy*ay+cz*az)*lb;w+=2*Math.atan2(det,den);}
+		return w/(4*Math.PI)*(this.outer?1:this.flip);
+	}
 	/** Distance to the nearest triangle, searching out to `maxR` metres (returns maxR when none is nearer). */
 	nearest(x:number,y:number,z:number,maxR=0.05):number{return this.nearestHit(x,y,z,maxR)?.d??maxR;}
 }
