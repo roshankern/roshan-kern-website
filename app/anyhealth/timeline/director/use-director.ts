@@ -38,7 +38,7 @@ export function useDirector(today:string):DirectorApi{
 	const pause=useCallback(()=>{clock.pause(performance.now());publish();},[clock,publish]);
 	const cont=useCallback(()=>{if(clock.holding!==null)scrubbed.current=false;clock.continue(performance.now());publish();},[clock,publish]);
 	const seekDay=useCallback((day:number)=>{scrubbed.current=true;clock.seekDay(day);publish();},[clock,publish]);
-	const seekStop=useCallback((i:number)=>{if(i>=0&&i<schedule.holdMs.length)scrubbed.current=false;clock.seekStop(i,performance.now());publish();},[clock,publish,schedule]);
+	const seekStop=useCallback((i:number)=>{if(Number.isInteger(i)&&i>=0&&i<schedule.holdMs.length)scrubbed.current=false;clock.seekStop(i,performance.now());publish();},[clock,publish,schedule]);
 	const manualCamera=useCallback(()=>{if(clock.playing){clock.pause(performance.now());publish();}},[clock,publish]);
 	useEffect(()=>{
 		const onKey=(e:KeyboardEvent)=>{

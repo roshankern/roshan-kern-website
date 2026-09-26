@@ -123,11 +123,14 @@ export const checks:Check[]=[
 		const x=k.tick(500);c.assert(x.phase==='approach'&&x.stop===2&&x.ghost===0,`${x.phase} ${x.stop}`);k.tick(500+APPROACH_MS);c.assert(k.holding===2,'holds at 2');
 	}},
 	{name:'director: exact stop days invert to their hold, and seekDay there + play holds at the first stop that day',run(c){
-		const s=buildSchedule(SCRIPTS,REAL_TODAY);
-		s.stops.forEach((st,i)=>{const first=s.stops.findIndex(x=>x.day===st.day);if(st.day===0)return;
-			c.assert(s.storyMsForDay(st.day)===s.holdMs[first],`${st.id}: storyMsForDay ${s.storyMsForDay(st.day)} vs hold ${s.holdMs[first]}`);
-			const k=createClock(s);k.seekDay(st.day);k.play(0);k.tick(1);c.assert(k.holding===first&&k.storyMs===s.holdMs[first],`${st.id}: seekDay + play holds ${k.holding} (want ${first}) at ${k.storyMs}`);});
-		c.assert(s.storyMsForDay(s.sample(s.totalMs,false).day)===s.totalMs,'end day inverts to exactly totalMs');
+		// 2020-01-01 clamps later climaxes onto today, so stops share the end day.
+		for(const [what,s] of [['real',buildSchedule(SCRIPTS,REAL_TODAY)],['real at 2020-01-01',buildSchedule(SCRIPTS,'2020-01-01')],['stop on today',buildSchedule([...SYN,fake('t-today',TODAY,0,{resolve:'2025-02-01'})],TODAY)]] as const){
+			s.stops.forEach(st=>{const first=s.stops.findIndex(x=>x.day===st.day);if(st.day===0)return;
+				c.assert(s.storyMsForDay(st.day)===s.holdMs[first],`${what} ${st.id}: storyMsForDay ${s.storyMsForDay(st.day)} vs hold ${s.holdMs[first]}`);
+				const k=createClock(s);k.seekDay(st.day);k.play(0);k.tick(1);c.assert(k.holding===first&&k.storyMs===s.holdMs[first],`${what} ${st.id}: seekDay + play holds ${k.holding} (want ${first}) at ${k.storyMs}`);});
+			const end=s.sample(s.totalMs,false).day;if(!s.stops.some(x=>x.day===end))c.assert(s.storyMsForDay(end)===s.totalMs,`${what}: end day inverts to exactly totalMs`);
+		}
+		const t=buildSchedule([...SYN,fake('t-today',TODAY,0,{resolve:'2025-02-01'})],TODAY);c.assert(t.stops[t.stops.length-1].id==='t-today'&&t.stops[t.stops.length-1].day===t.sample(t.totalMs,false).day,'synthetic stop sits on today');
 	}},
 	{name:'director: a stop at birth reads idle at story 0 until played',run(c){
 		const s=buildSchedule([fake('birth',BIRTH_DATE,0)],TODAY),x=s.sample(0,false);c.assert(x.phase==='idle'&&x.ghost===0,`at 0: ${x.phase}`);

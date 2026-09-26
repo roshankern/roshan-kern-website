@@ -103,8 +103,9 @@ export function buildSchedule(scripts:IssueScript[],today:string,opts:{reducedMo
 	}
 	const firstStopOn=new Map<number,number>();stops.forEach((x,i)=>{if(!firstStopOn.has(x.day))firstStopOn.set(x.day,i);});
 	function storyMsForDay(day:number){
-		if(day<=dayAt(0))return 0;if(day>=dayAt(totalMs))return totalMs;
-		const i=firstStopOn.get(day);if(i!==undefined)return holdMs[i];// exact stop day: its hold instant, so seekDay + play holds there
+		if(day<=dayAt(0))return 0;
+		const i=firstStopOn.get(day);if(i!==undefined)return holdMs[i];// exact stop day (even today's): its hold instant, so seekDay + play holds there
+		if(day>=dayAt(totalMs))return totalMs;
 		let lo=0,hi=totalMs;for(let n=0;n<200;n++){const mid=(lo+hi)/2;if(mid<=lo||mid>=hi)break;if(dayAt(mid)>=day)hi=mid;else lo=mid;}
 		return hi;
 	}
