@@ -2,7 +2,8 @@
 import type {IssueScript,PartFx,Vec3} from '../../types';
 import {toDays,fromDays} from '../../../health/dates';
 import {ARTERIAL_PARTS} from '../systemic/arterial-parts';
-import {smooth,envelope,windowGlow,pollenSeason,immunoFactor} from '../systemic/curves';
+import {smooth,envelope,windowGlow,preRolled,pollenSeason,immunoFactor} from '../systemic/curves';
+import {PRE_ROLL} from '../airway/shape';
 import {FRONT,LEFT_SIDE} from '../views';
 
 type Rgb=[number,number,number];
@@ -26,12 +27,12 @@ const CBC_PARTS=[...HEART_PARTS,...AORTA_PARTS];
 /** The chronic trait: every arterial part tinted from 2004-07-01; the amount steps up slightly at the 2024 confirmation. */
 const thalassemia:IssueScript={
 	id:'microcytosis-suspected-thalassemia-2004',parts:[...HEART_PARTS,...ARTERIAL_PARTS],onset:'2004-07-01',chronic:true,illustrative:true,
-	// The first CBC at age 1 (MCV 55.5, his most microcytic value), not the brighter post-2024 tint, which marks diagnostic certainty rather than severity.
-	climax:THAL_RAMP,approachDays:THAL_RAMP, // basis: systemic#climax-thalassemia
+	// The first CBC at age 1 (the lowest absolute MCV, 55.5: first detection of a congenital trait), not the brighter post-2024 tint, which marks diagnostic certainty rather than severity.
+	climax:0,approachDays:PRE_ROLL, // basis: systemic#climax-thalassemia
 	fxAt(day,ctx){
-		if(day<=0)return [];
+		if(day<=-PRE_ROLL)return [];
 		const confirmed=smooth(0,THAL_RAMP,toDays(ctx.date)-toDays(THAL_CONFIRMED));
-		const a=smooth(0,THAL_RAMP,day)*(THAL_A+(THAL_A_CONFIRMED-THAL_A)*confirmed);
+		const a=preRolled(day)*(THAL_A+(THAL_A_CONFIRMED-THAL_A)*confirmed);
 		return ARTERIAL_PARTS.map(p=>tint(p,THAL_RGB,a));
 	},
 	status:day=>day<0?null:dateOf('2004-07-01',day)>=THAL_CONFIRMED?'Beta-thalassemia minor · HbA2 4.9%':'Microcytosis · MCV 55.5 fL',
@@ -39,7 +40,7 @@ const thalassemia:IssueScript={
 /** A 30-day window for one CBC or hematology visit: the heart and aorta tint a little more strongly, rising and falling over 7 days. */
 const cbc=(id:string,onset:string,status:string):IssueScript=>({
 	id,parts:CBC_PARTS,onset,resolve:fromDays(toDays(onset)+CBC_LEN),illustrative:true,
-	climax:THAL_RAMP,approachDays:THAL_RAMP, // basis: systemic#climax-record-window
+	climax:0,approachDays:PRE_ROLL, // basis: systemic#climax-record-window
 	fxAt(day){const a=THAL_WINDOW_A*windowGlow(day,THAL_RAMP,CBC_LEN);return a>0?CBC_PARTS.map(p=>tint(p,THAL_RGB,a)):[];},
 	status:()=>status,
 });
@@ -48,7 +49,6 @@ const cbc=(id:string,onset:string,status:string):IssueScript=>({
 const ORAL=['Tongue','Lip'];
 const ALLERGY_RGB:Rgb=[0.88,0.34,0.38]; // basis: systemic#food-allergy-tint
 const FOOD_A=0.08; // basis: systemic#food-allergy-tint
-const FOOD_RAMP=14; // basis: systemic#food-allergy-tint
 const GLOW_A=0.26; // basis: systemic#allergy-test-glow
 const GLOW_LEN=14; // basis: systemic#allergy-test-glow
 const GLOW_RAMP=4; // basis: systemic#allergy-test-glow
@@ -56,14 +56,14 @@ const CONCHAE=['Left inferior nasal concha','Right inferior nasal concha'];
 
 const foodAllergy:IssueScript={
 	id:'peanut-tree-nut-food-allergy',parts:ORAL,onset:'2003-12-22',chronic:true,illustrative:true,
-	climax:FOOD_RAMP,approachDays:FOOD_RAMP,view:FRONT, // basis: systemic#climax-food-allergy
-	fxAt(day){const a=FOOD_A*smooth(0,FOOD_RAMP,day);return day>0?ORAL.map(p=>tint(p,ALLERGY_RGB,a)):[];},
+	climax:0,approachDays:PRE_ROLL,view:FRONT, // basis: systemic#climax-food-allergy
+	fxAt(day){const a=FOOD_A*preRolled(day);return a>0?ORAL.map(p=>tint(p,ALLERGY_RGB,a)):[];},
 	status:()=>'Peanut & tree nuts · IgE-mediated',
 };
 /** A 14-day glow for an allergy test: skin tests and CAP-RAST (2004), the specific-IgE panel (2016). */
 const allergyTest=(id:string,onset:string,parts:string[],status:string,view:Vec3):IssueScript=>({
 	id,parts,onset,resolve:fromDays(toDays(onset)+GLOW_LEN),illustrative:true,
-	climax:GLOW_RAMP,approachDays:GLOW_RAMP,view, // basis: systemic#climax-record-window
+	climax:0,approachDays:PRE_ROLL,view, // basis: systemic#climax-record-window
 	fxAt(day){const a=GLOW_A*windowGlow(day,GLOW_RAMP,GLOW_LEN);return a>0?parts.map(p=>tint(p,ALLERGY_RGB,a)):[];},
 	status:()=>status,
 });

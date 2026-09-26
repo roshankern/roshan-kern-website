@@ -2,7 +2,7 @@
 import type {Check,CheckContext} from './harness';
 import {DEFAULT_VISIBLE} from '../../atlas/anatomy';
 import {nodeEngine} from './engine-node';
-import {SCRIPTS} from '../issues';
+import {SCRIPTS,leadDays} from '../issues';
 import {bodyAt} from '../growth/proportions';
 import {toDays,fromDays} from '../../health/dates';
 import {mergeFx} from '../fx/part-fx';
@@ -12,12 +12,8 @@ import {skinSurface} from '../issues/skin/surface';
 import {warpState,warpPoint,segAt,SEG_STRIDE} from '../growth/warp';
 import rigJson from '../growth/rig.json';
 import type {Rig,Vec3} from '../types';
-import {LEAD_DAYS as boneLead} from '../issues/catalog/bones';
-import {LEAD_DAYS as airwayLead} from '../issues/catalog/airway';
-import {LEAD_DAYS as digestiveLead} from '../issues/catalog/digestive';
-import {LEAD_DAYS as skinLead} from '../issues/catalog/skin';
 
-const LEAD:Record<string,number>={...boneLead,...airwayLead,...digestiveLead,...skinLead},TODAY='2026-09-25';
+const TODAY='2026-09-25';
 const frame=(date:string,now=0,isolate:string|null=null)=>({date,visible:DEFAULT_VISIBLE,isolate,now});
 /** Two node engines hold the same picking geometry: every part's bounds and warped positions. */
 const sameGeometry=(c:CheckContext,g:{atlas:{parts:{name:string}[]}},A:ReturnType<typeof nodeEngine>,B:ReturnType<typeof nodeEngine>,what:string)=>{
@@ -52,7 +48,7 @@ export const checks:Check[]=[
 	{name:'swellBand overlaps: scripts carrying different bands on one part on the same date are listed, and the merge keeps the union',async run(c){
 		// Every script sampled every 6 h from its lead to 30 days past resolve (today when chronic); bands grouped by sample time and part.
 		const STEP=0.25,at=new Map<number,{id:string;part:string;band:[number,number]}[]>(),bodies=new Map<string,ReturnType<typeof bodyAt>>();
-		for(const s of SCRIPTS){const o=toDays(s.onset),a=o-(LEAD[s.id]??0)-2,b=toDays(s.chronic||!s.resolve?TODAY:s.resolve)+30;
+		for(const s of SCRIPTS){const o=toDays(s.onset),a=o-leadDays(s.id)-2,b=toDays(s.chronic||!s.resolve?TODAY:s.resolve)+30;
 			for(let t=Math.floor(a/STEP)*STEP;t<=b;t+=STEP){const date=fromDays(Math.floor(t));let body=bodies.get(date);if(!body){body=bodyAt(date);bodies.set(date,body);}
 				for(const f of s.fxAt(t-o,{body,date}))if(f.swellBand){const l=at.get(t)??[];l.push({id:s.id,part:f.part,band:f.swellBand});at.set(t,l);}}}
 		const pairs=new Map<string,{from:number;to:number;merged:[number,number]}>();

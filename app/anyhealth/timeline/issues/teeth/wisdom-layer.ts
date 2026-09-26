@@ -26,6 +26,9 @@ export const WISDOM=[
 const TOOTH_COLOR=SYSTEMS.find(s=>s.id==='skeletal')!.mesh;
 const centreOf=(a:ArrayLike<number>)=>{const c=new T.Vector3();for(let i=0;i<a.length;i+=3)c.set(c.x+a[i],c.y+a[i+1],c.z+a[i+2]);return c.multiplyScalar(3/a.length);};
 
+/** Whether the third molars are drawn `day` days after the extraction date `onset`: from gingival emergence (the start of the ADA window) until the extraction (day 0). Switches and Isolate aside. */
+export const wisdomShown=(onset:string,day:number)=>day<0&&(toDays(onset)+day-toDays(BIRTH_DATE))/365.25>=WISDOM_ERUPT[0];
+
 /** A layer for the extraction script with onset `onset` (layer days count from it). */
 export function wisdomLayer(onset:string):CustomLayer{
 	const teeth:{mesh:T.Mesh;rest:Float32Array;centre:T.Vector3;up:number;cap:number}[]=[];let ctxRef:LayerContext|null=null,last='';
@@ -51,8 +54,7 @@ export function wisdomLayer(onset:string):CustomLayer{
 			return true;
 		},
 		update(day:number,frame:LayerFrame){
-			// Visible from gingival emergence (the start of the window) until the extraction (day 0).
-			const age=(toDays(onset)+day-toDays(BIRTH_DATE))/365.25,show=day<0&&age>=WISDOM_ERUPT[0]&&!frame.hiddenByIsolate&&frame.systemVisible('skeletal');
+			const age=(toDays(onset)+day-toDays(BIRTH_DATE))/365.25,show=wisdomShown(onset,day)&&!frame.hiddenByIsolate&&frame.systemVisible('skeletal');
 			const ps=teeth.map(t=>Math.min(t.cap,progress(age,WISDOM_ERUPT))),key=`${show}|${ps.map(p=>p.toFixed(4)).join(',')}`;if(key===last)return {changed:false,animating:false};last=key;
 			teeth.forEach((t,i)=>{t.mesh.visible=show;if(show)place(t,ps[i]);});
 			return {changed:true,animating:false};

@@ -1,29 +1,26 @@
 /** Checks for the v2 director's per-script stop fields (Task 2): `climax`, `approachDays`, `view` on every issue script. Reasons per issue: the "climax-*" rows in docs/anyhealth/timeline-medical-basis/*.md. */
 import type {Check} from './harness';
 import type {IssueScript,PartFx} from '../types';
-import {SCRIPTS,activeWindow} from '../issues';
-import {LEAD_DAYS as airwayLead} from '../issues/catalog/airway';
-import {LEAD_DAYS as bonesLead} from '../issues/catalog/bones';
-import {LEAD_DAYS as digestiveLead} from '../issues/catalog/digestive';
-import {LEAD_DAYS as eyesTeethLead} from '../issues/catalog/eyes-teeth';
-import {LEAD_DAYS as skinLead,SKIN_MARKS} from '../issues/catalog/skin';
-import {WISDOM_ERUPT} from '../issues/teeth/wisdom-layer';
+import {SCRIPTS,activeWindow,leadDays,scriptFor} from '../issues';
+import {fxMagnitude} from '../issues/magnitude';
+import {SKIN_MARKS} from '../issues/catalog/skin';
+import {ECZEMA_ID} from '../issues/skin/eczema';
+import {wisdomShown} from '../issues/teeth/wisdom-layer';
 import {FRACTURE_DATE,fractureAt} from '../../fracture/model';
 import {bodyAt} from '../growth/proportions';
 import {toDays,fromDays} from '../../health/dates';
-import {BIRTH_DATE} from '../../health/types';
 
 /** The earliest `today` the timeline can show (chronic windows end there). */
 const TODAY='2026-09-26';
-const LEAD:Record<string,number>={...airwayLead,...bonesLead,...digestiveLead,...eyesTeethLead,...skinLead};
-const lead=(s:IssueScript)=>LEAD[s.id]??0;
+const lead=(s:IssueScript)=>leadDays(s.id);
 /** Days since onset of the window's end: resolve, or TODAY when chronic. */
 const end=(s:IssueScript)=>toDays(activeWindow(s,TODAY).to)-toDays(s.onset);
 const at=(s:IssueScript,d:number)=>{const date=fromDays(toDays(s.onset)+Math.floor(d));return s.fxAt(d,{body:bodyAt(date),date});};
-/** The director's fx magnitude (director autoClimax): Σ |swell|·100 + |translate|·100 + rotation angle + tint amount + (1 − visible). */
-export const magnitude=(fx:PartFx[])=>fx.reduce((m,f)=>m+Math.abs(f.swell??0)*100+(f.translate?Math.hypot(...f.translate):0)*100+(f.rotate?2*Math.acos(Math.min(1,Math.abs(f.rotate[3]))):0)+(f.tint?.[3]??0)+(1-(f.visible??1)),0);
-/** Any visible change at all (magnitude, or a scale, which the magnitude leaves out: myopia's axial elongation, the laryngomalacia epiglottis). */
-const shows=(fx:PartFx[])=>magnitude(fx)>0||fx.some(f=>(f.scale??[1,1,1]).some(v=>v!==1));
+/** Σ mark alpha of a skin script's marks layer on day `d` (eczema: the infant patches only, the finding; the palm vesicles are the later dyshidrotic phase). 0 for other scripts. */
+const marksAlpha=(id:string,d:number)=>{const m=SKIN_MARKS[id];if(!m)return 0;return m.state(d).reduce((a,x,i)=>a+(id!==ECZEMA_ID||m.marks[i].tag==='patch'?x.alpha:0),0);};
+/** The peak measure: fx magnitude (issues/magnitude.ts) plus, for the skin marks layers, Σ mark alpha. */
+const measure=(s:IssueScript,d:number)=>fxMagnitude(at(s,d))+marksAlpha(s.id,d);
+const shows=(fx:PartFx[])=>fxMagnitude(fx)>0;
 /** Samples over the window [−lead, end]: every day, plus every 0.01 day over the first week and within 2 days of the climax (the acute rises are fractions of a day). */
 function samples(s:IssueScript){
 	const lo=-lead(s),hi=end(s),out:number[]=[];for(let d=Math.ceil(lo);d<=hi;d++)out.push(d);
@@ -33,15 +30,17 @@ function samples(s:IssueScript){
 
 /** Scripts whose medically defined climax deliberately sits below 90% of the fx magnitude peak, with the reason. */
 export const CLIMAX_NOT_PEAK:Record<string,string>={
-	'microcytosis-suspected-thalassemia-2004':'the trait is congenital and constant; the tint steps up at the 2024 confirmation for diagnostic certainty, while the most microcytic CBC (MCV 55.5) was this first one at age 1',
+	'microcytosis-suspected-thalassemia-2004':'the trait is congenital and constant; the tint steps up at the 2024 confirmation for diagnostic certainty, while this first CBC (the lowest absolute MCV, 55.5) is the first detection of the trait',
 	'wisdom-teeth-extraction':'the finding is the layer\'s erupted / impacted third molars, drawn only before the extraction; the fx only tints the healing sockets after it',
+	'verruca-vulgaris-2018':'the finding is the three warts on the treatment day; the cantharidin blister that doubles the marks from day 1 is the treatment\'s effect, not the disease',
+	'isotretinoin-accutane-course':'a treatment is held where its effect shows (92% of lesions cleared, full cheilitis); the untreated day 0 has the most marks but shows no isotretinoin effect',
 };
 /** Scripts drawn by a custom layer: whether the layer shows anything on day `d` (days since the script's onset). */
 const LAYER_SHOWS:Record<string,(d:number)=>boolean>={
 	'left-humerus-fracture-2009':d=>fractureAt(FRACTURE_DATE,d)!==null,
 	// No layer or fx of its own: the fracture script's layer draws the callus this record marks (bones.check: 'callus window, no fx').
 	'healing-humerus-callus-2009':d=>fractureAt(FRACTURE_DATE,d+toDays('2009-09-25')-toDays(FRACTURE_DATE))!==null,
-	'wisdom-teeth-extraction':d=>d<0&&(toDays('2023-12-26')+d-toDays(BIRTH_DATE))/365.25>=WISDOM_ERUPT[0],
+	'wisdom-teeth-extraction':d=>wisdomShown(scriptFor('wisdom-teeth-extraction')!.onset,d),
 	...Object.fromEntries(Object.entries(SKIN_MARKS).map(([id,m])=>[id,(d:number)=>m.state(d).some(x=>x.alpha>0)])),
 };
 const dateOf=(s:IssueScript)=>fromDays(toDays(s.onset)+Math.floor(s.climax!));
@@ -57,10 +56,10 @@ export const checks:Check[]=[
 			c.assert(shows(at(s,s.climax!))||LAYER_SHOWS[s.id]?.(s.climax!),`${s.id}: nothing visible at climax ${s.climax} (${dateOf(s)})`);
 		});
 	}},
-	{name:'climax is at (≥ 90% of) the peak fx magnitude over the window, or listed in CLIMAX_NOT_PEAK',run(c){
+	{name:'climax is at (≥ 90% of) the peak magnitude over the window (fx, + Σ mark alpha for skin layers), or listed in CLIMAX_NOT_PEAK',run(c){
 		for(const s of SCRIPTS){
-			let peak=0,pd=0;for(const d of samples(s)){const m=magnitude(at(s,d));if(m>peak){peak=m;pd=d;}}
-			const m=magnitude(at(s,s.climax!)),ok=m>=0.9*peak-1e-9;
+			let peak=0,pd=0;for(const d of samples(s)){const m=measure(s,d);if(m>peak){peak=m;pd=d;}}
+			const m=measure(s,s.climax!),ok=m>=0.9*peak-1e-9;
 			if(s.id in CLIMAX_NOT_PEAK)c.assert(!ok,`${s.id}: listed in CLIMAX_NOT_PEAK but its climax is at the peak (${m} vs ${peak}); remove it from the list`);
 			else c.assert(ok,`${s.id}: magnitude ${m.toFixed(4)} at climax ${s.climax} < 90% of the peak ${peak.toFixed(4)} at day ${pd}`);
 		}
