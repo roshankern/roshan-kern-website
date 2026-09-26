@@ -20,8 +20,8 @@ export function createClock(s:Schedule):Clock{
 		pause(nowMs){advance(nowMs);playing=false;},
 		continue(nowMs){if(holding===null)return;passed.add(holding);holding=null;playing=true;lastNow=nowMs;},
 		seekDay(day){playing=false;holding=null;storyMs=s.storyMsForDay(day);rearm();},
-		seekStop(i,nowMs){holding=null;storyMs=Math.max(0,s.holdMs[i]-APPROACH_MS);rearm();playing=true;lastNow=nowMs;},
-		tick(nowMs):Sample{advance(nowMs);const x=s.sample(storyMs,holding!==null);return playing&&x.phase==='idle'?{...x,phase:'cruise'}:x;},
+		seekStop(i,nowMs){if(!Number.isInteger(i)||i<0||i>=s.holdMs.length)return;holding=null;storyMs=Math.max(0,s.holdMs[i]-APPROACH_MS);rearm();playing=true;lastNow=nowMs;},
+		tick(nowMs):Sample{advance(nowMs);const x=s.sample(storyMs,holding!==null);return playing&&x.phase==='idle'?{...x,phase:x.stop!==null?'approach':'cruise'}:x;},
 	};
 	return clock;
 }

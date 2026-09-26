@@ -15,7 +15,8 @@ function ownKey(e:KeyboardEvent){
 	return !document.querySelector('dialog[open],[role="dialog"][aria-modal="true"]');
 }
 
-interface View {sample:Sample;playing:boolean;holding:number|null}
+/** `scrubbed`: set by seekDay (free mode), cleared by play / continue / seekStop. */
+interface View {sample:Sample;playing:boolean;holding:number|null;scrubbed:boolean}
 
 /** Guided playback for the timeline: the schedule for `today`, the clock state, and the actions the bar, tracker and scene call. */
 export function useDirector(today:string):DirectorApi{
@@ -23,20 +24,21 @@ export function useDirector(today:string):DirectorApi{
 	const clockRef=useRef<{schedule:typeof schedule;clock:Clock}|null>(null);
 	if(clockRef.current?.schedule!==schedule)clockRef.current={schedule,clock:createClock(schedule)};
 	const clock=clockRef.current.clock;
-	const [view,setView]=useState<View>(()=>({sample:clock.tick(0),playing:false,holding:null}));
+	const [view,setView]=useState<View>(()=>({sample:clock.tick(0),playing:false,holding:null,scrubbed:false}));
+	const scrubbed=useRef(false);
 	/** Tick to now and publish the clock state. */
-	const publish=useCallback(()=>{const sample=clock.tick(performance.now());setView({sample,playing:clock.playing,holding:clock.holding});},[clock]);
+	const publish=useCallback(()=>{const sample=clock.tick(performance.now());setView({sample,playing:clock.playing,holding:clock.holding,scrubbed:scrubbed.current});},[clock]);
 	useEffect(()=>{publish();},[publish]);
 	useEffect(()=>{
 		if(!view.playing)return;let raf=0;
 		const loop=()=>{publish();if(clock.playing)raf=requestAnimationFrame(loop);};
 		raf=requestAnimationFrame(loop);return ()=>cancelAnimationFrame(raf);
 	},[view.playing,clock,publish]);
-	const play=useCallback(()=>{clock.play(performance.now());publish();},[clock,publish]);
+	const play=useCallback(()=>{scrubbed.current=false;clock.play(performance.now());publish();},[clock,publish]);
 	const pause=useCallback(()=>{clock.pause(performance.now());publish();},[clock,publish]);
-	const cont=useCallback(()=>{clock.continue(performance.now());publish();},[clock,publish]);
-	const seekDay=useCallback((day:number)=>{clock.seekDay(day);publish();},[clock,publish]);
-	const seekStop=useCallback((i:number)=>{clock.seekStop(i,performance.now());publish();},[clock,publish]);
+	const cont=useCallback(()=>{if(clock.holding!==null)scrubbed.current=false;clock.continue(performance.now());publish();},[clock,publish]);
+	const seekDay=useCallback((day:number)=>{scrubbed.current=true;clock.seekDay(day);publish();},[clock,publish]);
+	const seekStop=useCallback((i:number)=>{if(i>=0&&i<schedule.holdMs.length)scrubbed.current=false;clock.seekStop(i,performance.now());publish();},[clock,publish,schedule]);
 	const manualCamera=useCallback(()=>{if(clock.playing){clock.pause(performance.now());publish();}},[clock,publish]);
 	useEffect(()=>{
 		const onKey=(e:KeyboardEvent)=>{
@@ -46,7 +48,8 @@ export function useDirector(today:string):DirectorApi{
 		};
 		window.addEventListener('keydown',onKey);return ()=>window.removeEventListener('keydown',onKey);
 	},[clock,cont,pause,play]);
-	const {sample,playing,holding}=view,stops=schedule.stops;
-	const cue=useMemo(()=>({day:sample.day,guided:playing||holding!==null,phase:sample.phase,stop:sample.stop!==null?{id:stops[sample.stop].id,view:stops[sample.stop].view}:null,ghost:sample.ghost,zoom:sample.zoom}),[sample,playing,holding,stops]);
+	const {sample,playing,holding}=view,free=view.scrubbed,stops=schedule.stops;
+	// Guided unless scrubbed: pausing mid-shot freezes it; only a scrub (or reset) drops to free mode, where the scene follows the default pose unghosted.
+	const cue=useMemo(()=>({day:sample.day,guided:!free,phase:sample.phase,stop:sample.stop!==null?{id:stops[sample.stop].id,view:stops[sample.stop].view}:null,ghost:free?0:sample.ghost,zoom:free?0:sample.zoom}),[sample,free,stops]);
 	return {sample,stops,schedule,playing,holding,cue,play,pause,continue:cont,seekDay,seekStop,manualCamera};
 }

@@ -46,8 +46,8 @@ export function stopsFor(scripts:IssueScript[],today:string):Stop[]{
 	return stops;
 }
 
-/** A Hermite key: story ms, day, velocity (days per ms). */
-interface Key {t:number;d:number;m:number}
+/** A key: story ms, day, velocity (days per ms). `cruise`: the piece from this key to the next is a cruise leg (cruiseDay), else a cubic Hermite. */
+interface Key {t:number;d:number;m:number;cruise?:boolean}
 /** Story time between two hold instants (or birth → first stop, last stop → today). */
 interface Trip {t0:number;t1:number;keys:Key[];from:number|null;to:number|null}
 
@@ -56,14 +56,20 @@ function limit(keys:Key[]){for(let j=0;j+1<keys.length;j++){
 	const a=keys[j],b=keys[j+1],h=b.t-a.t;if(h<=0)continue;const s=(b.d-a.d)/h;
 	if(s<=0){a.m=0;b.m=0;continue;}const al=a.m/s,be=b.m/s,r=al*al+be*be;if(r>9){const k=3/Math.sqrt(r);a.m=al*k*s;b.m=be*k*s;}}}
 
-/** Hermite keys for one trip from (t0,d0) to day d1, with or without release / approach legs; returns the keys and the trip's end time. */
+/** Day on a cruise leg of length h from day d0 to d1, entry / exit velocities m0, m1 (with (m0+m1)/2 ≤ the leg's mean speed): velocity = m0 + (m1−m0)·smootherstep(u) + K·smootherstep′(u), with K ≥ 0 set by the leg's days. Velocity is positive between the ends and its derivative is 0 at both ends, so the joints with the release / approach Hermites have no kink even when those legs are much slower than the cruise. */
+function cruiseDay(s:number,a:Key,b:Key){const h=b.t-a.t,u=clamp((s-a.t)/h,0,1),K=(b.d-a.d)/h-(a.m+b.m)/2,u4=u*u*u*u;
+	return a.d+h*(a.m*u+(b.m-a.m)*u4*(u*u-3*u+2.5)+K*smootherstep(0,1,u));}
+
+/** Keys for one trip from (t0,d0) to day d1, with or without release / approach legs; returns the keys and the trip's end time. */
 function tripKeys(t0:number,d0:number,d1:number,release:boolean,approach:number|null):{keys:Key[];t1:number}{
 	const g=d1-d0,R=release?RELEASE_MS:0,A=approach!==null?APPROACH_MS:0;
 	const rs=release?Math.min(30,0.3*g):0,as=approach!==null?Math.min(approach,0.3*g):0,cruiseDays=g-rs-as;
 	const cruiseMs=g>=1?clamp(cruiseDays/365*CRUISE_MS_PER_YEAR,CRUISE_MIN_MS,CRUISE_MAX_MS):0,t1=t0+R+cruiseMs+A;
 	const keys:Key[]=[];
-	if(cruiseMs>0){const v=cruiseDays/cruiseMs;
-		keys.push({t:t0,d:d0,m:release?0:v});if(release)keys.push({t:t0+R,d:d0+rs,m:v});if(approach!==null)keys.push({t:t1-A,d:d1-as,m:v});keys.push({t:t1,d:d1,m:0});}
+	if(cruiseMs>0){// Joint velocities: the cruise mean, capped at 3× the neighbouring leg's mean (Fritsch–Carlson, so its Hermite stays monotone). Birth enters at the cruise mean; the end trip stops at today with velocity 0.
+		const v=cruiseDays/cruiseMs,mA=release?Math.min(v,3*rs/RELEASE_MS):v,mB=approach!==null?Math.min(v,3*as/APPROACH_MS):0;
+		if(release)keys.push({t:t0,d:d0,m:0});keys.push({t:t0+R,d:d0+rs,m:mA,cruise:true});keys.push({t:t1-A,d:d1-as,m:mB});if(approach!==null)keys.push({t:t1,d:d1,m:0});
+		return {keys,t1};}
 	else{// Gap under a day: no cruise leg; the release / approach keys collapse into one mid key (or none) at the leg joint.
 		const v=R+A>0?g/(R+A):0;keys.push({t:t0,d:d0,m:release?0:v});if(release&&approach!==null)keys.push({t:t0+R,d:d0+g*R/(R+A),m:v});keys.push({t:t1,d:d1,m:0});}
 	limit(keys);return {keys,t1};
@@ -82,7 +88,8 @@ export function buildSchedule(scripts:IssueScript[],today:string,opts:{reducedMo
 	const rm=!!opts.reducedMotion,AG=rm?[0.92,1]:[0,0.5],AZ=rm?[0.92,1]:[0.3,1],RZ=rm?[0,0.08]:[0,0.7],RG=rm?[0,0.08]:[0.4,1];
 	/** The trip containing story time s: the last one starting at or before s (binary search). */
 	const tripAt=(s:number)=>{let lo=0,hi=starts.length-1;while(lo<hi){const mid=(lo+hi+1)>>1;if(starts[mid]<=s)lo=mid;else hi=mid-1;}return trips[lo];};
-	const dayIn=(tr:Trip,s:number)=>{const k=tr.keys;if(s<=k[0].t)return k[0].d;for(let j=0;j+1<k.length;j++)if(s<k[j+1].t)return k[j].d===k[j+1].d?k[j].d:hermite(s,k[j].t,k[j+1].t,k[j].d,k[j+1].d,k[j].m,k[j+1].m);return k[k.length-1].d;};
+	/** Day within a trip; each piece is clamped to its key values, so float error never dips below a hold's day (monotone across keys). */
+	const dayIn=(tr:Trip,s:number)=>{const k=tr.keys;if(s<=k[0].t)return k[0].d;for(let j=0;j+1<k.length;j++)if(s<k[j+1].t)return k[j].d===k[j+1].d?k[j].d:k[j].cruise?clamp(cruiseDay(s,k[j],k[j+1]),k[j].d,k[j+1].d):clamp(hermite(s,k[j].t,k[j+1].t,k[j].d,k[j+1].d,k[j].m,k[j+1].m),k[j].d,k[j+1].d);return k[k.length-1].d;};
 	const dayAt=(s:number)=>dayIn(tripAt(s),clamp(s,0,totalMs));
 	function sample(storyMs:number,holding:boolean):Sample{
 		const s=clamp(storyMs,0,totalMs),tr=tripAt(s),day=dayIn(tr,s);
@@ -91,11 +98,13 @@ export function buildSchedule(scripts:IssueScript[],today:string,opts:{reducedMo
 		else if(s>=totalMs&&tr.to===null&&totalMs>0){phase='end';}
 		else if(tr.from!==null&&s<tr.t0+RELEASE_MS){phase='release';stop=tr.from;const u=(s-tr.t0)/RELEASE_MS;zoom=1-smootherstep(RZ[0],RZ[1],u);ghost=1-smootherstep(RG[0],RG[1],u);}
 		else if(tr.to!==null&&s>=tr.t1-APPROACH_MS){phase='approach';stop=tr.to;const u=(s-(tr.t1-APPROACH_MS))/APPROACH_MS;ghost=smootherstep(AG[0],AG[1],u);zoom=smootherstep(AZ[0],AZ[1],u);}
-		else if(s===0)phase='idle';
+		if(s===0&&phase!=='hold')phase='idle';// 'idle' at story 0; the clock reports it as cruise / approach while playing
 		return {storyMs:s,day,date:fromDays(BIRTH+Math.floor(day)),phase,stop,focusId:stop!==null?stops[stop].id:null,ghost,zoom};
 	}
+	const firstStopOn=new Map<number,number>();stops.forEach((x,i)=>{if(!firstStopOn.has(x.day))firstStopOn.set(x.day,i);});
 	function storyMsForDay(day:number){
-		if(day<=dayAt(0))return 0;if(day>dayAt(totalMs))return totalMs;
+		if(day<=dayAt(0))return 0;if(day>=dayAt(totalMs))return totalMs;
+		const i=firstStopOn.get(day);if(i!==undefined)return holdMs[i];// exact stop day: its hold instant, so seekDay + play holds there
 		let lo=0,hi=totalMs;for(let n=0;n<200;n++){const mid=(lo+hi)/2;if(mid<=lo||mid>=hi)break;if(dayAt(mid)>=day)hi=mid;else lo=mid;}
 		return hi;
 	}

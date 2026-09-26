@@ -23,10 +23,14 @@ function continuity(c:CheckContext,s:Schedule,what:string){
 	for(let k=0;k+1<B.length;k++){
 		const a=B[k],b=B[k+1],n=Math.max(1,Math.ceil(b-a)),h=(b-a)/n;if(b-a<=0)continue;
 		const days:number[]=[],gz:[number,number][]=[];for(let j=0;j<=n;j++){const t=j===n?b:a+j*h,x=s.sample(t,false);days.push(x.day);gz.push([x.ghost,x.zoom]);}
-		const v:number[]=[];for(let j=0;j<n;j++){const dd=days[j+1]-days[j];c.assert(dd>=-1e-9,`${what} trip ${k}: day decreases at ${a+j*h} ms (${dd})`);v.push(dd/h);}
+		const v:number[]=[];for(let j=0;j<n;j++){const dd=days[j+1]-days[j];c.assert(dd>=0,`${what} trip ${k}: day decreases at ${a+j*h} ms (${dd})`);v.push(dd/h);}
 		for(let j=0;j<n;j++)for(let q=0;q<2;q++)c.assert(Math.abs(gz[j+1][q]-gz[j][q])<=0.02,`${what} trip ${k}: ${q?'zoom':'ghost'} step ${gz[j+1][q]-gz[j][q]} at ${a+j*h} ms`);
 		const peak=Math.max(...v);if(peak<=0)continue;
 		for(let j=1;j<n;j++)c.assert(Math.abs(v[j]-v[j-1])<=0.02*peak,`${what} trip ${k}: velocity jump ${v[j]-v[j-1]} (peak ${peak}) at ${a+j*h} ms`);
+		// Leg joints, against the local speed (the peak bound alone lets kinks in slow legs through).
+		const joints=[...(k>0?[a+RELEASE_MS]:[]),...(k<s.holdMs.length?[b-APPROACH_MS]:[])].filter(J=>J-1>=a&&J+1<=b);
+		for(const J of joints){const day=(t:number)=>s.sample(t,false).day,vb=day(J)-day(J-1),va=day(J+1)-day(J);
+			c.assert(Math.abs(va-vb)<=0.05*(Math.abs(va)+Math.abs(vb))/2+1e-6,`${what} trip ${k}: joint at ${J} ms kinks ${vb} → ${va} day/ms`);}
 		if(k>0)c.assert(v[0]<=1e-3*peak,`${what} trip ${k}: velocity leaving hold ${k-1} is ${v[0]} (peak ${peak})`);
 		if(k<s.holdMs.length)c.assert(v[n-1]<=1e-3*peak,`${what} trip ${k}: velocity arriving at hold ${k} is ${v[n-1]} (peak ${peak})`);
 	}
@@ -74,7 +78,7 @@ export const checks:Check[]=[
 				if(x.phase==='release'){if(zoomOut<0&&x.zoom<=0.05)zoomOut=t;if(ghostDrop<0&&x.ghost<0.5)ghostDrop=t;c.assert(x.stop===k-1,`release stop ${x.stop}`);}
 			}
 			if(k<s.holdMs.length){c.assert(ghostHalf>=0&&zoomLeft>=0&&ghostHalf<zoomLeft,`trip ${k} approach: ghost 0.5 at ${ghostHalf}, zoom leaves 0.05 at ${zoomLeft}`);const x=s.sample(b-APPROACH_MS,false);c.assert(x.phase==='approach'&&x.ghost===0&&x.zoom===0,`approach start ${x.phase} ${x.ghost} ${x.zoom}`);}
-			if(k>0){c.assert(zoomOut>=0&&ghostDrop>=0&&zoomOut<ghostDrop,`trip ${k} release: zoom 0.05 at ${zoomOut}, ghost below 0.5 at ${ghostDrop}`);const x=s.sample(a+RELEASE_MS,false);c.assert(x.ghost===0&&x.zoom===0,`release end ${x.phase} ${x.ghost} ${x.zoom}`);}
+			if(k>0){c.assert(zoomOut>=0&&ghostDrop>=0&&zoomOut<ghostDrop,`trip ${k} release: zoom 0.05 at ${zoomOut}, ghost below 0.5 at ${ghostDrop}`);const x=s.sample(a+RELEASE_MS,false),y=s.sample(a+RELEASE_MS-0.5,false);c.assert(x.phase!=='release'&&y.phase==='release'&&y.stop===k-1,`release leg is RELEASE_MS long: ${y.phase} → ${x.phase}`);}
 		}
 	}},
 	{name:'director: same-day stops get two holds and zoom out between them',run(c){
@@ -117,6 +121,20 @@ export const checks:Check[]=[
 	{name:'director clock: seekStop lands at the approach start and plays',run(c){
 		const s=syn(),k=createClock(s);k.seekStop(2,500);c.assert(k.playing&&k.holding===null&&k.storyMs===s.holdMs[2]-APPROACH_MS,`seekStop ${k.storyMs}`);
 		const x=k.tick(500);c.assert(x.phase==='approach'&&x.stop===2&&x.ghost===0,`${x.phase} ${x.stop}`);k.tick(500+APPROACH_MS);c.assert(k.holding===2,'holds at 2');
+	}},
+	{name:'director: exact stop days invert to their hold, and seekDay there + play holds at the first stop that day',run(c){
+		const s=buildSchedule(SCRIPTS,REAL_TODAY);
+		s.stops.forEach((st,i)=>{const first=s.stops.findIndex(x=>x.day===st.day);if(st.day===0)return;
+			c.assert(s.storyMsForDay(st.day)===s.holdMs[first],`${st.id}: storyMsForDay ${s.storyMsForDay(st.day)} vs hold ${s.holdMs[first]}`);
+			const k=createClock(s);k.seekDay(st.day);k.play(0);k.tick(1);c.assert(k.holding===first&&k.storyMs===s.holdMs[first],`${st.id}: seekDay + play holds ${k.holding} (want ${first}) at ${k.storyMs}`);});
+		c.assert(s.storyMsForDay(s.sample(s.totalMs,false).day)===s.totalMs,'end day inverts to exactly totalMs');
+	}},
+	{name:'director: a stop at birth reads idle at story 0 until played',run(c){
+		const s=buildSchedule([fake('birth',BIRTH_DATE,0)],TODAY),x=s.sample(0,false);c.assert(x.phase==='idle'&&x.ghost===0,`at 0: ${x.phase}`);
+		const k=createClock(s);k.play(0);c.assert(k.tick(0).phase==='approach','playing at 0 reads approach');k.tick(APPROACH_MS+1);c.assert(k.holding===0,'holds at the birth stop');
+	}},
+	{name:'director clock: seekStop out of range is a no-op',run(c){
+		const s=syn(),k=createClock(s);k.seekDay(s.stops[1].day);const at=k.storyMs;for(const i of [-1,s.holdMs.length,1.5,NaN]){k.seekStop(i,0);c.assert(k.storyMs===at&&!k.playing,`seekStop(${i})`);}
 	}},
 	{name:'director clock: end then play restarts at 0',run(c){
 		const s=syn(),k=createClock(s);k.seekDay(1e9);c.assert(k.storyMs===s.totalMs,'at end');k.play(0);k.tick(1);c.assert(k.storyMs===0||k.storyMs===1,`restart ${k.storyMs}`);
