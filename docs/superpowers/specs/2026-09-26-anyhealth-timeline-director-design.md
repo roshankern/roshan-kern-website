@@ -125,3 +125,17 @@ Audio, narration text beyond the tracker card, per-stop custom camera paths (orb
 - Holds cost zero story time; the bar shows story fraction, not calendar fraction (cost: the bar no longer reads as a linear calendar; year labels are placed by story time).
 - The platform does not scale and may overflow at birth (cost: if it looks odd, a one-line change fades its outer rim).
 - Focus box frozen per stop at approach start (cost: an issue that grows a lot during the approach may slightly outgrow the frame; the framing check covers climax).
+
+## Rulings made during execution (2026-09-26)
+
+- **Cruise profile.** The cruise leg is not a Hermite at constant speed. Its speed follows `v(u)=mA+(mB−mA)·smootherstep(u)+K·smootherstep′(u)` (K ≥ 0), integrated exactly, so acceleration is 0 at both joints. Speed peaks at about 1.8× the cruise mean mid-leg (a smooth bell). Release and approach stay limited Hermites. Why: a Hermite could not slow from cruise into a slow approach without a kink at the joint.
+- **Free mode.** Free mode starts only after a scrub or reset (`seekDay`) and lasts until play, continue or seekStop. `cue.guided` is `!scrubbed`, so pausing mid-leg freezes the shot instead of snapping to the default view. In free mode, ghost and zoom are 0.
+- **Camera direction.** The camera turns by interpolating azimuth (the shortest arc about +y) and elevation, not by a great-circle slerp. Front↔back stops then orbit around the body instead of swinging over the head.
+- **Ghost onset.** Alpha is `mix(1,GHOST_ALPHA,g)·mix(1,0.35+0.65·rim,g)`. A depth-only pre-pass of the non-focus parts means only the frontmost ghost surface shows. This gives a continuous onset with no unsorted see-through.
+- **No hitches.**
+  - The ghost-pass shader variants are precompiled at `ready()` (`Engine.prewarm`).
+  - `focusBox` is memoised, and the focus box for every stop is prefetched in idle settle slices.
+- **Stops drawn by another script.** A stop drawn by another script's layer (the callus, drawn by the fracture layer) uses `IssueScript.focusAlso`.
+- **Manual Isolate at a hold.** It leaves guided mode (`seekDay` at the same day), so Play returns to that climax.
+- **Release ramp ordering.** The check asserts zoom ≤ 0.05 before ghost drops below 0.5, mirroring the approach. The ramps overlap on purpose, for smoothness.
+- **Record-date holds.** Record-window glows (CBCs, allergy tests, thalassemia) pre-roll so these stops hold on the record date (climax 0).

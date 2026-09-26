@@ -81,7 +81,7 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
    groups.forEach((gs,system)=>{const geometry=mergeGeometries(gs,false);if(!geometry)throw new Error('Could not assemble anatomy geometry.');geometries.push(geometry);const mesh=new T.Mesh(geometry,mats.get(system as never));mesh.frustumCulled=false;scene.add(mesh);});
    lastState=null;loaded++;report();dirty=true;
   };
-  (async()=>{try{let cursor=0;await Promise.all(Array.from({length:3},async()=>{while(cursor<atlas.chunks.length){const i=cursor++;await loadChunk(i);}}));if(!disposed){ready=true;dirty=true;engine?.ready(pickers);}}catch(e){if(!disposed)onError(e instanceof Error?e.message:'Could not load the anatomy.');}})();
+  (async()=>{try{let cursor=0;await Promise.all(Array.from({length:3},async()=>{while(cursor<atlas.chunks.length){const i=cursor++;await loadChunk(i);}}));if(!disposed){ready=true;dirty=true;if(engine){engine.ready(pickers);/* ghost-pass twins compile now, not on the first approach */engine.prewarm(renderer,scene,camera).catch(e=>console.warn('AnyHealth: ghost prewarm',e));settled=false;}}}catch(e){if(!disposed)onError(e instanceof Error?e.message:'Could not load the anatomy.');}})();
   // Width of the issue panel's right footprint (--issue-panel-w + --panel-inset on .studio), resolved through a probe so calc()/min()/vw values work. 0 when the properties are unset.
   const issueFootprint=()=>{
    const studio=document.querySelector('.studio');if(!(studio instanceof HTMLElement))return 0;const cs=getComputedStyle(studio);
@@ -265,7 +265,7 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
    if(engine&&tl){
     const now=performance.now();if(tl.date!==seenDate){seenDate=tl.date;dateAt=now;settled=false;}
     const r=engine.update({date:tl.date,day:tl.cue?.day,visible:s.visible,isolate:tl.isolate,now,focus});if(r.changed||r.animating)dirty=true;if(r.fly&&!P)focusBox(r.fly,1.35);
-    // Re-warp the picking geometry and bounds once the date has rested for 150 ms, about 4 ms per frame (a pick completes the rest first).
+    // Re-warp the picking geometry and bounds once the date has rested for 150 ms, about 4 ms per frame (a pick completes the rest first); after ready() it also runs the focus-box prefetch, so it keeps being called until both are done.
     if(ready&&!settled&&now-dateAt>=150)settled=engine.settleSlice(4);
    }
    const fd=latestDate.current;if(ready&&fd.fracture&&!fxTried){fxTried=true;fx=createFracture({scene,atlas,pickers,data,partTexture});}

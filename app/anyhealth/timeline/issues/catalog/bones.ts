@@ -25,7 +25,8 @@ export const SCRIPTS:IssueScript[]=[
 		climax:0.25,approachDays:0.5, // basis: bones#climax-fracture
 	},
 	// The fracture script draws the callus; this record only marks the film.
-	{id:'healing-humerus-callus-2009',parts:[FRACTURE_PART],onset:'2009-09-25',resolve:HEALED,fxAt:()=>[],status:()=>'Callus on the day-23 film',
+	// The callus is drawn by the fracture script's layer, so focusing this stop keeps that layer solid.
+	{id:'healing-humerus-callus-2009',parts:[FRACTURE_PART],onset:'2009-09-25',resolve:HEALED,focusAlso:['left-humerus-fracture-2009'],fxAt:()=>[],status:()=>'Callus on the day-23 film',
 		climax:0,approachDays:toDays('2009-09-25')-toDays(FRACTURE_DATE)-6}, // basis: bones#climax-callus
 	{id:'scoliosis-upper-thoracic-2025',parts:SCOLIOSIS_PARTS,onset:SCOLIOSIS_RECORD,chronic:true,illustrative:true,fxAt:day=>scoliosisFx(day),
 		climax:0,approachDays:365,view:BACK}, // basis: bones#climax-scoliosis
