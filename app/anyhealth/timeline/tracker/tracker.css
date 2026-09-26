@@ -1,0 +1,73 @@
+/* /anyhealth/timeline only (<main class="studio timeline">): the Issue tracker. It fills the issue panel's
+   footprint (--issue-panel-w / --panel-inset), which scene.tsx reserves, so the body stays centred between
+   the panels. On ≤767px (portrait) it is a bottom sheet: a 44px peek bar that expands to 60dvh. */
+.studio.timeline{--tracker-peek:44px}
+.studio.timeline .issue-tracker{position:absolute;z-index:8;right:var(--panel-inset);top:24px;bottom:24px;width:var(--issue-panel-w);display:flex;flex-direction:column;overflow:hidden;animation:tracker-panel-in .2s ease-out}
+@keyframes tracker-panel-in{from{opacity:0;transform:translateX(8px)}}
+.studio.timeline .tracker-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:18px 20px 13px;font-size:13px;font-weight:600;color:#26313c;border-bottom:1px solid #18253612}
+.studio.timeline .tracker-head h2{margin:0;font:inherit;color:inherit;letter-spacing:inherit}
+.studio.timeline .tracker-count{font-size:11px;font-weight:500;color:#8a949e;font-variant-numeric:tabular-nums}
+.studio.timeline .tracker-peek{display:none}
+.studio.timeline .tracker-list{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:12px 12px 14px;display:flex;flex-direction:column;gap:10px;scrollbar-width:thin;scrollbar-color:#b9c3cc transparent}
+.studio.timeline .tracker-empty{margin:6px 8px;font-size:13px;color:#8a949e}
+
+/* Cards: the old issue panel's typography, one card per issue. */
+.studio.timeline .tracker-card{display:flex;flex-direction:column;gap:9px;padding:15px 15px 12px;border-radius:12px;background:#ffffffa6;border:1px solid #18253612;animation:tracker-in .18s ease-out;transition:opacity .18s,border-color .18s}
+@keyframes tracker-in{from{opacity:0;transform:translateY(6px)}}
+.studio.timeline .tracker-card.resolved{opacity:.6}
+.studio.timeline .tracker-card.isolated{border-color:#263b4840;box-shadow:0 0 0 1px #263b4818}
+.studio.timeline .tracker-card .eyebrow{gap:6px;flex-wrap:wrap;color:#737d89}.studio.timeline .tracker-card .eyebrow b{font-weight:600;color:#a0a9b2}
+.studio.timeline .tracker-card h3{margin:0;font-size:15px;font-weight:600;letter-spacing:-.25px;line-height:1.3;color:#20242b;overflow-wrap:anywhere}
+.studio.timeline .tracker-card .issue-date{margin-top:-5px}
+.studio.timeline .tracker-tags{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.studio.timeline .tracker-status{font-size:12px;font-weight:500;color:#3c4956;font-variant-numeric:tabular-nums;margin-right:2px}
+.studio.timeline .tracker-chip{font-size:9.5px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:#6b7682;padding:3px 7px;border-radius:999px;background:#edf0f2}
+.studio.timeline .tracker-card .issue-summary{margin:0;font-size:13px;line-height:1.6}
+.studio.timeline .tracker-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;padding-top:10px;border-top:1px solid #18253612}
+.studio.timeline .tracker-foot .issue-source{padding:0;border:0;min-width:0}
+.studio.timeline .tracker-isolate{flex-shrink:0;height:30px;padding:0 11px;border-radius:8px;font-size:11.5px;font-weight:500;color:#3c4956;background:#edf0f2!important}
+.studio.timeline .tracker-isolate:hover{background:#e3e7ea!important}
+.studio.timeline .tracker-isolate.on{background:#263b48!important;color:#fff}
+/* v2 director: the guided stop's card (pinned first), and Continue at its hold, the tracker's one filled button. */
+.studio.timeline .tracker-card.focused{background:#fffffff2;border-color:#263b4833;box-shadow:0 0 0 1px #263b4814,0 8px 24px #2433440f}
+.studio.timeline .tracker-continue{align-self:flex-start;display:inline-flex;align-items:center;gap:8px;height:38px;padding:0 16px 0 18px;border-radius:999px;font-size:13px;font-weight:600;letter-spacing:.01em;color:#fff!important;background:#263b48!important;box-shadow:0 4px 14px #263b4833;animation:tracker-continue-in .24s ease-out}
+.studio.timeline .tracker-continue:hover{background:#1c2d38!important}
+.studio.timeline .tracker-continue svg{transition:transform .18s}.studio.timeline .tracker-continue:hover svg{transform:translateX(2px)}
+@keyframes tracker-continue-in{from{opacity:0;transform:translateY(4px)}}
+/* Bar (director mode): the play button turns into a labelled Continue pill at a hold. */
+.studio.timeline .timeline-play.timeline-continue{width:auto;gap:6px;padding:0 13px 0 15px;border-radius:999px;font-size:12.5px;font-weight:600;color:#fff;background:#263b48!important}
+.studio.timeline .timeline-play.timeline-continue:hover{background:#1c2d38!important;color:#fff}
+
+@media(max-width:1100px) and (min-width:768px){.studio.timeline .issue-tracker{bottom:118px}}
+
+/* Phone portrait: bottom sheet. The timeline, body stats, Systems button and Systems sheet move up to clear the peek bar. */
+@media(max-width:767px) and ((orientation:portrait) or (min-height:601px)){
+ .studio.timeline{--tracker-lift:calc(var(--tracker-peek) + 4px)}
+ .studio.timeline .timeline-panel{bottom:calc(44px + var(--tracker-lift) + env(safe-area-inset-bottom))}
+ .studio.timeline .body-stats{bottom:calc(116px + var(--tracker-lift) + env(safe-area-inset-bottom))}
+ .studio.timeline .systems-fab{bottom:calc(114px + var(--tracker-lift) + env(safe-area-inset-bottom))}
+ .studio.timeline .layers-panel.mobile-open{bottom:calc(118px + var(--tracker-lift) + env(safe-area-inset-bottom));max-height:calc(100dvh - 230px - var(--tracker-lift))}
+ .studio.timeline .issue-tracker{left:12px;right:12px;top:auto;bottom:calc(40px + env(safe-area-inset-bottom));width:auto;height:var(--tracker-peek);z-index:30;border-radius:14px;background:#fffffff7;animation-name:tracker-sheet-in;transition:height .22s ease-out}
+ .studio.timeline .issue-tracker.open{height:60dvh}
+ /* The head is replaced by the peek bar but its h2 stays for screen readers, so the cards' h3s keep a parent heading. */
+ .studio.timeline .tracker-head{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+ .studio.timeline .tracker-peek{display:flex;align-items:center;justify-content:space-between;flex-shrink:0;width:100%;height:var(--tracker-peek);padding:0 16px;font-size:13px;font-weight:600;color:#26313c;background:none!important}
+ .studio.timeline .tracker-peek svg{color:#8a949e;transition:transform .2s}.studio.timeline .issue-tracker.open .tracker-peek svg{transform:rotate(180deg)}
+ .studio.timeline .issue-tracker:not(.open) .tracker-list{visibility:hidden}
+ .studio.timeline .issue-tracker.open .tracker-peek{border-bottom:1px solid #18253612}
+ .studio.timeline .tracker-list{padding:10px 10px 12px}
+ .studio.timeline .tracker-isolate{height:44px;padding:0 14px;font-size:12.5px}
+ .studio.timeline .tracker-continue{height:44px;padding:0 18px 0 20px}
+ .studio.timeline .tracker-card h3{font-size:15px}
+}
+@keyframes tracker-sheet-in{from{opacity:0;transform:translateY(12px)}}
+
+/* Short landscape: a side panel, like the issue panel. */
+@media(max-height:600px) and (orientation:landscape){
+ .studio.timeline .issue-tracker{top:12px;bottom:12px;right:max(var(--panel-inset),env(safe-area-inset-right))}
+ .studio.timeline .tracker-head{padding:13px 16px 10px}
+}
+
+@media(prefers-reduced-motion:reduce){
+ .studio.timeline .issue-tracker,.studio.timeline .tracker-card,.studio.timeline .tracker-peek svg,.studio.timeline .tracker-continue,.studio.timeline .tracker-continue svg{animation:none!important;transition:none!important}
+}

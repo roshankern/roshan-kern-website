@@ -1,0 +1,186 @@
+/** v2 Task 3: ghosted focus (fx row 4 .w, the tfxGhost uniform, the two render passes), layer fading, fractional fx days and focusBox. The render passes run for real under SwiftShader (ghost-gpu.ts; ANYHEALTH_PLAYWRIGHT, or ANYHEALTH_SKIP_GPU=1 to skip). */
+import * as T from 'three';
+import type {Check,CheckContext} from './harness';
+import {DEFAULT_VISIBLE} from '../../atlas/anatomy';
+import {nodeEngine} from './engine-node';
+import {ghostGpu} from './ghost-gpu';
+import {SCRIPTS,scriptFor,dayOf} from '../issues';
+import {climaxDay,stopBoxDay,dayOfDate} from '../camera/pose';
+import {prefetchPlan} from '../engine';
+import {stopsFor} from '../director/schedule';
+import {todayISO} from '../../health/dates';
+import {GHOST_ALPHA} from '../director/types';
+import {FX_ROWS} from '../fx/part-fx';
+import {toDays} from '../../health/dates';
+import {BIRTH_DATE} from '../../health/types';
+import type {Engine,EngineFrame} from '../engine';
+import type {IssueScript} from '../types';
+
+const FRACTURE='left-humerus-fracture-2009',CALLUS='healing-humerus-callus-2009',SCOLIOSIS='scoliosis-upper-thoracic-2025',ACNE='acne-diagnosis-topical-treatment',BIRTH=toDays(BIRTH_DATE),TODAY='2026-09-25';
+const frame=(date:string,o:Partial<EngineFrame>={}):EngineFrame=>({date,visible:DEFAULT_VISIBLE,isolate:null,now:0,...o});
+/** The shared fx texture and ghost uniforms, as a patched material's onBeforeCompile hands them to the shader, and the injected fragment. */
+function probe(engine:Engine){
+	const m=new T.MeshStandardMaterial();engine.patchMaterial(m,{partFx:true,soft:false});
+	const sh={uniforms:{} as Record<string,{value:unknown}>,vertexShader:'#include <common>\n#include <beginnormal_vertex>\n#include <begin_vertex>',fragmentShader:'#include <common>\n#include <clipping_planes_fragment>\n#include <color_fragment>\n#include <opaque_fragment>'};
+	m.onBeforeCompile(sh as never,undefined as never);const tex=sh.uniforms.tfxState.value as T.DataTexture,width=sh.uniforms.tfxWidth.value as number,data=tex.image.data as Float32Array;
+	return {tex,ghost:sh.uniforms.tfxGhost as {value:number},flag:(i:number)=>data[(4*width+i)*4+3],fragment:sh.fragmentShader,vertex:sh.vertexShader};
+}
+/** Temporarily set a script's focusAlso. */
+async function withFocusAlso<R>(id:string,also:string[],fn:()=>R|Promise<R>):Promise<R>{const s=scriptFor(id) as IssueScript,prev=s.focusAlso;s.focusAlso=also;try{return await fn();}finally{if(prev===undefined)delete s.focusAlso;else s.focusAlso=prev;}}
+const boxNear=(c:CheckContext,a:T.Box3|null,b:T.Box3|null,tol:number,what:string)=>{c.assert(!!a&&!!b,`${what}: a box is null`);for(const k of ['min','max'] as const)for(const ax of ['x','y','z'] as const)c.near(a![k][ax],b![k][ax],tol,`${what} ${k}.${ax}`);};
+/** The fracture group and the material its head fragment draws with now (its own, or the ghost twin while faded). */
+const fracture=(scene:T.Scene)=>{const g=scene.getObjectByName('fracture')!,mesh=g.children[0] as T.Mesh;return {group:g,mesh,own:mesh.material as T.Material,head:()=>mesh.material as T.Material};};
+
+/** The GPU run: the focused script's first part (F), a non-focus Heart (N), a switched-off Liver (H), a non-focus part half behind F (O) and a translucent skin-like part (S), on a date with no issue fx on them. */
+const gpu=()=>ghostGpu({date:'2010-01-01',focus:SCOLIOSIS,names:{F:scriptFor(SCOLIOSIS)!.parts[0],N:'Heart',H:'Liver',S:'Skin (ghost check)',O:'Aorta (ghost check)',K:'Skin 2 (ghost check)',K2:'Skin far (ghost check)',M:'Pericardium (ghost check)',P:'Pleura (ghost check)'}});
+async function gpuRun(c:CheckContext){
+	const r=await gpu();if(!r){c.assert(process.env.ANYHEALTH_SKIP_GPU==='1','SKIPPED: playwright-core or Chromium not found (set ANYHEALTH_PLAYWRIGHT, see docs/anyhealth/timeline-checks.md) — set ANYHEALTH_SKIP_GPU=1 to skip this check explicitly');return null;}
+	c.assert(!r.errors.length,`shader compile: ${r.errors.join('\n')}`);return r;
+}
+const BLUE=(p:number[])=>p[0]<=2&&p[1]<=2&&p[2]>=250,WHITE=(p:number[])=>p[0]>=250&&p[1]>=250&&p[2]>=250,same=(a:number[],b:number[])=>a.every((v,k)=>v===b[k]);
+
+export const checks:Check[]=[
+	{name:'focus flag row 4.w is 1 exactly for the focused script\'s parts (and its focusAlso scripts\'), 0 with no focus',async run(c){
+		const g=await c.geometry(),{engine}=nodeEngine(g),p=probe(engine),n=g.atlas.parts.length;
+		const expect=(names:Set<string>,what:string)=>{let bad=0;for(let i=0;i<n;i++)if(p.flag(i)!==(names.has(g.atlas.parts[i].name)?1:0))bad++;c.assert(bad===0,`${what}: ${bad} parts with the wrong flag`);c.assert(p.flag(n)===0,`${what}: padding column`);};
+		const sco=new Set(scriptFor(SCOLIOSIS)!.parts);
+		engine.update(frame('2025-06-01',{focus:{id:SCOLIOSIS,ghost:.5}}));expect(sco,'focus');c.near(p.ghost.value,.5,0,'tfxGhost');
+		engine.update(frame('2025-06-01',{focus:null}));expect(new Set(),'focus null');c.assert(p.ghost.value===0,'ghost 0 with no focus');
+		engine.update(frame('2025-06-01',{isolate:SCOLIOSIS}));expect(sco,'isolate, focus absent (v1 Isolate as focus)');c.assert(p.ghost.value===1,'isolate maps to ghost 1');
+		engine.update(frame('2025-06-01',{isolate:SCOLIOSIS,focus:null}));expect(new Set(),'focus null wins over isolate');
+		engine.update(frame('2025-06-01',{focus:{id:'no-such-issue',ghost:1}}));expect(new Set(),'unknown id');c.assert(p.ghost.value===0,'unknown id: no ghost');
+		await withFocusAlso(SCOLIOSIS,[FRACTURE],()=>{engine.update(frame('2025-06-01',{focus:{id:SCOLIOSIS,ghost:.5},now:1}));});
+		expect(new Set([...sco,...scriptFor(FRACTURE)!.parts]),'focusAlso');
+		c.assert(/tfxFocus = tfxRow\(4\.0\)\.w;/.test(p.vertex)&&/uniform float tfxGhost;/.test(p.fragment)&&/#else\nif \(tfxVisible < 0\.5 \|\| \(tfxFocus < 0\.5 && tfxGhost > 0\.001\)\) discard;/.test(p.fragment)&&/#ifdef TFX_GHOST_PASS\n\{ float tfxRim[^\n]*mix\(1\.0, 0\.35 \+ 0\.65 \* tfxRim, tfxGhost\); \}\n#endif\n#include <opaque_fragment>/.test(p.fragment),'shader wiring: focus varying, ghost uniform, pass 0 / pass 1 discard, pass 1 alpha before opaque_fragment');
+		c.assert(FX_ROWS===6,'row 4 is the scale row');
+	}},
+	{name:'ghost uniform only: changing ghost does not rewrite the fx texture',async run(c){
+		const g=await c.geometry(),{engine}=nodeEngine(g),p=probe(engine);
+		engine.update(frame('2025-06-01',{focus:{id:SCOLIOSIS,ghost:.3},now:1}));const v=p.tex.version;
+		const r=engine.update(frame('2025-06-01',{focus:{id:SCOLIOSIS,ghost:.7},now:2}));
+		c.assert(p.tex.version===v,`texture version ${v} → ${p.tex.version}`);c.near(p.ghost.value,.7,0,'uniform written');c.assert(r.changed,'a ghost change asks for a render');
+		c.assert(!engine.update(frame('2025-06-01',{focus:{id:SCOLIOSIS,ghost:.7},now:3})).changed,'same ghost: no change');
+		engine.update(frame('2025-06-01',{focus:{id:FRACTURE,ghost:.7},now:4}));c.assert(p.tex.version>v,'a focus id change rewrites the flags');
+	}},
+	{name:'GPU ghost: pass 0 (normal render) discards non-focus at ghost > 0.001, keeps them at ghost 0; focus parts draw opaque at ghost 1',async run(c){
+		const r=await gpuRun(c);if(!r)return;const s=r.steps;
+		c.assert(WHITE(s.ghost0.F)&&WHITE(s.ghost0.N),`ghost 0: focus ${s.ghost0.F}, non-focus ${s.ghost0.N} both solid`);
+		c.assert(!BLUE(s.ghost0.S)&&s.ghost0.S[0]>60,`ghost 0: the translucent part draws (${s.ghost0.S})`);c.assert(BLUE(s.ghost0.H)&&BLUE(s.ghost0.gap),`switched-off part / gap show the ground: ${s.ghost0.H} ${s.ghost0.gap}`);
+		c.assert(same(s['ghost0+pass'].N,s.ghost0.N)&&same(s['ghost0+pass'].S,s.ghost0.S),'the ghost pass is a no-op at ghost 0');
+		for(const k of ['ghost1','ghost0.5'] as const){c.assert(WHITE(s[k].F),`${k}: focus part opaque (${s[k].F})`);c.assert(BLUE(s[k].N)&&BLUE(s[k].S)&&BLUE(s[k].H),`${k}: non-focus discarded in pass 0 (N ${s[k].N}, S ${s[k].S}, H ${s[k].H})`);}
+	}},
+	{name:'GPU ghost: pass 1 (ghost pass) draws only non-focus, hidden never draws, focus parts occlude ghosts, only the frontmost ghost shows, no clear, every state restored',async run(c){
+		const r=await gpuRun(c);if(!r)return;const s=r.steps,p=s['ghost1+pass'],o=s['pass only'];
+		c.assert(WHITE(p.F),`focus part kept, nothing cleared (${p.F})`);c.assert(BLUE(p.gap)&&BLUE(p.H),`gap / hidden part: ground (${p.gap}, ${p.H})`);
+		c.assert(p.N[0]>2&&p.N[0]<.2*255&&p.N[2]>=240,`non-focus drawn as a faint ghost over the ground (${p.N})`);
+		c.assert(o.H.every(v=>v===0)&&o.gap.every(v=>v===0),`pass alone: no hidden part, ground or background (H ${o.H}, gap ${o.gap})`);c.assert(same(o.F,o.O),`pass alone: the focus part never draws (at F only the ghost of O behind it: ${o.F} = ${o.O})`);
+		c.assert(Math.abs(o.N[0]-255*GHOST_ALPHA*.35)<=3,`pass alone: a face-on ghost at GHOST_ALPHA × 0.35 (rim 0): ${o.N} vs ${(255*GHOST_ALPHA*.35).toFixed(1)}`);c.assert(o.S[0]>0&&o.S[0]<o.N[0],`pass alone: the translucent part keeps its own opacity multiplied in (${o.S} < ${o.N})`);
+		c.assert(!r.restored.length,r.restored.join('; '));c.assert(same(s['ghost1 again'].N,s.ghost1.N)&&same(s['ghost1 again'].F,s.ghost1.F),'the next normal render is pass 0 again (materials restored)');
+		c.assert(WHITE(p.FO)&&same(p.FO,s.ghost1.FO),`focus part in front of a ghost: the ghost is hidden where they overlap (${p.FO})`);c.assert(p.O[0]>2&&p.O[0]<.2*255,`the same ghost shows where nothing covers it (${p.O})`);
+		c.assert(same(p.NO,p.N),`ghost in front of ghost: only the frontmost surface blends in, a silhouette, not a stacked fog (N over O ${p.NO}, N alone ${p.N})`);
+	}},
+	{name:'GPU ghost: continuous onset (ghost 0.001, pass 1 skipped, vs 0.002, pass 1 at alpha ≈ 1: every sample within 3 levels)',async run(c){
+		const r=await gpuRun(c);if(!r)return;const a=r.steps['ghost0.001'],b=r.steps['ghost0.002'],bad:string[]=[];
+		for(const k of Object.keys(a) as (keyof typeof a)[])if(a[k].some((v,j)=>Math.abs(v-b[k][j])>3))bad.push(`${k}: ${a[k]} vs ${b[k]}`);
+		c.assert(!bad.length,bad.join('; '));c.assert(WHITE(b.N)&&WHITE(b.O),`non-focus parts still read solid at 0.002 (${b.N}, ${b.O})`);
+	}},
+	{name:'GPU ghost: onset keeps the translucent skin over the ghosts behind it, even when its mesh centre sorts behind them (ghost 0.001 vs 0.002 within 3 levels)',async run(c){
+		const r=await gpuRun(c);if(!r)return;const a=r.steps['ghost0.001'].K,b=r.steps['ghost0.002'].K;
+		c.assert(a[0]>=250&&a[1]>60&&a[1]<200,`red skin over the white part behind it at 0.001: a blend (${a})`);c.assert(a.every((v,j)=>Math.abs(v-b[j])<=3),`skin at 0.001 ${a} vs 0.002 ${b}`);
+	}},
+	{name:'GPU ghost: onset keeps a faded layer (fadeMesh ghost twin) in front of the ghost behind it (ghost 0.001 vs 0.002 within 3 levels)',async run(c){
+		const r=await gpuRun(c);if(!r)return;const a=r.steps['ghost0.001'].L,b=r.steps['ghost0.002'].L;
+		c.assert(a[1]>=250&&a[0]<=5,`the layer at 0.001 (${a})`);c.assert(a.every((v,j)=>Math.abs(v-b[j])<=3),`layer at 0.001 ${a} vs 0.002 ${b}`);
+	}},
+	{name:'GPU ghost: after prewarm no render compiles a program (ghost twins, depth twins, every ghost value)',async run(c){
+		const r=await gpuRun(c);if(!r)return;c.assert(r.programs.prewarm>0,`programs after prewarm: ${r.programs.prewarm}`);c.assert(r.programs.end===r.programs.prewarm,`programs: ${r.programs.prewarm} after prewarm, ${r.programs.end} after the run`);
+	}},
+	{name:'picking ignores ghosted parts at ghost ≥ 0.5; focus parts stay pickable (whatever the switches)',async run(c){
+		const g=await c.geometry(),{engine}=nodeEngine(g),heart=g.indicesOf('Cavity of left ventricle')[0],sco=g.indicesOf(scriptFor(SCOLIOSIS)!.parts[0])[0];
+		const at=(ghost:number,visible=DEFAULT_VISIBLE)=>{engine.update(frame('2012-01-01',{focus:{id:SCOLIOSIS,ghost},visible}));return [engine.partVisible(sco),engine.partVisible(heart)];};
+		c.assert(JSON.stringify(at(.49))==='[1,1]','ghost 0.49: both pickable');c.assert(JSON.stringify(at(.5))==='[1,0]','ghost 0.5: the ghosted heart is not');c.assert(JSON.stringify(at(1))==='[1,0]','ghost 1');
+		c.assert(JSON.stringify(at(1,['cardiac']))==='[1,0]','a focus part is shown with its system switched off');c.assert(JSON.stringify(at(0,['cardiac']))==='[1,1]','ghost 0, skeleton off: the focus part still shows, the heart by its switch');
+		engine.update(frame('2012-01-01',{isolate:SCOLIOSIS}));c.assert(engine.partVisible(heart)===0&&engine.partVisible(sco)===1,'manual Isolate (ghost 1)');
+	}},
+	{name:'layers fade instead of hide: the fracture layer at mix(1, GHOST_ALPHA, ghost) while another script is focused, hidden by its switch, solid for its own focus and a focusAlso',async run(c){
+		const g=await c.geometry(),{engine,scene}=nodeEngine(g),date='2009-09-20',{group,mesh,own:ownMat,head}=fracture(scene);let now=0;
+		const at=(o:Partial<EngineFrame>)=>{engine.update(frame(date,{now:now+=16,...o}));const m=head();return {shown:group.visible,opacity:m.opacity,transparent:m.transparent,depthWrite:m.depthWrite};};
+		const v0=ownMat.version;
+		c.assert(at({}).shown&&head()===ownMat&&ownMat.opacity===1,'drawn solid with nothing focused');
+		for(const ghost of [.25,.5,1]){const r=at({focus:{id:SCOLIOSIS,ghost}});c.assert(r.shown,`ghost ${ghost}: drawn`);c.near(r.opacity,1+(GHOST_ALPHA-1)*ghost,1e-9,`ghost ${ghost}: opacity`);c.assert(r.transparent&&r.depthWrite&&head()!==ownMat,`ghost ${ghost}: on its transparent ghost twin, writing depth`);}
+		c.assert(!at({focus:{id:SCOLIOSIS,ghost:.5},visible:DEFAULT_VISIBLE.filter(s=>s!=='skeletal')}).shown,'skeleton switched off: hidden, not ghosted');
+		const own=at({focus:{id:FRACTURE,ghost:1},visible:DEFAULT_VISIBLE.filter(s=>s!=='skeletal')});c.assert(own.shown&&own.opacity===1&&!own.transparent&&own.depthWrite,'own focus: solid, even with the skeleton off');
+		c.assert(at({focus:{id:CALLUS,ghost:1}}).opacity<1||!!scriptFor(CALLUS)!.focusAlso?.includes(FRACTURE),'callus focus without focusAlso ghosts the fracture layer');
+		await withFocusAlso(CALLUS,[FRACTURE],()=>{const r=at({focus:{id:CALLUS,ghost:1}});c.assert(r.shown&&r.opacity===1&&r.depthWrite,`focusAlso: the fracture layer stays solid when the callus is focused (opacity ${r.opacity})`);});
+		c.assert(at({focus:null}).opacity===1&&mesh.material===ownMat&&!ownMat.transparent,'back to its own solid material');c.assert(ownMat.version===v0,`the own material was never modified (version ${v0} → ${ownMat.version}: no program switch)`);
+	}},
+	{name:'LayerFrame.isolated is true for the focused script (and its focusAlso) at ghost > 0: the isotretinoin marks draw on a guided focus, never with the acne copy',async run(c){
+		const g=await c.geometry(),{engine,scene}=nodeEngine(g),ISO='isotretinoin-accutane-course',mesh=(id:string)=>scene.getObjectByName(`marks:${id}`) as T.Mesh;let now=0;
+		const on=(focus:EngineFrame['focus'])=>{engine.update(frame('2022-03-01',{focus,now:now+=16}));return [mesh(ACNE).visible,mesh(ISO).visible];};
+		c.assert(JSON.stringify(on({id:ISO,ghost:.3}))==='[false,true]','guided focus on isotretinoin at ghost 0.3: its layer only');
+		c.assert(JSON.stringify(on({id:ISO,ghost:0}))==='[true,false]','focus at ghost 0: the acne layer, not isotretinoin\'s');
+		c.assert(JSON.stringify(on({id:FRACTURE,ghost:1}))==='[true,false]'&&(mesh(ACNE).material as T.Material).opacity<1,'another focus: acne ghosted, isotretinoin not drawn');
+		await withFocusAlso(FRACTURE,[ISO],()=>{c.assert(JSON.stringify(on({id:FRACTURE,ghost:1}))==='[false,true]','focusAlso counts as focused (isolated)');});
+	}},
+	{name:'fractional day drives fx: update({…,day:d+0.5}) hands every script the fx day dayOf+0.5 (the fracture included), growth keeps the date',async run(c){
+		const g=await c.geometry(),{engine}=nodeEngine(g),s=scriptFor(FRACTURE) as IssueScript,orig=s.fxAt,seen:{day:number;date:string}[]=[];
+		s.fxAt=(day,ctx)=>{seen.push({day,date:ctx.date});return orig(day,ctx);};
+		try{
+			const date='2009-09-02',d=toDays(date)-BIRTH;engine.update(frame(date,{day:d+.5}));
+			c.assert(seen.length>0,'fxAt called');c.near(seen.at(-1)!.day,dayOf(s,date)+.5,1e-9,'fx day');c.assert(seen.at(-1)!.date===date,'growth context keeps the date');
+			engine.update(frame(date,{day:d+.75,now:1}));c.near(seen.at(-1)!.day,dayOf(s,date)+.75,1e-9,'a new fractional day re-applies on the same date');
+			engine.update(frame(date,{now:2}));c.near(seen.at(-1)!.day,dayOf(s,date),0,'no day: whole days from the date');
+		}finally{s.fxAt=orig;}
+	}},
+	{name:'focusBox matches isolateBox after settle on the same whole day (within 1 mm; day +0.25 and +0.75 give that day), with no settle needed, focusAlso included',async run(c){
+		const g=await c.geometry(),{engine}=nodeEngine(g);
+		for(const [id,date] of [[FRACTURE,'2009-09-20'],[SCOLIOSIS,'2026-01-10'],[ACNE,'2022-03-01']] as const){
+			const d=toDays(date)-BIRTH;engine.update(frame(date,{day:d}));const a=engine.focusBox(id,d+.25),b=engine.focusBox(id,d+.75);engine.settle();const ib=engine.isolateBox(id);boxNear(c,a,ib,.001,`${id} +0.25`);boxNear(c,b,ib,.001,`${id} +0.75`);
+		}
+		const d=toDays('2009-10-10')-BIRTH;engine.update(frame('2009-10-10',{day:d}));engine.settle();
+		await withFocusAlso(CALLUS,[FRACTURE],()=>boxNear(c,engine.focusBox(CALLUS,d),engine.focusBox(FRACTURE,d),1e-9,'callus with focusAlso = fracture parts + layer'));
+		c.assert(engine.focusBox('no-such-issue',d)===null,'unknown id: null');
+	}},
+	{name:'focusBox at another day uses that day\'s body (birth box height < today\'s × 0.4)',async run(c){
+		const g=await c.geometry(),{engine}=nodeEngine(g);engine.update(frame('2012-01-01'));
+		const h=(day:number)=>{const b=engine.focusBox(SCOLIOSIS,day)!;return b.max.y-b.min.y;},birth=h(0),today=h(toDays(TODAY)-BIRTH);
+		c.assert(birth<today*.4,`spine box height at birth ${birth.toFixed(3)} m, today ${today.toFixed(3)} m`);
+		const b=engine.focusBox(SCOLIOSIS,0)!;c.assert(b.max.y<.6,`birth box top ${b.max.y.toFixed(3)} m is within a newborn's height`);
+	}},
+	{name:'focusBox prefetch: ready() queues every script\'s climax box (clamped to today) in stop order, settleSlice finishes it in budgeted slices, and every real stop (scene.tsx stopBoxDay: fractional climaxes included) then hits the cache',async run(c){
+		const g=await c.geometry(),{engine}=nodeEngine(g),fresh=nodeEngine(g).engine,end=dayOfDate(todayISO());engine.update(frame('2012-01-01'));
+		let slices=0,worst=0;for(;;){const t=performance.now(),done=engine.settleSlice(4);worst=Math.max(worst,performance.now()-t);slices++;if(done)break;c.assert(slices<5000,'prefetch never finished');}
+		const st=engine.stats().boxes,stops=SCRIPTS.map(s=>({id:s.id,day:stopBoxDay(s.id,0,scriptFor,end)})),keys=new Set(stops.map(s=>`${s.id}|${Math.floor(s.day)}`));
+		c.assert(st.pending===0&&st.cached>=keys.size&&st.misses===0,`after ${slices} slices: ${JSON.stringify(st)}, ${keys.size} stops`);c.assert(worst<15,`slowest slice ${worst.toFixed(1)} ms for a 4 ms budget`);
+		c.assert(stops.every(s=>s.day===climaxDay(scriptFor(s.id)!,end)),'stop box days are the clamped climax days');
+		for(const s of stops)engine.focusBox(s.id,s.day);const after=engine.stats().boxes;
+		c.assert(after.misses===0&&after.hits===stops.length,`stop lookups: ${JSON.stringify(after)}`);
+		for(const s of stops.filter(x=>[FRACTURE,SCOLIOSIS,ACNE].includes(x.id)))boxNear(c,engine.focusBox(s.id,s.day),fresh.focusBox(s.id,s.day),1e-9,`${s.id}: prefetched = computed`);
+	}},
+	{name:'prefetch order = the director\'s stop order (ids and days, today and a clamping today), so the first approaches are cached first',run(c){
+		for(const today of [todayISO(),'2020-01-01']){const plan=prefetchPlan(SCRIPTS,dayOfDate(today)),stops=stopsFor(SCRIPTS,today);
+			c.assert(plan.length===stops.length&&plan.every((p,i)=>p.id===stops[i].id&&p.day===stops[i].day),`${today}: plan ${plan.slice(0,4).map(p=>p.id)} vs stops ${stops.slice(0,4).map(s=>s.id)}`);}
+	}},
+	{name:'prefetchSlice: prefetch only (no settle), respects its 1.5 ms budget (one vertex chunk at least), completes in stop order, then every stop hits',async run(c){
+		const g=await c.geometry(),{engine}=nodeEngine(g),end=dayOfDate(todayISO()),plan=prefetchPlan(SCRIPTS,end);engine.update(frame('2012-01-01'));
+		const first=plan[0];let slices=0,worst=0,firstAt=-1;
+		for(;;){const t=performance.now(),done=engine.prefetchSlice(1.5);worst=Math.max(worst,performance.now()-t);slices++;
+			if(firstAt<0&&engine.stats().boxes.cached>0)firstAt=slices;if(done)break;c.assert(slices<20000,'prefetch never finished');}
+		const st=engine.stats().boxes;c.assert(st.pending===0&&st.misses===0&&st.cached>=new Set(plan.map(p=>`${p.id}|${Math.floor(p.day)}`)).size,`after ${slices} slices: ${JSON.stringify(st)}`);
+		c.assert(worst<12,`slowest slice ${worst.toFixed(1)} ms for a 1.5 ms budget`);c.assert(slices>5,`${slices} slices: the budget sliced the work`);
+		const h0=engine.stats().boxes.hits;engine.focusBox(first.id,first.day);c.assert(engine.stats().boxes.hits===h0+1,'the first stop hits');
+		c.assert(engine.settle()>0,'prefetchSlice left the settle to settleSlice / settle (parts still to re-warp)');
+		for(const p of plan)engine.focusBox(p.id,p.day);c.assert(engine.stats().boxes.misses===0,'every stop hits');
+	}},
+	{name:'a sub-day step recomputes the issue fx alone: body / warp are cached by date (bodyAt not called), a new whole date recomputes them, and the settle stays exact',async run(c){
+		const g=await c.geometry(),A=nodeEngine(g),B=nodeEngine(g),date='2009-09-02',d=toDays(date)-BIRTH;
+		A.engine.update(frame(date,{day:d}));const b0=A.engine.stats().bodies,a0=A.engine.stats().applies;
+		for(let k=1;k<=10;k++)A.engine.update(frame(date,{day:d+k/12,now:k}));const s1=A.engine.stats();
+		c.assert(s1.applies===a0+10&&s1.bodies===b0,`10 sub-day steps: ${s1.applies-a0} applies, ${s1.bodies-b0} body recomputes`);
+		A.engine.update(frame('2009-09-03',{day:d+1,now:20}));c.assert(A.engine.stats().bodies===b0+1,'a new whole date recomputes the body');
+		// Settle after sub-day steps (a pass interrupted by fx-only changes) equals a fresh settle at the final day.
+		A.engine.update(frame(date,{day:d+.2,now:30}));A.engine.settleSlice(0);A.engine.update(frame(date,{day:d+.9,now:31}));A.engine.settleSlice(0);A.engine.update(frame(date,{day:d+.95,now:32}));A.engine.settle();
+		B.engine.update(frame(date,{day:d+.95}));B.engine.settle();let worst=0;A.bounds.forEach((b,i)=>{for(const k of ['min','max'] as const)for(const ax of ['x','y','z'] as const)worst=Math.max(worst,Math.abs(b[k][ax]-B.bounds[i][k][ax]));});
+		c.assert(worst<=1e-9,`settled bounds after fx-only steps differ from a fresh settle by ${worst}`);
+	}},
+];

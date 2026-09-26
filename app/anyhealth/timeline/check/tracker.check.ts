@@ -1,0 +1,102 @@
+import type {Check} from './harness';
+import type {IssueScript} from '../types';
+import {trackerEntries,entriesFrom} from '../tracker/tracker-model';
+import {pacing,pacingFrom} from '../issues/pacing';
+import {scriptFor} from '../issues';
+import {makeWarp,type Density} from '../../health/warp';
+import {toDays,fromDays} from '../../health/dates';
+import {BIRTH_DATE} from '../../health/types';
+import type {Phase,Sample,Schedule} from '../director/types';
+import {YEAR_GAP,msAtFraction,stopTicks,yearMarks} from '../bar-model';
+import {buildSchedule} from '../director/schedule';
+import {createClock} from '../director/clock';
+import {SCRIPTS} from '../issues';
+const T0='2026-09-25';
+// Quiet share of the birth..today track under a density list (days outside every range, weighted by the warp).
+const quietShare=(dens:Density[],today:string)=>{const min=toDays(BIRTH_DATE),max=toDays(today),w=makeWarp(min,max,dens);let quiet=0;for(let d=min;d<max;d++){const inDense=dens.some(r=>d>=toDays(r.from)&&d<toDays(r.to));if(!inDense)quiet+=w.toT(d+1)-w.toT(d);}return quiet;};
+// Synthetic scripts, so the model's rules are checked independently of what the area catalogs hold.
+const fake=(id:string,onset:string,o:Partial<IssueScript>={}):IssueScript=>({id,parts:['Left humerus'],onset,fxAt:()=>[],climax:0,...o});
+// A linear stand-in schedule (story time ∝ day, 1 ms per day) with two stops, so the bar marks are checked without the real director.
+const linear=(today:string):Schedule=>{const max=toDays(today)-toDays(BIRTH_DATE),S=[{id:'a',day:max*.25,approachDays:1,view:null,title:'A'},{id:'b',day:max*.5,approachDays:1,view:null,title:'B'}];
+	return {stops:S,holdMs:S.map(s=>s.day),totalMs:max,storyMsForDay:d=>Math.max(0,Math.min(max,d)),sample:(ms)=>({storyMs:ms,day:ms,date:fromDays(toDays(BIRTH_DATE)+Math.floor(ms)),phase:'cruise',stop:null,focusId:null,ghost:0,zoom:0}) as Sample};};
+export const checks:Check[]=[
+	{name:'fracture is active on 2009-09-10 and gone by 2011',run(c){c.assert(trackerEntries('2009-09-10',T0,null).some(e=>e.issue.id==='left-humerus-fracture-2009'&&e.state==='active'),'active');c.assert(!trackerEntries('2011-01-01',T0,null).some(e=>e.issue.id==='left-humerus-fracture-2009'),'gone');}},
+	{name:'resolved issues linger 7 days with state resolved',run(c){const s=scriptFor('chco-picu-subglottitis-2016')!;const d=fromDays(toDays(s.resolve!)+3);c.assert(trackerEntries(d,T0,null).find(e=>e.issue.id===s.id)?.state==='resolved','resolved chip');c.assert(!trackerEntries(fromDays(toDays(s.resolve!)+8),T0,null).some(e=>e.issue.id===s.id),'faded');}},
+	{name:'chronic issues stay through today',run(c){c.assert(trackerEntries(T0,T0,null).some(e=>e.issue.id==='asthma-diagnosis-chronic'),'asthma');}},
+	{name:'isolated issue stays pinned first when inactive',run(c){const e=trackerEntries('2020-01-01',T0,'left-humerus-fracture-2009');c.assert(e[0]?.issue.id==='left-humerus-fracture-2009'&&e[0].state==='isolated-inactive','pinned');}},
+	{name:'entries are newest onset first',run(c){const e=trackerEntries('2016-12-23',T0,null).filter(x=>x.state!=='isolated-inactive');for(let i=1;i<e.length;i++)c.assert(e[i-1].script.onset>=e[i].script.onset,'order');}},
+	{name:'pacing keeps quiet time >= 40% of the track',run(c){const min=toDays('2003-06-22'),max=toDays(T0),w=makeWarp(min,max,pacing(T0));const dens=pacing(T0);let quiet=0;for(let d=min;d<max;d++){const inDense=dens.some(r=>d>=toDays(r.from)&&d<toDays(r.to));if(!inDense)quiet+=w.toT(d+1)-w.toT(d);}c.assert(quiet>=0.4,`quiet ${quiet}`);}},
+	{name:'pacing ranges are sorted and non-overlapping',run(c){const d=pacing(T0);for(let i=1;i<d.length;i++)c.assert(d[i-1].to<=d[i].from,'overlap');}},
+	// Model rules on synthetic scripts (these hold whatever the catalogs say).
+	{name:'model: window is onset..resolve+7 inclusive, chronic runs to today, day counts from onset',run(c){
+		const S=[fake('a','2010-01-01',{resolve:'2010-01-10'}),fake('b','2010-01-05',{chronic:true})];
+		const at=(d:string)=>entriesFrom(S,d,T0,null);
+		c.assert(!at('2009-12-31').length,'before onset');
+		c.assert(at('2010-01-01')[0]?.state==='active'&&at('2010-01-01')[0].day===0,'onset day 0');
+		c.assert(at('2010-01-10').find(e=>e.script.id==='a')?.state==='active','active on resolve day');
+		c.assert(at('2010-01-17').find(e=>e.script.id==='a')?.state==='resolved','resolved on resolve+7');
+		c.assert(!at('2010-01-18').some(e=>e.script.id==='a'),'gone on resolve+8');
+		c.assert(at(T0).find(e=>e.script.id==='b')?.state==='active','chronic active today');
+		c.assert(at('2010-01-07')[0].script.id==='b','newest onset first');
+		c.assert(at('2010-01-07').find(e=>e.script.id==='b')?.day===2,'day');
+	}},
+	{name:'model: an active isolated issue is first and keeps its state',run(c){
+		const S=[fake('a','2010-01-01',{resolve:'2010-02-01'}),fake('b','2010-01-05',{resolve:'2010-02-01'})];
+		const e=entriesFrom(S,'2010-01-07',T0,'a');c.assert(e[0].script.id==='a'&&e[0].state==='active'&&e.length===2,'isolated active first');
+		const f=entriesFrom(S,'2011-01-01',T0,'a');c.assert(f.length===1&&f[0].state==='isolated-inactive','inactive pinned alone');
+		c.assert(entriesFrom(S,'2011-01-01',T0,'nope').length===0,'unknown isolate id ignored');
+	}},
+	{name:'pacing: overlapping acute ranges merge with the max k',run(c){
+		const S=[fake('a','2010-01-01',{resolve:'2010-02-01',acute:[{from:0,to:10,k:4}]}),fake('b','2010-01-05',{resolve:'2010-02-01',acute:[{from:0,to:20,k:6}]}),fake('c','2012-01-01',{resolve:'2012-02-01',acute:[{from:-2,to:3,k:3}]})];
+		const d=pacingFrom(S,T0);c.assert(d.length===2,`ranges ${JSON.stringify(d)}`);
+		c.assert(d[0].from==='2010-01-01'&&d[0].to==='2010-01-25'&&d[0].k===6,`merged ${JSON.stringify(d[0])}`);
+		c.assert(d[1].from==='2011-12-30'&&d[1].to==='2012-01-04'&&d[1].k===3,`second ${JSON.stringify(d[1])}`);
+	}},
+	{name:'pacing: heavy stretch is scaled down to exactly the 40% quiet floor',run(c){
+		// 20 one-year-apart acute weeks at k=400 would leave almost no quiet time.
+		const S=Array.from({length:20},(_,i)=>fake(`x${i}`,`${2004+i}-03-01`,{resolve:`${2004+i}-04-01`,acute:[{from:0,to:7,k:400}]}));
+		const d=pacingFrom(S,T0),q=quietShare(d,T0);
+		c.assert(d.every(r=>r.k>1&&r.k<400),`scaled k ${d[0]?.k}`);c.assert(q>=0.4&&q<0.41,`quiet ${q}`);
+		const light=pacingFrom(S.slice(0,1).map(s=>({...s,acute:[{from:0,to:7,k:3}]})),T0);c.assert(light[0].k===3,'light stretch untouched');
+	}},
+	{name:'pacing: ranges are clipped to birth..today and memoised per today',run(c){
+		const S=[fake('a','2026-09-20',{chronic:true,acute:[{from:0,to:30,k:5}]}),fake('b','2003-06-22',{resolve:'2003-07-01',acute:[{from:-10,to:5,k:2}]})];
+		const d=pacingFrom(S,T0);c.assert(d[0].from===BIRTH_DATE&&d[d.length-1].to===T0,`clipped ${JSON.stringify(d)}`);
+		c.assert(pacing(T0)===pacing(T0),'same array for the same today');
+	}},
+	// v2 director: the focused (guided) issue is pinned first while approached, held or released.
+	{name:'focused entry pinned first during approach/hold/release',run(c){
+		const S=[fake('a','2010-01-01',{resolve:'2010-02-01'}),fake('b','2010-01-05',{resolve:'2010-02-01'}),fake('c','2010-01-03',{resolve:'2010-02-01'})];
+		for(const phase of ['approach','hold','release'] as Phase[]){const e=entriesFrom(S,'2010-01-07',T0,null,{id:'a',phase});c.assert(e[0].script.id==='a'&&e[0].state==='active'&&e.length===3,`${phase}: pinned`);c.assert(e[1].script.id==='b'&&e[2].script.id==='c','rest newest first');}
+		const i=entriesFrom(S,'2010-01-07',T0,'c',{id:'a',phase:'hold'});c.assert(i[0].script.id==='a'&&i[1].script.id==='c'&&i.length===3,'focus first, then the manual isolate');
+	}},
+	{name:'focus outside its active window lists as isolated-inactive',run(c){
+		const S=[fake('a','2010-01-01',{resolve:'2010-01-10'}),fake('b','2010-06-01',{resolve:'2010-07-01'})];
+		const e=entriesFrom(S,'2010-06-05',T0,null,{id:'a',phase:'approach'});c.assert(e[0].script.id==='a'&&e[0].state==='isolated-inactive'&&e.length===2,'inactive focus pinned');
+		c.assert(entriesFrom(S,'2010-06-05',T0,null,{id:'nope',phase:'hold'}).length===1,'unknown focus id ignored');
+	}},
+	{name:'a guided focus inside its lead lists as active (wisdom teeth the eve of extraction); outside it, isolated-inactive',run(c){
+		const w=scriptFor('wisdom-teeth-extraction')!,day=(n:number)=>fromDays(toDays(w.onset)+n);
+		c.assert(trackerEntries(day(-1),T0,null,{id:w.id,phase:'hold'})[0].state==='active','eve of onset: active');
+		c.assert(trackerEntries(day(-1),T0,w.id,null)[0].state==='isolated-inactive','manual isolate before onset: unchanged');
+		c.assert(trackerEntries('2010-01-01',T0,null,{id:w.id,phase:'hold'})[0].state==='isolated-inactive','years before its lead: isolated-inactive');
+	}},
+	{name:'no focus: order unchanged from v1',run(c){
+		for(const d of ['2009-09-10','2016-12-23','2020-01-01',T0]){const v1=trackerEntries(d,T0,null).map(e=>e.issue.id).join();
+			const es=trackerEntries(d,T0,null,null);c.assert(es.every((e,i)=>!i||es[i-1].script.onset>e.script.onset||es[i-1].script.onset===e.script.onset&&es[i-1].issue.title.localeCompare(e.issue.title)<=0),`${d}: newest onset first, then title`);
+			// Outside approach/hold/release a focus does not pin (cruise/idle/end carry no focus).
+			for(const phase of ['idle','cruise','end'] as Phase[])c.assert(trackerEntries(d,T0,null,{id:'left-humerus-fracture-2009',phase}).map(e=>e.issue.id).join()===v1,`${d}: ${phase}`);}
+	}},
+	{name:'bar: ticks at hold fractions, year labels sparse and ascending, drag fraction maps through the schedule',run(c){
+		const s=linear(T0),t=stopTicks(s);c.assert(t.length===2&&t[0].title==='A',`ticks ${JSON.stringify(t)}`);c.near(t[0].t,.25,1e-9,'tick a');c.near(t[1].t,.5,1e-9,'tick b');
+		const y=yearMarks(s,T0);c.assert(y.length>=3,`years ${y.length}`);
+		for(let i=0;i<y.length;i++){c.assert(y[i].t>=0&&y[i].t<=1,'in track');if(i)c.assert(y[i].year>y[i-1].year&&y[i].t-y[i-1].t>=YEAR_GAP,`gap ${y[i-1].year}→${y[i].year}`);}
+		c.assert(msAtFraction(s,.5)===s.totalMs*.5&&msAtFraction(s,2)===s.totalMs&&msAtFraction(s,-1)===0,'fraction → story ms, clamped');
+	}},
+	{name:'bar: a drag fraction → seekMs → the handle (storyMs / totalMs) round-trips exactly, over same-day flats too, and seeks free (paused, not holding)',run(c){
+		const s=buildSchedule(SCRIPTS,T0),k=createClock(s);let worst=0;
+		const fr=[...Array.from({length:401},(_,i)=>i/400),...s.holdMs.flatMap(h=>[h,h+1,h+900].map(ms=>ms/s.totalMs))];
+		for(const t of fr){const ms=msAtFraction(s,t);k.seekMs(ms);c.assert(k.storyMs===ms&&!k.playing&&k.holding===null,`seekMs(${ms}) → ${k.storyMs}`);worst=Math.max(worst,Math.abs(k.storyMs/s.totalMs-Math.min(1,t)));}
+		c.assert(worst<=1e-15,`handle drift ${worst}`);
+	}},
+];

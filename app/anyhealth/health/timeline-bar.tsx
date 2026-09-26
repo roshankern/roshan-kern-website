@@ -1,34 +1,47 @@
 'use client';
-import {useEffect,useRef,useState,type CSSProperties,type KeyboardEvent,type PointerEvent} from 'react';
-import {Pause,Play,RotateCcw} from 'lucide-react';
+import {useEffect,useMemo,useRef,useState,type CSSProperties,type KeyboardEvent,type PointerEvent} from 'react';
+import {ArrowRight,Pause,Play,RotateCcw} from 'lucide-react';
 import {BIRTH_DATE,type Issue} from './types';
 import {issueColor} from './anchors';
 import {formatDate,fromDays,todayISO,toDays} from './dates';
+import {makeWarp,type Density} from './warp';
 
 /** Wall-clock time to play birth → today. */
 const PLAY_MS=26000;
 const YEARS=[2005,2010,2015,2020,2025];
 
-interface Props {issues:Issue[];date:string;onDate:(iso:string)=>void;selected:string|null;onSelect:(id:string|null)=>void}
+/** Timeline mode (v2 director): the director owns playback, so the bar has no clock of its own. The track is story time (`fraction` = storyMs/totalMs); `ticks`/`years` are placed on it by the caller; `holding` turns Play into Continue. */
+export interface BarDirector {fraction:number;ticks:{t:number;title:string}[];playing:boolean;holding:boolean;onPlay():void;onPause():void;onContinue():void;onSeekFraction(t:number):void;onSeekStop(i:number):void;onReset():void;years:{year:number;t:number}[]}
+/** `warp` gives date ranges k× their natural width on the track (off by default: linear). With `director`, `issues`/`warp`/`onDate` are unused and `date` is only the label. */
+interface Props {issues:Issue[];date:string;onDate:(iso:string)=>void;selected:string|null;onSelect:(id:string|null)=>void;warp?:Density[];director?:BarDirector}
 
-export default function TimelineBar({issues,date,onDate,selected,onSelect}:Props){
+export default function TimelineBar(props:Props){return props.director?<DirectorBar date={props.date} d={props.director}/>:<CalendarBar {...props}/>;}
+
+/** The v1 bar (/anyhealth, /anyhealth/test): its own rAF playback over a (warped) calendar track. */
+function CalendarBar({issues,date,onDate,selected,onSelect,warp}:Props){
 	const track=useRef<HTMLDivElement>(null),[playing,setPlaying]=useState(false);
 	const min=toDays(BIRTH_DATE),[max]=useState(()=>toDays(todayISO())),span=max-min;
-	const pct=(iso:string)=>Math.max(0,Math.min(100,(toDays(iso)-min)/span*100));
+	const map=useMemo(()=>makeWarp(min,max,warp),[min,max,warp]),warped=!!warp?.length;
+	const pct=(iso:string)=>Math.max(0,Math.min(100,map.toT(toDays(iso))*100));
+	// Warped: an extra year label before the stretched range so it reads as 2009 → 2010.
+	const years=warped?[...new Set([...YEARS,...warp!.map(r=>+r.from.slice(0,4))])].sort((a,b)=>a-b):YEARS;
 	const latest=useRef({date,onDate});latest.current={date,onDate};
 
 	useEffect(()=>{
 		if(!playing)return;
 		let start=toDays(latest.current.date);if(start>=max)start=min;
 		const t0=performance.now();let raf=0;
-		const step=(now:number)=>{const day=start+(now-t0)*span/PLAY_MS;if(day>=max){latest.current.onDate(fromDays(max));setPlaying(false);return;}latest.current.onDate(fromDays(day));raf=requestAnimationFrame(step);};
+		// Warped: advance in track space, so playback slows through the dense ranges (same total PLAY_MS).
+		const t1=map.toT(start),step=(now:number)=>{const t=t1+(now-t0)/PLAY_MS,day=warped?(t>=1?max:map.fromT(t)):start+(now-t0)*span/PLAY_MS;if(day>=max){latest.current.onDate(fromDays(max));setPlaying(false);return;}latest.current.onDate(fromDays(day));raf=requestAnimationFrame(step);};
 		raf=requestAnimationFrame(step);return()=>cancelAnimationFrame(raf);
-	},[playing,max,min,span]);
+	},[playing,max,min,span,map,warped]);
 
-	const fromX=(x:number)=>{const r=track.current?.getBoundingClientRect();if(!r)return;const t=Math.max(0,Math.min(1,(x-r.left)/r.width));onDate(fromDays(min+t*span));};
+	const fromX=(x:number)=>{const r=track.current?.getBoundingClientRect();if(!r)return;const t=Math.max(0,Math.min(1,(x-r.left)/r.width));onDate(fromDays(map.fromT(t)));};
 	const down=(e:PointerEvent<HTMLDivElement>)=>{if(e.button!==0)return;setPlaying(false);e.currentTarget.setPointerCapture(e.pointerId);fromX(e.clientX);};
 	const move=(e:PointerEvent<HTMLDivElement>)=>{if(e.currentTarget.hasPointerCapture(e.pointerId))fromX(e.clientX);};
-	const key=(e:KeyboardEvent)=>{const step=e.shiftKey?365:30,d=toDays(date);const next=e.key==='ArrowRight'||e.key==='ArrowUp'?d+step:e.key==='ArrowLeft'||e.key==='ArrowDown'?d-step:e.key==='Home'?min:e.key==='End'?max:null;if(next==null)return;e.preventDefault();setPlaying(false);onDate(fromDays(Math.max(min,Math.min(max,next))));};
+	// Arrows: 30 days (shift: a year); warped, 0.5% of the track (shift: 5%), at least a day.
+	const shift=(d:number,dir:number,big:boolean)=>{if(!warped)return d+dir*(big?365:30);const n=Math.round(map.fromT(map.toT(d)+dir*(big?.05:.005)));return n===d?d+dir:n;};
+	const key=(e:KeyboardEvent)=>{const d=toDays(date);const next=e.key==='ArrowRight'||e.key==='ArrowUp'?shift(d,1,e.shiftKey):e.key==='ArrowLeft'||e.key==='ArrowDown'?shift(d,-1,e.shiftKey):e.key==='Home'?min:e.key==='End'?max:null;if(next==null)return;e.preventDefault();setPlaying(false);onDate(fromDays(Math.max(min,Math.min(max,next))));};
 	const at=pct(date);
 
 	return <section className="timeline-panel glass" aria-label="Timeline">
@@ -40,8 +53,32 @@ export default function TimelineBar({issues,date,onDate,selected,onSelect}:Props
 				<div className="timeline-handle" style={{left:`${at}%`}}/>
 				<div className="timeline-date" style={{left:`clamp(34px,${at}%,calc(100% - 34px))`}}>{formatDate(date)}</div>
 			</div>
-			<div className="timeline-years" aria-hidden="true">{YEARS.map(y=><span key={y} style={{left:`${pct(`${y}-01-01`)}%`}}>{y}</span>)}</div>
+			<div className="timeline-years" aria-hidden="true">{years.map(y=><span key={y} style={{left:`${pct(`${y}-01-01`)}%`}}>{y}</span>)}</div>
 		</div>
 		<button type="button" className="timeline-play timeline-reset" onClick={()=>{setPlaying(false);onSelect(null);onDate(fromDays(min));}} aria-label="Reset timeline to birth" title="Back to start"><RotateCcw size={15} strokeWidth={2.2}/></button>
+	</section>;
+}
+
+/** Director mode: fill/handle at the story fraction, one tick per stop (click flies there), drag scrubs freely. */
+function DirectorBar({date,d}:{date:string;d:BarDirector}){
+	const track=useRef<HTMLDivElement>(null),at=Math.max(0,Math.min(100,d.fraction*100));
+	const fromX=(x:number)=>{const r=track.current?.getBoundingClientRect();if(r)d.onSeekFraction(Math.max(0,Math.min(1,(x-r.left)/r.width)));};
+	const down=(e:PointerEvent<HTMLDivElement>)=>{if(e.button!==0)return;e.currentTarget.setPointerCapture(e.pointerId);fromX(e.clientX);};
+	const move=(e:PointerEvent<HTMLDivElement>)=>{if(e.currentTarget.hasPointerCapture(e.pointerId))fromX(e.clientX);};
+	// Arrows: 0.5% of the track (shift: 5%).
+	const key=(e:KeyboardEvent)=>{const f=d.fraction,s=e.shiftKey?.05:.005;const next=e.key==='ArrowRight'||e.key==='ArrowUp'?f+s:e.key==='ArrowLeft'||e.key==='ArrowDown'?f-s:e.key==='Home'?0:e.key==='End'?1:null;if(next==null)return;e.preventDefault();d.onSeekFraction(Math.max(0,Math.min(1,next)));};
+	const play=d.holding?{label:'Continue',on:d.onContinue}:d.playing?{label:'Pause timeline',on:d.onPause}:{label:'Play timeline',on:d.onPlay};
+	return <section className="timeline-panel glass director" aria-label="Timeline">
+		<button type="button" className={`timeline-play${d.holding?' timeline-continue':''}`} onClick={play.on} aria-label={play.label}>{d.holding?<><span>Continue</span><ArrowRight size={15} strokeWidth={2.4}/></>:d.playing?<Pause size={15} fill="currentColor" strokeWidth={0}/>:<Play size={15} fill="currentColor" strokeWidth={0}/>}</button>
+		<div className="timeline-body">
+			<div className="timeline-track" ref={track} onPointerDown={down} onPointerMove={move} role="slider" tabIndex={0} aria-label="Story position" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(at)} aria-valuetext={formatDate(date)} onKeyDown={key}>
+				<div className="timeline-line"/><div className="timeline-fill" style={{width:`${at}%`}}/>
+				{d.ticks.map((k,i)=><button type="button" key={i} className={`timeline-tick stop${k.t*100>at+1e-6?' future':''}`} style={{left:`${k.t*100}%`}} title={k.title} aria-label={`Go to ${k.title}`} onPointerDown={e=>e.stopPropagation()} onClick={()=>d.onSeekStop(i)}/>)}
+				<div className="timeline-handle" style={{left:`${at}%`}}/>
+				<div className="timeline-date" style={{left:`clamp(34px,${at}%,calc(100% - 34px))`}}>{formatDate(date)}</div>
+			</div>
+			<div className="timeline-years" aria-hidden="true">{d.years.map(y=><span key={y.year} style={{left:`${y.t*100}%`}}>{y.year}</span>)}</div>
+		</div>
+		<button type="button" className="timeline-play timeline-reset" onClick={d.onReset} aria-label="Reset timeline to birth" title="Back to start"><RotateCcw size={15} strokeWidth={2.2}/></button>
 	</section>;
 }
