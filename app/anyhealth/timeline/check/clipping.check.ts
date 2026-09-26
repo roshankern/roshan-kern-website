@@ -87,7 +87,7 @@ const SKIN_CELL=0.005;
 const SAMPLE=3;
 
 // ── Shared state ──
-interface Setup {g:NodeAtlas;seg:Uint8Array;segOff:Int32Array;soft:boolean[];restCenter:Vec3[];byName:(names:string[])=>number[];names:(test:(n:string,i:number)=>boolean)=>string[]}
+interface Setup {g:NodeAtlas;seg:Uint8Array;segOff:Int32Array;soft:boolean[];restCenter:Vec3[];/** per part, 1 for the first vertex at each rest position (the atlas duplicates vertices along normal / UV seams) */first:Uint8Array[];byName:(names:string[])=>number[];names:(test:(n:string,i:number)=>boolean)=>string[]}
 let setupP:Promise<Setup>|null=null;
 const setup=(c:CheckContext)=>setupP??=(async()=>{
 	const g=await c.geometry(),b=fs.readFileSync('public/anyhealth/models/segments.bin'),seg=new Uint8Array(b.buffer,b.byteOffset,b.byteLength),n=g.parts.length,segOff=new Int32Array(n+1);
@@ -97,7 +97,8 @@ const setup=(c:CheckContext)=>setupP??=(async()=>{
 	const restCenter=g.parts.map(d=>{const lo=[Infinity,Infinity,Infinity],hi=[-Infinity,-Infinity,-Infinity];for(let k=0;k<d.position.length;k+=3)for(let j=0;j<3;j++){const v=d.position[k+j];if(v<lo[j])lo[j]=v;if(v>hi[j])hi[j]=v;}return [0,1,2].map(j=>(lo[j]+hi[j])/2) as Vec3;});
 	const byName=(names:string[])=>names.flatMap(nm=>{const l=g.indicesOf(nm);if(!l.length)throw new Error(`clipping: no atlas part named ${nm}`);return l;});
 	const names=(test:(nm:string,i:number)=>boolean)=>[...new Set(g.atlas.parts.flatMap((p,i)=>test(p.name,i)?[p.name]:[]))];
-	return {g,seg,segOff,soft,restCenter,byName,names};
+	const first=g.parts.map(d=>{const seen=new Set<string>(),f=new Uint8Array(d.position.length/3),P=d.position;for(let v=0;v<f.length;v++){const k=`${P[v*3]},${P[v*3+1]},${P[v*3+2]}`;if(!seen.has(k)){seen.add(k);f[v]=1;}}return f;});
+	return {g,seg,segOff,soft,restCenter,byName,names,first};
 })();
 
 /** Merged fx for a date, as engine.applyDate builds them. */
@@ -140,7 +141,8 @@ function testDates():{date:string;label:string}[]{
 }
 
 // ── The per-date measurements (one pass per date, cached) ──
-/** Hull containment: vertices out, the farthest out, and the exit side of each out vertex (dominant axis of the exit face normal). */
+/** Hull containment: vertices out, the farthest out, and the exit side of each out vertex (dominant axis of the exit face normal). Each rest position counts once: the atlas repeats a vertex along normal / UV seams (the left apical
+ * segmental bronchial tree has 722 vertices at 507 positions, and its seam runs through its apex), which would weight the fractions by where the seams happen to run. */
 interface HullStat {out:number;maxOut:number;n:number;/** per exit side: vertices out through it and the farthest (metres) */exits:Record<string,{n:number;max:number}>}
 /** Skin containment of a vertex set: n tested, outside now, `inRest` = inside at rest, newly outside (inside at rest, now more than OUT_MM outside) and the farthest of those (mm, over all of them). */
 interface SkinStat {n:number;outside:number;inRest:number;newOut:number;worstMM:number}
@@ -195,7 +197,7 @@ function measureNow(s:Setup,date:string|null,rest:Measure|null):Measure{
 	const hullFrom=(names:string[],extraZ=0):Hull=>{const pts=concat(s.byName(names).map(W));if(!extraZ)return hullOf(pts);const sh=pts.slice();for(let k=2;k<sh.length;k+=3)sh[k]+=extraZ;return hullOf(concat([pts,sh]));};
 	const inHull=(h:Hull,names:string[],inflate=0,sel?:(i:number)=>ArrayLike<number>):Map<string,HullStat>=>{
 		const out=new Map<string,HullStat>();
-		for(const nm of names){let o=0,n=0,mx=0,any=false;const exits:HullStat['exits']={};for(const i of g.indicesOf(nm)){if(!visibleOn(pose,i))continue;any=true;const P=sel?sel(i):W(i),st=sel||P.length/3<SMALL?1:SAMPLE;for(let k=0;k<P.length;k+=3*st){const d=h.dist(P[k],P[k+1],P[k+2])-inflate;n++;if(d>0){o++;if(d>mx)mx=d;const e=exitSide(h.exitNormal(P[k],P[k+1],P[k+2])),x=exits[e]??={n:0,max:0};x.n++;x.max=Math.max(x.max,d);}}}if(any)out.set(nm,{out:o,n,maxOut:mx,exits});}
+		for(const nm of names){let o=0,n=0,mx=0,any=false;const exits:HullStat['exits']={};for(const i of g.indicesOf(nm)){if(!visibleOn(pose,i))continue;any=true;const P=sel?sel(i):W(i),st=sel||P.length/3<SMALL?1:SAMPLE,F=s.first[i];for(let k=0;k<P.length;k+=3*st){if(!sel&&!F[k/3])continue;const d=h.dist(P[k],P[k+1],P[k+2])-inflate;n++;if(d>0){o++;if(d>mx)mx=d;const e=exitSide(h.exitNormal(P[k],P[k+1],P[k+2])),x=exits[e]??={n:0,max:0};x.n++;x.max=Math.max(x.max,d);}}}if(any)out.set(nm,{out:o,n,maxOut:mx,exits});}
 		return out;
 	};
 	// 1 · organs in the rib cage; 2 · abdominal organs in the pelvis / abdomen hull (+1 cm anterior).

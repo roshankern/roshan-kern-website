@@ -1,4 +1,5 @@
-/** Upper-thoracic scoliosis as part effects: T1–T6 and their disks shift sideways (to the left, the classic side of a proximal thoracic curve) along a smooth arc (apex between T3 and T4), tilt with the arc and turn axially toward the convexity; ribs 1–6 follow their vertebra's shift. It develops from 2020 to the 2025-07-08 record and then holds (chronic). The record has no imaging, so the angle, side and apex are typical values (see docs/anyhealth/timeline-medical-basis/bones.md). */
+/** Upper-thoracic scoliosis as part effects: T1–T6 and their disks shift sideways (to the left, the classic side of a proximal thoracic curve) along a smooth arc (apex between T3 and T4, end vertebrae T1 and T5), tilt with the arc and turn axially toward the convexity; ribs 1–6 follow their vertebra's shift.
+ * C5–C7 and their disks take the upper flank of the arc, the cervical compensation that keeps the head level (Task 15b: with C7 held neutral, T1's 4° tilt against it closed the left C7/T1 facet by 1.7 mm). It develops from 2020 to the 2025-07-08 record and then holds (chronic). The record has no imaging, so the angle, side and apex are typical values (see docs/anyhealth/timeline-medical-basis/bones.md). */
 import type {PartFx,Quat} from '../../types';
 import {toDays} from '../../../health/dates';
 
@@ -11,8 +12,10 @@ const REST:[number,number,number,number][]=// [vertebra x, vertebra y, vertebra 
 export const SCOLIOSIS_LEVELS:SpineLevel[]=ORD.map((o,i)=>({vertebra:`${Ord[i]} thoracic vertebra`,disk:`Intervertebral disk of ${o} thoracic vertebra`,x:REST[i][0],y:REST[i][1],z:REST[i][2],diskY:REST[i][3]}));
 /** Ribs 1–6, paired with T1–T6. */
 export const SCOLIOSIS_RIBS=ORD.map(o=>({left:`Left ${o} rib`,right:`Right ${o} rib`}));
+/** C5–C7, top to bottom: the lower cervical levels inside the arc's upper flank (bounds centres, atlas.json, checked in bones.check.ts). */
+export const SCOLIOSIS_CERVICAL:SpineLevel[]=[['Fifth',-.0007,1.484,-.0366,1.4761],['Sixth',-.0007,1.4713,-.0396,1.4601],['Seventh',-.0006,1.4564,-.0444,1.4439]].map(([o,x,y,z,d])=>({vertebra:`${o} cervical vertebra`,disk:`Intervertebral disk of ${String(o).toLowerCase()} cervical vertebra`,x:x as number,y:y as number,z:z as number,diskY:d as number}));
 /** Every part the scoliosis moves (the script's `parts`). */
-export const SCOLIOSIS_PARTS=[...SCOLIOSIS_LEVELS.flatMap(l=>[l.vertebra,l.disk]),...SCOLIOSIS_RIBS.flatMap(r=>[r.left,r.right])];
+export const SCOLIOSIS_PARTS=[...SCOLIOSIS_CERVICAL.flatMap(l=>[l.vertebra,l.disk]),...SCOLIOSIS_LEVELS.flatMap(l=>[l.vertebra,l.disk]),...SCOLIOSIS_RIBS.flatMap(r=>[r.left,r.right])];
 
 export const SCOLIOSIS_RECORD='2025-07-08';
 /** The curve starts to form here (after the 2019–2020 "mild asymmetry" note) and reaches its full size on the record date. */
@@ -26,12 +29,13 @@ export const COBB_DEG=10; // basis: bones#scoliosis-cobb
 export const CONVEX=1; // basis: bones#scoliosis-convexity
 /** Apex between T3 and T4 (rest y of their bounds centres, averaged). */
 export const APEX_Y=(REST[2][1]+REST[3][1])/2; // basis: bones#scoliosis-apex
-/** The arc runs from C7 (its rest bounds centre) down to T7: neutral vertebrae at both ends, so the curve blends into the unmoved spine. */
-const TOP_Y=1.4564,BOTTOM_Y=1.2887; // basis: bones#scoliosis-apex
+/** The arc runs from the C4/C5 disk down to T7 (rest bounds centres): neutral at both ends, so the curve blends into the unmoved spine. The top is placed so the upper inflection (the most tilted level, the upper end vertebra) is T1,
+ * as in the T1–T5 proximal thoracic curve, and the lower cervical spine (C5–C7) above it carries the compensation; the lower inflection falls at T5. */
+const TOP_Y=1.4921,BOTTOM_Y=1.2887; // basis: bones#scoliosis-apex
 /** Apical axial rotation per degree of Cobb angle. */
 export const ROTATION_PER_COBB=.286; // basis: bones#scoliosis-rotation
 const DEG=Math.PI/180,LU=TOP_Y-APEX_Y,LL=APEX_Y-BOTTOM_Y;
-/** Lateral offset at the apex, metres. The profile is sin² on each side of the apex, whose steepest slopes are A·π/(2·L); the Cobb angle is the sum of the two end tilts, so A = Cobb / (π/2 · (1/Lu + 1/Ll)) (small-angle, within 1%). About 4.5 mm. */
+/** Lateral offset at the apex, metres. The profile is sin² on each side of the apex, whose steepest slopes are A·π/(2·L); the Cobb angle is the sum of the two end tilts, so A = Cobb / (π/2 · (1/Lu + 1/Ll)) (small-angle, within 1%). About 5.6 mm (Lu 10.3 cm from the C4/C5 disk, Ll 10.0 cm to T7). */
 export const APEX_OFFSET=COBB_DEG*DEG/(Math.PI/2*(1/LU+1/LL)); // basis: bones#scoliosis-cobb
 /** Profile 0..1 at rest height y (1 at the apex) and its slope d/dy. */
 function profile(y:number):[number,number]{
@@ -54,6 +58,7 @@ function levelFx(part:string,y:number,k:number,pivot?:[number,number,number]):Pa
 export function scoliosisFx(day:number):PartFx[]{
 	const k=scoliosisProgress(day);if(k<=0)return [];
 	const out:PartFx[]=[];
+	for(const l of SCOLIOSIS_CERVICAL)out.push(levelFx(l.vertebra,l.y,k),levelFx(l.disk,l.diskY,k,[l.x,l.diskY,l.z]));
 	SCOLIOSIS_LEVELS.forEach((l,i)=>{
 		const v=levelFx(l.vertebra,l.y,k);out.push(v);
 		// The disk turns about the same vertical axis as its vertebra (the vertebra's rest bounds-centre x/z, which the vertebra pivots on by default), so the two stay together.
