@@ -2,13 +2,14 @@ import type {Check,CheckContext} from './harness';
 import rig from '../growth/rig.json';
 import {SEGMENTS,type Body,type Rig,type SegmentId,type Vec3} from '../types';
 import {bodyAt} from '../growth/proportions';
-import {warpState,warpPoint,segAt,axialRates,MENTON_Y,AXIAL_WINDOW,AXIAL_GIRTH_WINDOW,SEG_STRIDE,type WarpState} from '../growth/warp';
+import {warpState,warpPoint,warpNormal,segAt,axialRates,taperOf,MENTON_Y,AXIAL_WINDOW,AXIAL_GIRTH_WINDOW,SEG_STRIDE,AXIAL_SEGMENTS,type WarpState} from '../growth/warp';
 import {growthFx,GLOBE_FRONT} from '../growth/organs';
 import {eruptionFx,TEETH} from '../issues/teeth/eruption';
 import {mergeFx,applyFxPoint,type ResolvedFx} from '../fx/part-fx';
 import {toDays,fromDays} from '../../health/dates';
 import {SOFT_SYSTEMS} from '../engine';
-import {seamDefects} from './seam';
+import {seamDefects,LIMB_REGIONS} from './seam';
+import {trunkOnly,boneSegment} from '../growth/segment-map';
 const R=rig as Rig;
 export const checks:Check[]=[
 	{name:'rig has all 15 segments with parents first',run(c){c.assert(R.segments.length===15,'count');R.segments.forEach((s,i)=>{c.assert(s.id===SEGMENTS[i],`order ${s.id}`);if(s.parent)c.assert(SEGMENTS.indexOf(s.parent)<i,`parent before ${s.id}`);});}},
@@ -16,6 +17,9 @@ export const checks:Check[]=[
 	{name:'adult segment lengths are anatomically plausible',run(c){const L=(id:string)=>R.segments.find(s=>s.id===id)!.length;c.near(L('lUpperArm'),0.30,0.04,'humerus');c.near(L('lThigh'),0.44,0.05,'femur');c.near(L('lShank'),0.39,0.05,'tibia');c.near(R.stature,1.7297,0.003,'stature');}},
 	{name:'segments.bin covers every vertex',async run(c){const g=await c.geometry();const fs=await import('node:fs');const n=fs.statSync('public/anyhealth/models/segments.bin').size;c.assert(n===g.parts.reduce((s,p)=>s+p.position.length/3,0)*SEG_STRIDE,'size');}},
 	{name:'no active blend between non-adjacent segments',async run(c){const fs=await import('node:fs');const b=fs.readFileSync('public/anyhealth/models/segments.bin');const adj=(a:number,s:number)=>{const A=R.segments[a],S=R.segments[s];return a===s||A.parent===S.id||S.parent===A.id;};let bad=0;const pairs=new Set<string>();for(let i=0;i<b.length;i+=SEG_STRIDE){const a=b[i]&15,s=b[i]>>4;c.assert(a<15&&s<15,`segment index at vertex ${i/SEG_STRIDE}`);if(b[i+1]<0.98*255&&!adj(a,s)){bad++;pairs.add(`${SEGMENTS[a]}↔${SEGMENTS[s]}`);}}c.assert(bad===0,`${bad} vertices blend non-adjacent segments: ${[...pairs].join(', ')}`);}},
+	{name:'trunk-only soft parts (segment-map TRUNK_ONLY: rib cage wall and vessels, genitals, pelvic floor) ride wholly on the trunk',async run(c){const g=await c.geometry(),fs=await import('node:fs'),b=fs.readFileSync(SEG_BIN);let off=0,parts=0,verts=0;
+		g.parts.forEach((p,i)=>{const n=p.position.length/3,name=g.atlas.parts[i].name;if(trunkOnly(name)&&!boneSegment(name)){parts++;for(let v=0;v<n;v++){const k=off+v*SEG_STRIDE;c.assert(b[k]===0&&b[k+1]===255,`${name} vertex ${v}: segments ${b[k]&15}/${b[k]>>4} weight ${b[k+1]}`);verts++;}}off+=n*SEG_STRIDE;});
+		c.assert(parts>=60,`only ${parts} trunk-only parts matched`);console.log(`     ${parts} trunk-only parts, ${verts} vertices`);}},
 ];
 
 // ── Body warp (Task 6) ──
@@ -31,19 +35,29 @@ const perturbedBody=(x:number):Body=>{const b=unitBody();b.scale=0.75;b.statureM
 const SEAM_X=0.0006;
 /** Limb seam ratchet: [flipped, torn, out-of-ratio] of the triangles with some limb weight (seam.ts `limb`), per seam body. Task 14a set it on all triangles; Task 14c split off the axial region and re-baselined the limb
  * counts downward on the axial remap and the thigh girth taper (Task 14a limb counts before the remap: birth 8132 / 8248 / 814, 6 y 429 / 2971 / 0 … the hand-built infants 1442 / 141 / 202 and 1084 / 34 / 45; Task 14a fix-round totals, e.g. birth 10800 / 9665 / 7749).
+ * Task 14d (trunk-only weights, Jacobian-matched limb joints) lowered it again; LIMB_14C keeps the Task 14c entries that LIMB_GOAL is measured against.
  * The goal is 0; lower the entries as the warp improves, never raise them. '±2%' counts every triangle. */
 const SEAM_RATCHET:Record<string,[number,number,number]>={
-	'hand-built child (S .75, head 1.2, legs .9)':[54,73,0],
-	'bodyAt 2003-06-22':[4422,7083,434],
-	'bodyAt 2004-06-22':[3068,6715,287],
-	'bodyAt 2006-06-22':[411,1744,12],
-	'bodyAt 2009-06-22':[145,3127,0],
-	'bodyAt 2013-06-22':[57,1078,0],
-	'bodyAt 2017-06-22':[28,1201,0],
-	'infant (S .3, head 2, legs 0.7)':[731,141,191],
-	'infant (S .3, head 2, legs 0.8)':[372,34,43],
+	'hand-built child (S .75, head 1.2, legs .9)':[54,21,0],
+	'bodyAt 2003-06-22':[200,2124,434],
+	'bodyAt 2004-06-22':[200,2014,287],
+	'bodyAt 2006-06-22':[0,523,12],
+	'bodyAt 2009-06-22':[0,938,0],
+	'bodyAt 2013-06-22':[0,323,0],
+	'bodyAt 2017-06-22':[0,360,0],
+	'infant (S .3, head 2, legs 0.7)':[731,42,191],
+	'infant (S .3, head 2, legs 0.8)':[372,10,43],
 	'±2%':[8,207,0],
 };
+/** The Task 14c limb ratchet (flipped / torn / out-of-ratio), kept as the baseline of LIMB_GOAL. */
+const LIMB_14C:Record<string,[number,number,number]>={
+	'hand-built child (S .75, head 1.2, legs .9)':[54,73,0],'bodyAt 2003-06-22':[4422,7083,434],'bodyAt 2004-06-22':[3068,6715,287],'bodyAt 2006-06-22':[411,1744,12],'bodyAt 2009-06-22':[145,3127,0],
+	'bodyAt 2013-06-22':[57,1078,0],'bodyAt 2017-06-22':[28,1201,0],'infant (S .3, head 2, legs 0.7)':[731,141,191],'infant (S .3, head 2, legs 0.8)':[372,34,43],
+};
+/** Task 14d gate on the bodyAt dates: limb torn at most 30% of LIMB_14C (a ≥ 70% cut) at every date; limb flipped ≤ 200 at birth and 1 y; from 3 y on the brief's goal is 0 flipped, and what is left must be mesh slivers
+ * (rest altitude < 1.6 mm and aspect > 15, as R25 for the axial region) or Skin welds between segments the rig moves independently (region 'other': the resting hand / forearm on the thigh / flank with one vertex a hair off weight 1,
+ * which seam.ts's frozen weld rule does not exclude), held by SEAM_RATCHET. [max flipped (null = only the sliver / weld rule), max torn]. */
+const LIMB_GOAL=(label:string):[number|null,number]|null=>{const m=/^bodyAt (\d{4})/.exec(label);if(!m)return null;const age=+m[1]-2003;return [age<3?200:null,Math.floor(0.3*LIMB_14C[label][1])];};
 /** Axial residual (Task 14c): [flipped, torn, out-of-ratio] of the trunk / neck / head triangles, per seam body. The goal was 0 and the remap cannot fold (det = g²·f′ > 0), but a discrete triangle can still invert or over-stretch:
  * - flipped (R25: accepted as a mesh-sliver limit; the gate asserts each is a sliver, rest altitude < 1.6 mm and aspect > 15): at birth 39 = 17 in the C7/T1 f′ window, 15 in the menton window (the steepest f″: ℓ_neck → ℓ_face),
  *   1 in the AO window and 6 below every f′ window (g curvature in the first girth window, 1.365–1.495 m); max altitude 1.52 mm, min aspect 28 (sternocleidomastoid, splenius, trachea, esophagus, pharyngeal constrictors).
@@ -91,9 +105,12 @@ checks.push(
 		const r:Vec3=[p1[0]-(p0[0]+k[0]*dy),0,p1[2]-(p0[2]+k[1]*dy)],rho=Math.hypot(...r);
 		for(const d of [0.02,0.2]){const B=w(p1,0,false),I=warpPoint(ws,p1,0,0,1,true,[0,0,0],d),f=S*(b.softGirth.trunk-b.boneGirth.trunk)*Math.min(1,d/rho);for(let i=0;i<3;i++)c.near(I[i]-B[i],f*r[i],1e-9,`trunk soft inflation, dBone ${d} ${i}`);}
 		{const B=w(p1,0,true),I=warpPoint(ws,p1,0,0,1,false,[0,0,0],0.02);for(let i=0;i<3;i++)c.near(I[i],B[i],1e-12,'bone parts ignore dBone');}
-		// A limb segment keeps its affine map: along × S·ℓ, perpendicular × S·γ, plus the radial inflation from its axis.
-		{const u=seg('lShank'),ui=SEGMENTS.indexOf('lShank'),ua=u.axis,uq:Vec3=[1-ua[0]*ua[0],-ua[1]*ua[0],-ua[2]*ua[0]],u0:Vec3=[...u.joint],u1:Vec3=[u.joint[0]+0.1*ua[0]+0.02*uq[0],u.joint[1]+0.1*ua[1]+0.02*uq[1],u.joint[2]+0.1*ua[2]+0.02*uq[2]];
-			const A=w(u0,ui),B=w(u1,ui);for(let i=0;i<3;i++)c.near(B[i]-A[i],S*(0.1*b.length.lShank*ua[i]+0.02*b.boneGirth.lShank*uq[i]),1e-7,`shank bone ${i}`);
+		// A limb segment past its joint taper (Task 14d, LIMB_TAPER) is affine: along × one rate ℓe (solved so the segment keeps length S·ℓ·L, checked below), perpendicular × S·γ, plus the radial inflation S(γs − γb)·min(1, dBone/ρ)·r from its axis.
+		{const u=seg('lShank'),ui=SEGMENTS.indexOf('lShank'),ua=u.axis,uq:Vec3=[1-ua[0]*ua[0],-ua[1]*ua[0],-ua[2]*ua[0]],at=(t:number,q=0):Vec3=>[u.joint[0]+t*ua[0]+q*uq[0],u.joint[1]+t*ua[1]+q*uq[1],u.joint[2]+t*ua[2]+q*uq[2]];
+			const t1=taperOf('lShank')[1],u0=at(t1+0.02),u1=at(t1+0.12,0.02),A=w(u0,ui),B=w(u1,ui),E=w(at(u.length),ui),J0=w(at(0),ui),ab=(P:number[],Q:number[])=>(Q[0]-P[0])*ua[0]+(Q[1]-P[1])*ua[1]+(Q[2]-P[2])*ua[2];
+			const le=ab(A,E)/(u.length-t1-0.02);c.near(ab(A,B)/0.1,le,1e-6,'shank: one along rate past the taper');
+			for(let i=0;i<3;i++)c.near(B[i]-A[i],0.1*le*ua[i]+S*0.02*b.boneGirth.lShank*uq[i],1e-7,`shank bone ${i}`);
+			c.near(Math.hypot(E[0]-J0[0],E[1]-J0[1],E[2]-J0[2]),S*b.length.lShank*u.length,1e-6,'shank keeps its length S·ℓ·L through the taper');
 			const ur=0.02*Math.hypot(...uq),I=warpPoint(ws,u1,ui,ui,1,true,[0,0,0],0.005),f=S*(b.softGirth.lShank-b.boneGirth.lShank)*Math.min(1,0.005/ur)*0.02;for(let i=0;i<3;i++)c.near(I[i]-B[i],f*uq[i],1e-7,`shank soft inflation ${i}`);}
 		const h=seg('head'),hi=SEGMENTS.indexOf('head'),tip:Vec3=[h.joint[0]+h.axis[0]*h.length,h.joint[1]+h.axis[1]*h.length,h.joint[2]+h.axis[2]*h.length],J=w(h.joint,hi),T=w(tip,hi);
 		c.near(Math.hypot(T[0]-J[0],T[1]-J[1],T[2]-J[2]),S*2.0*h.length,1e-5,'head length = S × 2 × rest (the rig axes are rounded to 5 digits)');
@@ -101,6 +118,21 @@ checks.push(
 		c.near(Math.hypot(F1[0]-F0[0],F1[1]-F0[1],F1[2]-F0[2]),S*0.7*f.length,1e-5,'shank length = S × 0.7 × rest');
 	}},
 	{name:'children stay attached: each joint maps to the same point under parent and child',run(c){for(const [label,body] of [['bodyAt 2008-01-01',bodyAt('2008-01-01')],['hand-built',oddBody()]] as const){const ws=warpState(R,body);R.segments.forEach((s,i)=>{if(!s.parent)return;const pi=SEGMENTS.indexOf(s.parent);const a:Vec3=[0,0,0],b:Vec3=[0,0,0];warpPoint(ws,s.joint,i,i,1,false,a);warpPoint(ws,s.joint,pi,pi,1,false,b);c.near(Math.hypot(a[0]-b[0],a[1]-b[1],a[2]-b[2]),0,1e-6,`${label}: ${s.id} joint`);});}}},
+	{name:'limb joints are Jacobian-matched (Task 14d): at each joint the child map\'s along rate is |J_parent·a| and its perpendicular block the parent\'s (symmetrised, projected); det > 0 along every limb; normals are the inverse transpose',run(c){
+		const h=1e-5,jac=(ws:WarpState,i:number,p:Vec3)=>{const J:number[]=[];for(let k=0;k<3;k++){const a:Vec3=[...p],b:Vec3=[...p];a[k]+=h;b[k]-=h;const A=warpPoint(ws,a,i,i,1,false,[0,0,0]),B=warpPoint(ws,b,i,i,1,false,[0,0,0]);for(let r=0;r<3;r++)J[r*3+k]=(A[r]-B[r])/(2*h);}return J;};
+		const mv=(J:number[],v:number[])=>[0,1,2].map(r=>J[r*3]*v[0]+J[r*3+1]*v[1]+J[r*3+2]*v[2]),det=(J:number[])=>J[0]*(J[4]*J[8]-J[5]*J[7])-J[1]*(J[3]*J[8]-J[5]*J[6])+J[2]*(J[3]*J[7]-J[4]*J[6]);
+		for(const [label,body] of [['bodyAt 2003-06-22',bodyAt('2003-06-22')],['bodyAt 2009-06-22',bodyAt('2009-06-22')],['hand-built',oddBody()]] as const){const ws=warpState(R,body);
+			R.segments.forEach((s,i)=>{if(i<AXIAL_SEGMENTS)return;const pi=SEGMENTS.indexOf(s.parent!),al=Math.hypot(...s.axis),a=s.axis.map(v=>v/al),JP=jac(ws,pi,s.joint),JC=jac(ws,i,s.joint);
+				c.near(Math.hypot(...mv(JC,a)),Math.hypot(...mv(JP,a)),2e-5,`${label}: ${s.id} along rate at its joint`);
+				const m=Math.abs(a[0])<0.6?[1,0,0]:[0,0,1],d=m[0]*a[0]+m[1]*a[1]+m[2]*a[2],e1=[m[0]-d*a[0],m[1]-d*a[1],m[2]-d*a[2]].map((v,_,x)=>v/Math.hypot(...x)),e2=[a[1]*e1[2]-a[2]*e1[1],a[2]*e1[0]-a[0]*e1[2],a[0]*e1[1]-a[1]*e1[0]];
+				const blk=(J:number[],e:number[],f:number[])=>{const Je=mv(J,e),Jf=mv(J,f);return 0.5*(Je[0]*f[0]+Je[1]*f[1]+Je[2]*f[2]+Jf[0]*e[0]+Jf[1]*e[1]+Jf[2]*e[2]);};
+				for(const [e,f,n] of [[e1,e1,'11'],[e1,e2,'12'],[e2,e2,'22']] as const)c.near(blk(JC,e,f),blk(JP,e,f),2e-5,`${label}: ${s.id} perpendicular block ${n} at its joint`);
+				// det > 0 and the normal = the inverse transpose of the map, sampled from the parent side (t = −5 cm) to the child joint, off-axis by up to 6 cm.
+				for(let t=-0.05;t<=s.length;t+=0.02)for(const q of [0,0.03,0.06]){const p:Vec3=[s.joint[0]+t*a[0]+q*e1[0],s.joint[1]+t*a[1]+q*e1[1],s.joint[2]+t*a[2]+q*e1[2]],J=jac(ws,i,p);c.assert(det(J)>0,`${label}: ${s.id} det ${det(J)} at t ${t.toFixed(2)}`);
+					const n0=[0.3,0.5,0.8],Ji=[J[4]*J[8]-J[5]*J[7],J[5]*J[6]-J[3]*J[8],J[3]*J[7]-J[4]*J[6],J[2]*J[7]-J[1]*J[8],J[0]*J[8]-J[2]*J[6],J[1]*J[6]-J[0]*J[7],J[1]*J[5]-J[2]*J[4],J[2]*J[3]-J[0]*J[5],J[0]*J[4]-J[1]*J[3]],want=mv(Ji,n0),wl=Math.hypot(...want),got=warpNormal(ws,p,n0 as Vec3,i,i,1,[0,0,0]);
+					for(let k=0;k<3;k++)c.near(got[k],want[k]/wl,1e-4,`${label}: ${s.id} normal ${k} at t ${t.toFixed(2)}`);}
+			});}
+	}},
 	{name:'warped stature equals bodyAt stature and feet stay on the floor',async run(c){
 		for(const d of ['2003-06-22','2006-06-22','2012-01-01','2026-01-02']){const b=bodyAt(d),{lo,hi}=await extent(c,warpState(R,b));c.near(lo,0,0.003,`floor ${d}`);c.near(hi-lo,b.statureM,b.statureM*0.01,`stature ${d}`);}
 		const {lo}=await extent(c,warpState(R,oddBody()));c.near(lo,0,0.003,'floor, hand-built body');
@@ -132,7 +164,12 @@ checks.push(
 			for(const f of d.axialFlips){const k=ky.findIndex((y,j)=>Math.abs(f.y-y)<=AXIAL_WINDOW[j]),at=k>=0?['C7','menton','AO'][k]:f.y<ky[0]-AXIAL_WINDOW[0]?'below':'between';where.set(at,(where.get(at)??0)+1);
 				if(!(f.alt<0.0016&&f.aspect>15))bad.push(`${label}: axial flip in ${f.part} at y ${f.y.toFixed(3)} is not a sliver (altitude ${(f.alt*1000).toFixed(2)} mm, aspect ${f.aspect.toFixed(1)})`);}
 			if(d.axialFlips.length)console.log(`       axial flips by f′ window: ${[...where].map(([k,n])=>`${k} ${n}`).join(', ')}; max altitude ${(Math.max(...d.axialFlips.map(f=>f.alt))*1000).toFixed(2)} mm, min aspect ${Math.min(...d.axialFlips.map(f=>f.aspect)).toFixed(0)}`);
-			if(L.flipped>f||L.torn>t||L.ratioOut>o)bad.push(`${label}: limb ${L.flipped}/${L.torn}/${L.ratioOut} > ${f}/${t}/${o}`);}
+			console.log(`       limb by region (flipped/torn/out): ${LIMB_REGIONS.map(r=>{const x=d.limbByRegion[r];return `${r} ${x.flipped}/${x.torn}/${x.ratioOut}`;}).join(', ')}`);
+			if(L.flipped>f||L.torn>t||L.ratioOut>o)bad.push(`${label}: limb ${L.flipped}/${L.torn}/${L.ratioOut} > ${f}/${t}/${o}`);
+			const goal=LIMB_GOAL(label),sliver=(f:{alt:number;aspect:number})=>f.alt<0.0016&&f.aspect>15,real=d.limbFlips.filter(f=>!sliver(f)&&f.region!=='other');
+			console.log(`       limb flips: ${d.limbFlips.filter(sliver).length} slivers, ${d.limbFlips.filter(f=>!sliver(f)&&f.region==='other').length} Skin welds ('other'), ${real.length} other${real.length?` (${real.slice(0,6).map(f=>`${f.part} [${f.region}] altitude ${(f.alt*1000).toFixed(1)} mm`).join(', ')})`:''}`);
+			if(goal&&(goal[0]!==null&&L.flipped>goal[0]||L.torn>goal[1]))bad.push(`${label}: limb ${L.flipped} flipped / ${L.torn} torn > the Task 14d goal ${goal[0]??'slivers only'} / ${goal[1]}`);
+			if(goal&&goal[0]===null&&real.length)bad.push(`${label}: ${real.length} limb flips are neither slivers nor Skin welds, e.g. ${real.slice(0,3).map(f=>`${f.part} [${f.region}] altitude ${(f.alt*1000).toFixed(1)} mm, aspect ${f.aspect.toFixed(0)}`).join('; ')}`);}
 		c.assert(!bad.length,`seam defects (flipped/torn/out-of-ratio): ${bad.join('; ')}`);
 	}},
 	{name:'chin clearance: warped mandible bottom − max(warped clavicle tops, manubrium top) ≥ +1 cm at every seam date',async run(c){

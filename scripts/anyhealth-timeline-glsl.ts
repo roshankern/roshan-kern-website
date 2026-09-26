@@ -68,6 +68,16 @@ function testPoints(){
 	return {pos,nrm,seg,dist,part};
 }
 
+/** Deliberate breaks of the joint taper (Task 14d) in WARP_PARS: [label, text, replacement]. Each must fail the parity (main). */
+const BREAKS:[string,string,string][]=[
+	['no along taper: F = ℓe·t','r0 = vec4(T.x * t + (le - T.x) * H,','r0 = vec4(le * t,'],
+	['isotropic G: λu := λv','((r0.z - r0.w) * dot(r, u)) * u;','0.0 * u;'],
+	['taper derivative sign in the normal','- r1.x * dot(d, u) * nu','+ r1.x * dot(d, u) * nu'],
+	['no λv′ term in the normal','- r1.y * dot(d, v) * nv','- 0.0 * nv'],
+	['untapered soft coefficient κ','T.w + (k1 - T.w) * h','k1'],
+	['parent along rate not matched: F0 := ℓe','vec4 T = twT[i];','vec4 T = vec4(twS[i].x, twT[i].yzw);'],
+];
+
 // ── The shaders, wired as engine.ts patchMaterial wires them (tfxRow copied verbatim from there; twSeg from TW_SEG) ──
 type Kind='atlas'|'fixed'|'float'|'floatNoD';
 /** Atlas parts: partFx + warp with the byte seg attribute (TW_SEG_BYTES). Custom layers: warp only, either `#define TW_FIXED_SEG` with no seg attribute, or a float seg attribute. */
@@ -162,15 +172,25 @@ async function main(){
 		let failed=false;
 		// The bytes the atlas uploads (segments.bin): segA | segB<<4, round(weightA·255), dBone / D_UNIT as uint16; the test weights and distances are exact in these units.
 		const bytes=Array.from({length:N},(_,i)=>{const d=Math.round(dist[i]/D_UNIT);return [seg[i*3]|seg[i*3+1]<<4,Math.round(seg[i*3+2]*255),d&255,d>>8];}).flat();
+		const uni:Record<string,number[]>={twJ:flat('twJ'),twA:flat('twA'),twN:flat('twN'),twS:flat('twS'),twT:flat('twT'),twU:flat('twU'),twX:flat('twX'),twGround:[ws.ground]};
+		/** Runs the atlas variant with WARP_PARS as given: [position error, normal error]. */
+		const atlasErr=async(pars:string)=>{const want=reference('atlas'),r=await page.evaluate(gpu,{vs:vsFor('atlas').replace(WARP_PARS,pars),fs:fsFor('atlas'),n:N,pos:[...pos],nrm:[...nrm],seg:bytes,segD:[...dist],segBytes:true,part:[...part],tex:[...tex.data],texW:tex.width,rows:FX_ROWS,u:uni});
+			if('error' in r)throw new Error(r.error);let pe=0,ne=0;r.out.forEach((px,pass)=>{for(let i=0;i<N;i++)for(let k=0;k<3;k++){const e=Math.abs(px[i*4+k]-want[pass][i*3+k]);if(pass%2===0)pe=Math.max(pe,e);else ne=Math.max(ne,e);}});return [pe,ne];};
 		for(const [label,kind] of [['atlas parts (part fx + byte seg attribute)','atlas'],[`custom layer (TW_FIXED_SEG ${FIXED})`,'fixed'],['custom layer (float seg + segD, TW_SEG_D)','float'],['custom layer (float seg, no TW_SEG_D: segD compiled out, no inflation)','floatNoD']] as const){
 			const want=reference(kind);
-			const r=await page.evaluate(gpu,{vs:vsFor(kind),fs:fsFor(kind),n:N,pos:[...pos],nrm:[...nrm],seg:kind==='atlas'?bytes:[...seg],segD:[...dist],segBytes:kind==='atlas',part:[...part],tex:[...tex.data],texW:tex.width,rows:FX_ROWS,u:{twJ:flat('twJ'),twA:flat('twA'),twN:flat('twN'),twS:flat('twS'),twX:flat('twX'),twGround:[ws.ground]}});
+			const r=await page.evaluate(gpu,{vs:vsFor(kind),fs:fsFor(kind),n:N,pos:[...pos],nrm:[...nrm],seg:kind==='atlas'?bytes:[...seg],segD:[...dist],segBytes:kind==='atlas',part:[...part],tex:[...tex.data],texW:tex.width,rows:FX_ROWS,u:uni});
 			if('error' in r){console.error(`GLSL check failed (${label}):\n${r.error}`);process.exit(1);}
 			let posErr=0,nrmErr=0,worst='';
 			r.out.forEach((px,pass)=>{const ref=want[pass],isPos=pass%2===0;for(let i=0;i<N;i++)for(let k=0;k<3;k++){const e=Math.abs(px[i*4+k]-ref[i*3+k]);if(isPos&&e>posErr){posErr=e;worst=`point ${i} (${kind==='fixed'?`seg ${FIXED}`:`part ${part[i]}, seg ${seg[i*3]}/${seg[i*3+1]} w ${seg[i*3+2].toFixed(3)} dBone ${(dist[i]*100).toFixed(1)} cm`}, soft ${pass>>1})`;}if(!isPos)nrmErr=Math.max(nrmErr,e);}});
 			const moved=Math.max(...want[0].map((v,i)=>Math.abs(v-pos[i])));
 			console.log(`${label}: compile ok · parity max err ${posErr.toExponential(2)} m (positions, worst ${worst}) · ${nrmErr.toExponential(2)} (normals) · largest displacement tested ${moved.toFixed(3)} m`);
 			if(!(posErr<POS_TOL)||!(nrmErr<NRM_TOL)){console.error(`FAIL (${label}): tolerance ${POS_TOL} m (positions), ${NRM_TOL} (normals)`);failed=true;}
+		}
+		// Deliberate breaks of the Task 14d joint-taper terms (negatives): each edit of WARP_PARS must make the parity FAIL, so the check can see that term.
+		for(const [label,from,to] of BREAKS){
+			if(!WARP_PARS.includes(from)){console.error(`deliberate break "${label}": pattern not found in WARP_PARS`);failed=true;continue;}
+			const [pe,ne]=await atlasErr(WARP_PARS.replace(from,to)),caught=!(pe<POS_TOL)||!(ne<NRM_TOL);
+			console.log(`deliberate break (${label}): ${caught?'FAILS as it should':'NOT CAUGHT'} · positions ${pe.toExponential(2)} m, normals ${ne.toExponential(2)}`);if(!caught)failed=true;
 		}
 		if(failed)process.exit(1);
 		console.log(`compile ok · parity max err <${POS_TOL}`);

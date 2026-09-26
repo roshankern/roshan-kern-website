@@ -4,7 +4,7 @@
 // Weights (Task 14a): per joint, a child-side indicator centred on the joint plane, faded into the nearest-bone side where one bone clearly owns the tissue; the indicators combine into a tree partition of unity (see WEIGHTS below).
 import fs from 'node:fs';
 import {loadAtlasNode} from '../app/anyhealth/timeline/check/node-atlas';
-import {boneSegment} from '../app/anyhealth/timeline/growth/segment-map';
+import {boneSegment,trunkOnly} from '../app/anyhealth/timeline/growth/segment-map';
 import {SEG_STRIDE,D_UNIT} from '../app/anyhealth/timeline/growth/warp';
 import {SEGMENTS,type Rig,type Segment,type SegmentId,type Vec3} from '../app/anyhealth/timeline/types';
 import {SOFT_SYSTEMS} from '../app/anyhealth/timeline/engine';
@@ -26,6 +26,13 @@ const GRID=env('GRID',0.005),PLANE_B=env('PLANE_B',0.05),BLEND=env('BLEND',0.02)
  * Cyclic projection onto these convex slabs (and dBone ≥ 0), moving the apex and both edge ends by the least-squares split, until no vertex moves more than D_UNIT (or SLIVER_ITERS passes): it converges because a constant field satisfies every slab.
  * With |γs − γb| ≤ 0.4·γb that bounds the inflation's tilt of any triangle well below 90° (Task 14c report: axial seam flips at birth 136 → 34; the hand-built infants 1483 → 13). */
 const SLIVER_BETA=env('SLIVER_BETA',1),SLIVER_ITERS=env('SLIVER_ITERS',400);
+/** Clean weights (Task 14d): every vertex of a soft part matching growth/segment-map.ts TRUNK_ONLY is set to weight 1 on the trunk (the axial remap). The rules, by whole lower-cased part name:
+ *   rib cage wall — external / internal / innermost intercostal muscles, serratus anterior, external / internal oblique, transversus abdominis / thoracis, subcostales;
+ *   rib cage vessels — lateral thoracic and thoracodorsal arteries / veins, posterior / anterior / superior intercostal arteries and veins;
+ *   genitals — testes, epididymides, testicular arteries / veins, spermatic cords, ductus deferentes (deferent ducts), seminal vesicles, prostate, penis (corpora, glans, dorsal vessels), urethra;
+ *   pelvic floor — coccygeus, iliococcygeus, pubococcygeus, puborectalis, levator ani and its tendinous arch, perineal muscles, external anal sphincter, bulbospongiosus, ischiocavernosus.
+ * Every other vertex keeps its distance-field weights byte for byte; the number of vertices this changes (weight bytes differ from the distance-field ones) is asserted, so a rule or mesh change is noticed. dBone is untouched. */
+const TRUNK_ONLY_CHANGED=71517;
 /** One sliver-safe pass over a part (see SLIVER_BETA); returns how many constraints moved a vertex by more than D_UNIT. */
 function sliverPass(pos:Float32Array,index:Uint32Array,D:Float64Array,beta:number):number{
 	let m=0;const L=(i:number,j:number)=>Math.hypot(pos[i*3]-pos[j*3],pos[i*3+1]-pos[j*3+1],pos[i*3+2]-pos[j*3+2]);
@@ -140,11 +147,12 @@ async function main(){
 	/** Each segment's subtree (itself and every descendant). */
 	const SUBTREE=SEGMENTS.map((_,i)=>{const out=[i];for(let k=0;k<out.length;k++)out.push(...KIDS[out[k]]);return out;});
 	const D=new Float64Array(NS),DS=new Float64Array(NS),c=new Float64Array(NS),W=new Float64Array(NS),EPS=1e-4;
-	const out=new Uint8Array(parts.reduce((s,p)=>s+p.position.length/3,0)*SEG_STRIDE);let o=0,mixed=0,dropped=0,maxDrop=0;
+	const out=new Uint8Array(parts.reduce((s,p)=>s+p.position.length/3,0)*SEG_STRIDE);let o=0,mixed=0,dropped=0,maxDrop=0,cleaned=0,cleanedParts=0;
 	const dbgF=process.env.ANYHEALTH_FLOAT_OUT?new Float32Array(out.length/SEG_STRIDE*2):null,dB=new Float64Array(out.length/SEG_STRIDE);
 	parts.forEach((g,pi)=>{
 		const fixed=boneSegment(atlas.parts[pi].name),v=g.position,nv=v.length/3;
 		if(fixed){const s=SEG(fixed);for(let i=0;i<nv;i++){if(dbgF){dbgF[o/SEG_STRIDE*2]=1;dbgF[o/SEG_STRIDE*2+1]=0;}out[o++]=s|s<<4;out[o++]=255;out[o++]=0;out[o++]=0;}return;}
+		const toTrunk=trunkOnly(atlas.parts[pi].name);if(toTrunk)cleanedParts++;
 		for(let i=0;i<nv;i++){
 			const x=v[3*i],y=v[3*i+1],z=v[3*i+2];sample(x,y,z,D);
 			for(let s=0;s<NS;s++){let m=Infinity;for(const t of SUBTREE[s])m=Math.min(m,D[t]);DS[s]=m;}
@@ -166,6 +174,7 @@ async function main(){
 			let w=sB<0||kept<=0?1:W[sA]/kept;
 			if(Math.round(w*255)>=255){w=1;sB=sA;}else mixed++;
 			let dBone=Infinity;for(let s=0;s<NS;s++)dBone=Math.min(dBone,D[s]);
+			if(toTrunk&&(sA|sB<<4)!==0){cleaned++;if(w<1)mixed--;sA=sB=0;w=1;}
 			if(dbgF){dbgF[o/SEG_STRIDE*2]=w;dbgF[o/SEG_STRIDE*2+1]=dBone;}dB[o/SEG_STRIDE]=dBone;out[o++]=sA|sB<<4;out[o++]=Math.round(w*255);o+=2;
 		}
 	});
@@ -176,6 +185,8 @@ async function main(){
 			vo+=nv;});
 		for(let v=0;v<dB.length;v++){const du=Math.min(65535,Math.round(dB[v]/D_UNIT));out[v*SEG_STRIDE+2]=du&255;out[v*SEG_STRIDE+3]=du>>8;}
 		console.log(`sliver-safe dBone (beta ${SLIVER_BETA}): largest change ${(maxMove*1000).toFixed(2)} mm, ${left} constraints still moving after ${SLIVER_ITERS} passes (${Date.now()-t1} ms)`);}
+	console.log(`trunk-only parts (TRUNK_ONLY): ${cleanedParts} parts, ${cleaned} vertices moved onto the trunk (expected ${TRUNK_ONLY_CHANGED})`);
+	if(cleaned!==TRUNK_ONLY_CHANGED&&!process.env.ANYHEALTH_ANY_CLEAN)throw new Error(`TRUNK_ONLY changed ${cleaned} vertices, expected ${TRUNK_ONLY_CHANGED}: the rules or the mesh changed (update the constant deliberately, or set ANYHEALTH_ANY_CLEAN=1 to sweep)`);
 	if(dbgF)fs.writeFileSync(process.env.ANYHEALTH_FLOAT_OUT!,Buffer.from(dbgF.buffer));
 	if(o!==out.length)throw new Error(`wrote ${o} of ${out.length} bytes`);
 	fs.writeFileSync(BIN_OUT,out);

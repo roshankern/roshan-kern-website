@@ -116,7 +116,7 @@ export async function gpuParity(g:NodeAtlas,seg:Uint8Array,segOff:Int32Array,sof
 			let pe=0,ne=0,worst='';
 			for(const s of [0,1]){const P=r.out[s*2],M=r.out[s*2+1];pick.forEach(([i,v],k)=>{
 				const p:Vec3=[pos[k*3],pos[k*3+1],pos[k*3+2]],n:Vec3=[nrm[k*3],nrm[k*3+1],nrm[k*3+2]],q:Vec3=[0,0,0],m:Vec3=[0,0,0],[a,b,w,d]=segAt(seg,segOff[i],v);
-				applyFxPoint(fx.get(i)??identityFx(),p,n,q,m);warpPoint(ws,q,a,b,w,!!s,q,d);warpNormal(ws,m,a,b,w,m);
+				applyFxPoint(fx.get(i)??identityFx(),p,n,q,m);warpNormal(ws,q,m,a,b,w,m);warpPoint(ws,q,a,b,w,!!s,q,d);
 				for(let j=0;j<3;j++){const e=Math.abs(P[k*4+j]-q[j]);if(e>pe){pe=e;worst=`${g.atlas.parts[i].name} v${v} (soft ${s})`;}ne=Math.max(ne,Math.abs(M[k*4+j]-m[j]));}
 			});}
 			maxErr=Math.max(maxErr,pe);lines.push(`${date}: compile ok · max position error ${pe.toExponential(2)} m (worst ${worst}) · normals ${ne.toExponential(2)}`);
