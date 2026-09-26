@@ -40,6 +40,16 @@ const ROOT_T:Partial<Record<SegmentId,number[]>>=Object.fromEntries((['lThigh','
 /** ROOT_T acts only inside the limb's cylinder: radius from its axis < ROOT_R (smoothstep off), along it t < the segment length. */
 const ROOT_R=pair('ROOT_R','0.06,0.10'),ROOT_Q=env('ROOT_Q',0.14);
 const ROOT_T_CHANGED=2250;
+/** Skin facing rule (Task 15b): where two body parts rest against each other (the forearm and elbow on the flank, the hand on the thigh), the distance field cannot tell whose skin a vertex is and the joint-plane indicator gives the
+ * flank's own Skin 50–90% upper-arm / forearm weight; in infancy the arm's map then drags the flank Skin 4–10 mm inside the lower ribs (clipping check, bones in the Skin). A Skin surface belongs to the body part BEHIND it, not the
+ * one it faces: per limb joint (child C) whose subtree does not hold the vertex's nearest bone segment O, with n the rest vertex normal and ∇d the distance fields' unit gradients (pointing away from the bones), the child indicator is
+ * scaled by 1 − face(C)·behind(O), face(C) = smoothstep(FACE[0], FACE[1], −n·∇d_C) (the Skin looks at C's subtree), behind(O) = smoothstep(BEHIND[0], BEHIND[1], n·∇d_O) (its nearest bones are behind it). The rule fades in along the limb root's axis (FACE_ROOT). A limb's own Skin
+ * (O in C's subtree: between the toes, the fingers, the elbow crease) is never touched. Smoothsteps keep the weights continuous where the normal turns (the axilla dome: ≈ 0 there). Skin only; the changed vertices are counted and
+ * asserted (FACING_CHANGED). */
+const FACE=pair('FACE','0.3,0.7'),BEHIND=pair('BEHIND','0,0.4');
+/** The rule fades in along the limb root's axis (rest metres from the shoulder / hip joint): the axilla and groin keep their distance-field weights (there the Skin turns from trunk to limb and the joint taper blends the two maps). */
+const FACE_ROOT=pair('FACE_ROOT','0.18,0.28'),AXIAL_N=3;
+const FACING_CHANGED=95;
 /** One sliver-safe pass over a part (see SLIVER_BETA); returns how many constraints moved a vertex by more than D_UNIT. */
 function sliverPass(pos:Float32Array,index:Uint32Array,D:Float64Array,beta:number):number{
 	let m=0;const L=(i:number,j:number)=>Math.hypot(pos[i*3]-pos[j*3],pos[i*3+1]-pos[j*3+1],pos[i*3+2]-pos[j*3+2]);
@@ -154,12 +164,18 @@ async function main(){
 	/** Each segment's subtree (itself and every descendant). */
 	const SUBTREE=SEGMENTS.map((_,i)=>{const out=[i];for(let k=0;k<out.length;k++)out.push(...KIDS[out[k]]);return out;});
 	const D=new Float64Array(NS),DS=new Float64Array(NS),c=new Float64Array(NS),W=new Float64Array(NS),EPS=1e-4;
+	/** Unit gradients of every segment's field (GD) and subtree field (GS) at (x,y,z): central differences over one voxel. */
+	const GD=new Float64Array(NS*3),GS=new Float64Array(NS*3),Dp=new Float64Array(NS),Dm=new Float64Array(NS);
+	const grads=(x:number,y:number,z:number)=>{const h=GRID;for(let a=0;a<3;a++){sample(x+(a===0?h:0),y+(a===1?h:0),z+(a===2?h:0),Dp);sample(x-(a===0?h:0),y-(a===1?h:0),z-(a===2?h:0),Dm);
+		for(let s=0;s<NS;s++){GD[s*3+a]=Dp[s]-Dm[s];let mp=Infinity,mm=Infinity;for(const t of SUBTREE[s]){mp=Math.min(mp,Dp[t]);mm=Math.min(mm,Dm[t]);}GS[s*3+a]=mp-mm;}}
+		for(const G of [GD,GS])for(let s=0;s<NS;s++){const l=Math.hypot(G[s*3],G[s*3+1],G[s*3+2])||1;G[s*3]/=l;G[s*3+1]/=l;G[s*3+2]/=l;}};
+	let facing=0;
 	const out=new Uint8Array(parts.reduce((s,p)=>s+p.position.length/3,0)*SEG_STRIDE);let o=0,mixed=0,dropped=0,maxDrop=0,cleaned=0,cleanedParts=0,rootChanged=0;
 	const dbgF=process.env.ANYHEALTH_FLOAT_OUT?new Float32Array(out.length/SEG_STRIDE*2):null,dB=new Float64Array(out.length/SEG_STRIDE);
 	parts.forEach((g,pi)=>{
 		const fixed=boneSegment(atlas.parts[pi].name),v=g.position,nv=v.length/3;
 		if(fixed){const s=SEG(fixed);for(let i=0;i<nv;i++){if(dbgF){dbgF[o/SEG_STRIDE*2]=1;dbgF[o/SEG_STRIDE*2+1]=0;}out[o++]=s|s<<4;out[o++]=255;out[o++]=0;out[o++]=0;}return;}
-		const toTrunk=trunkOnly(atlas.parts[pi].name);if(toTrunk)cleanedParts++;
+		const toTrunk=trunkOnly(atlas.parts[pi].name);if(toTrunk)cleanedParts++;const isSkin=atlas.parts[pi].name==='Skin',nrm=g.normal;
 		for(let i=0;i<nv;i++){
 			const x=v[3*i],y=v[3*i+1],z=v[3*i+2];sample(x,y,z,D);let rootMoved=false;
 			for(let s=0;s<NS;s++){let m=Infinity;for(const t of SUBTREE[s])m=Math.min(m,D[t]);DS[s]=m;}
@@ -174,6 +190,12 @@ async function main(){
 					if(raise>cs){for(const m of KIDS[P])if(m!==s)raise*=smoothstep(0,ROOT_Q,(DS[m]-DS[s])/(DS[m]+DS[s]+EPS));if(raise>cs){cs=raise;rootMoved=true;}}}
 				c[s]=cs;
 			}
+			// Skin facing rule (FACE above), limb joints only (the axial segments share one remap, so their weights do not move anything).
+			let c0:Float64Array|null=null;
+			if(isSkin){grads(x,y,z);const n0=nrm[3*i]/127,n1=nrm[3*i+1]/127,n2=nrm[3*i+2]/127,nl=Math.hypot(n0,n1,n2)||1,dot=(G:Float64Array,s:number)=>(n0*G[s*3]+n1*G[s*3+1]+n2*G[s*3+2])/nl;c0=c.slice();
+				let own=0;for(let s=1;s<NS;s++)if(D[s]<D[own])own=s;
+				for(let s=3;s<NS;s++){if(SUBTREE[s].includes(own))continue;let r=s;while(PAR[r]>=AXIAL_N)r=PAR[r];const Jr=segments[r].joint,ar=segments[r].axis,t=(x-Jr[0])*ar[0]+(y-Jr[1])*ar[1]+(z-Jr[2])*ar[2];
+					c[s]*=1-smoothstep(FACE[0],FACE[1],-dot(GS,s))*smoothstep(BEHIND[0],BEHIND[1],dot(GD,own))*smoothstep(FACE_ROOT[0],FACE_ROOT[1],t);}}
 			// Tree partition of unity: w_s = (Π of c along the path to s) × (1 − Σ c over s's children).
 			let sum=0;
 			for(let s=0;s<NS;s++){let path=1;for(let t=s;t>=0;t=PAR[t])path*=c[t];let ch=0;for(const k of KIDS[s])ch+=c[k];W[s]=path*Math.max(0,1-ch);sum+=W[s];}
@@ -185,6 +207,9 @@ async function main(){
 			let dBone=Infinity;for(let s=0;s<NS;s++)dBone=Math.min(dBone,D[s]);
 			if(rootMoved&&!toTrunk)rootChanged++;
 			if(toTrunk&&(sA|sB<<4)!==0){cleaned++;if(w<1)mixed--;sA=sB=0;w=1;}
+			if(c0){const cur=[sA|sB<<4,Math.round(w*255)];c.set(c0);let s2=0;for(let s=0;s<NS;s++){let path=1;for(let t=s;t>=0;t=PAR[t])path*=c[t];let ch=0;for(const k of KIDS[s])ch+=c[k];W[s]=path*Math.max(0,1-ch);s2+=W[s];}
+				let a0=0;for(let s=1;s<NS;s++)if(W[s]>W[a0])a0=s;let b0=-1;for(const s of ADJ[a0])if(b0<0||W[s]>W[b0])b0=s;const k0=W[a0]+(b0<0?0:W[b0]);let w0=b0<0||k0<=0?1:W[a0]/k0;if(Math.round(w0*255)>=255){w0=1;b0=a0;}
+				if(cur[0]!==(a0|b0<<4)||cur[1]!==Math.round(w0*255)){facing++;if(process.env.ANYHEALTH_FACE_DUMP)console.log(`FACE ${x.toFixed(3)} ${y.toFixed(3)} ${z.toFixed(3)} ${SEGMENTS[a0]}/${SEGMENTS[b0]} ${w0.toFixed(2)} -> ${SEGMENTS[sA]}/${SEGMENTS[sB]} ${w.toFixed(2)}`);}}
 			if(dbgF){dbgF[o/SEG_STRIDE*2]=w;dbgF[o/SEG_STRIDE*2+1]=dBone;}dB[o/SEG_STRIDE]=dBone;out[o++]=sA|sB<<4;out[o++]=Math.round(w*255);o+=2;
 		}
 	});
@@ -197,6 +222,8 @@ async function main(){
 		console.log(`sliver-safe dBone (beta ${SLIVER_BETA}): largest change ${(maxMove*1000).toFixed(2)} mm, ${left} constraints still moving after ${SLIVER_ITERS} passes (${Date.now()-t1} ms)`);}
 	console.log(`trunk-only parts (TRUNK_ONLY): ${cleanedParts} parts, ${cleaned} vertices moved onto the trunk (expected ${TRUNK_ONLY_CHANGED})`);
 	console.log(`limb-root blends (ROOT_T): ${rootChanged} vertices with a raised limb-side indicator (expected ${ROOT_T_CHANGED})`);
+	console.log(`Skin facing rule (FACE): ${facing} Skin vertices changed (expected ${FACING_CHANGED})`);
+	if(facing!==FACING_CHANGED&&!process.env.ANYHEALTH_ANY_CLEAN)throw new Error(`the Skin facing rule changed ${facing} vertices, expected ${FACING_CHANGED} (update the constant deliberately, or set ANYHEALTH_ANY_CLEAN=1 to sweep)`);
 	if(rootChanged!==ROOT_T_CHANGED&&!process.env.ANYHEALTH_ANY_CLEAN)throw new Error(`ROOT_T changed ${rootChanged} vertices, expected ${ROOT_T_CHANGED} (update the constant deliberately, or set ANYHEALTH_ANY_CLEAN=1 to sweep)`);
 	if(cleaned!==TRUNK_ONLY_CHANGED&&!process.env.ANYHEALTH_ANY_CLEAN)throw new Error(`TRUNK_ONLY changed ${cleaned} vertices, expected ${TRUNK_ONLY_CHANGED}: the rules or the mesh changed (update the constant deliberately, or set ANYHEALTH_ANY_CLEAN=1 to sweep)`);
 	if(dbgF)fs.writeFileSync(process.env.ANYHEALTH_FLOAT_OUT!,Buffer.from(dbgF.buffer));

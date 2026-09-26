@@ -1,7 +1,8 @@
-/** Task 15 phase 1: clipping, containment and overlap checks in REPORTING mode. Every check measures the rendered geometry (merged fx from every script + growthFx + eruptionFx, then the body warp with the segments.bin weights and bone distances, exactly
- * as engine.settle does) on each test date and compares it with the same metric on the REST pose (the undeformed atlas), since many parts already touch or interpenetrate at rest. Each prints its worst offender per date and the
- * breaches (a worsening past the tolerance); none fails on a breach yet (phase 2 turns them into hard gates). They fail only when a measurement is vacuous (a missing part, an empty hull), when the measured warp
- * differs from engine.settle, or when the GLSL/TS parity at scale is off (those two are hard now). Geometry helpers: clip-geom.ts; the GPU harness: clip-gpu.ts (needs ANYHEALTH_PLAYWRIGHT, or ANYHEALTH_SKIP_GPU=1 to skip). Runtime about 2 min. */
+/** Task 15: clipping, containment and overlap checks, HARD GATES since phase 2. Every check measures the rendered geometry (merged fx from every script + growthFx + eruptionFx, then the body warp with the segments.bin weights and bone distances,
+ * exactly as engine.settle does) on each test date and compares it with the same metric on the REST pose (the undeformed atlas), since many parts already touch or interpenetrate at rest. Each prints its worst offender per date, the
+ * breaches (a worsening past the tolerance) and the worst over all dates; any breach fails the check. They also fail when a measurement is vacuous (a missing part, an empty hull), when the measured warp differs from engine.settle, or when
+ * the GLSL/TS parity at scale is off. Geometry helpers: clip-geom.ts; the GPU harness: clip-gpu.ts (needs ANYHEALTH_PLAYWRIGHT, or ANYHEALTH_SKIP_GPU=1 to skip). ANYHEALTH_CLIP_DATES=a,b,… limits the dates while iterating
+ * (the full set is the gate). Runtime about 2 min. */
 import * as T from 'three';
 import fs from 'node:fs';
 import type {Check,CheckContext} from './harness';
@@ -39,31 +40,43 @@ const GLOBE=/^(Left|Right) (sclera|cornea|choroid|iris|lens|vitreous body|corona
 const ORBIT_BONES=['Frontal bone','Left zygomatic bone','Right zygomatic bone','Left maxilla','Right maxilla'];
 /** Skeletal-system parts that are not bone (muscles, tendons and retinacula filed under skeletal) or are checked elsewhere (teeth, gingiva). */
 const NOT_BONE=/fibularis|tibialis|iliotibial|subscapularis|levator scapulae|tooth$|^Gingiva/;
-const HAND_FOOT=/phalanx|metacarp|metatars|capitate|hamate|lunate|pisiform|scaphoid|trapezi|triquetral|calcaneus|cuboid|cuneiform|navicular|talus|sesamoid/i;
 /** Organ neighbours whose contact the scripts change (task-12-report: rectum and descending colon; Task 5: the newborn thymus): [organ, neighbours]. */
 const NEIGHBOURS:[string,string[]][]=[
 	['Rectum',['Urinary bladder','Prostate','Sacrum','Left seminal vesicle','Right seminal vesicle']],
 	['Descending colon',['Left iliacus','Left hip bone','Left external oblique','Left psoas major','Left kidney','Spleen']],
 	['Left lobe of thymus',['Manubrium','Body of sternum']],['Right lobe of thymus',['Manubrium','Body of sternum']],
 ];
-/** Neighbour penetration may deepen at most this much beyond rest. */
-const NEIGH_MM=1;
+/** Neighbour penetration may deepen at most this much beyond rest (Task 15b brief). */
+const NEIGH_MM=1.5;
+/** Per-pair limits on the worsening (mm), overriding NEIGH_MM. By design, the encopresis rectum (digestive#encopresis-rectum-dilation: the loaded rectum widens to 5–6 cm) indents the bladder, prostate and seminal vesicles in front of it:
+ * those pairs are ratchets at the value measured in Task 15b + 0.5 mm, so a later change can only keep or reduce the indentation. Descending colon × external oblique was a warp artefact (Task 14c removed the axial deflation): ≤ 1 mm. */
+const NEIGH_CAP:Record<string,number>={
+	'Rectum ↔ Urinary bladder':5.1,'Rectum ↔ Prostate':5.3,'Rectum ↔ Left seminal vesicle':5.5,'Rectum ↔ Right seminal vesicle':6.0,
+	'Descending colon ↔ Left external oblique':1,
+};
 const VERTEBRAE=['Atlas','Axis',...['Third','Fourth','Fifth','Sixth','Seventh'].map(o=>`${o} cervical vertebra`),...Ord.map(o=>`${o} thoracic vertebra`),...Ord.slice(0,5).map(o=>`${o} lumbar vertebra`),'Sacrum'];
 
 // ── Tolerances (brief; each is applied to warped − rest) ──
 /** Organs in a hull: at most 2% more vertices outside than at rest, and the farthest no more than 3 mm farther out than at rest. */
 const HULL_FRAC=0.02,HULL_MM=3;
+/** Thymus lobes (exempt from HULL_*): superior exits through the thoracic inlet are anatomically normal for the large infant thymus (Task 15b brief); an exit on any other side (anterior, lateral, posterior, inferior) at most 1 mm. */
+const THYMUS_SIDE_MM=1,THYMUS=/lobe of thymus$/;
+/** Parts with fewer vertices than this are measured on every vertex, not every SAMPLE-th: a single vertex of a small part (a segmental bronchial tree, a toe phalanx) would otherwise count several %. */
+const SMALL=3000;
 /** Skin containment counts a vertex as newly outside when it was inside the Skin at rest and is now more than this far outside it. */
 const OUT_MM=0.5;
-/** Eyes: globe centre within 4 mm of the rest-relative orbit centre; at most 1.5% of the globe vertices inside the Skin at rest newly (> OUT_MM) outside. The front of the globe sits in the Skin's eye pocket (exterior to the shell),
- * whose rim is ambiguous for any inside test: on 2026-01-02, a near-uniform scale of the rest model, 0.7% (left) and 1.1% (right) still flip, so the tolerance sits above that floor (brief: 0.5%). */
-const EYE_MM=4,GLOBE_FRAC=0.015;
+/** Eyes: globe centre within 1 mm of the rest-relative orbit centre; at most 1.5% of the globe vertices inside the Skin at rest newly (> OUT_MM) outside (the front of the globe sits in the Skin's eye pocket, exterior to the shell,
+ * whose rim is ambiguous for any inside test: on 2026-01-02, a near-uniform scale of the rest model, 0.7% (left) and 1.1% (right) still flip, the noise floor); the cornea and each eyelid tarsal plate interpenetrate at most 0.5 mm deeper than at rest. */
+const EYE_MM=1,GLOBE_FRAC=0.015,LID_MM=0.5;
 /** Teeth: the root-end vertices stay within 1.5 mm of where the jaw carries them (the tooth's own fx applied in rest space, then the least-squares affine map of the jaw-bone vertices within 2.5 cm). */
 const TOOTH_MM=1.5,JAW_R=0.025;
-/** Bones in the skin: at most 0.5% (hands and feet 1%) of the vertices inside the Skin at rest end up outside it. */
-const BONE_FRAC=0.005,BONE_FRAC_HF=0.01;
-/** Joints: parent and child maps agree within 1 mm; bone pairs across the joint (within 1 cm at rest) close by at most 1 mm more than the rest gap scaled by the smallest along / bone scale of the two segments (the most a uniform shrink could close it). */
-const JOINT_MM=1,PAIR_NEAR=0.01,JOINT_ZONE=0.03,CROSS_MM=1;
+/** Bones in the skin: at most 0.5% of the vertices inside the Skin at rest end up (> OUT_MM) outside it, none more than 2 mm; the Mandible (the chin, Task 14c) none more than 1 mm. */
+const BONE_FRAC=0.005,BONE_MM=2,MANDIBLE_MM=1;
+/** Joints: parent and child maps agree within 1 mm; bone pairs across the joint (within 1 cm at rest) close by at most 1 mm more than the rest gap scaled by the smallest along / bone scale of the two segments (the most a uniform shrink could close it);
+ * atlas × occipital and C7 / T1 (the axial remap's knots) at most 0.5 mm. */
+const JOINT_MM=1,PAIR_NEAR=0.01,JOINT_ZONE=0.03,CROSS_MM=1,AXIAL_MM=0.5;
+/** The axial joint pairs gated at AXIAL_MM: [label, part-name test for one side, for the other]. */
+const AXIAL_PAIRS:[string,RegExp,RegExp][]=[['atlas × occipital',/^Atlas$/,/^Occipital bone$/],['C7 / T1',/^Seventh cervical vertebra$|^Intervertebral disk of seventh cervical vertebra$/,/^First thoracic vertebra$/]];
 /** Vertebrae and disks: penetration between neighbours at most 1 mm deeper than at rest. */
 const VERT_MM=1;
 /** The spinal column top to bottom, each vertebra followed by its disk (below it) when the atlas has one. */
@@ -122,18 +135,20 @@ function peaks(){
 /** The test dates, each labelled with the scripts that peak on it. */
 function testDates():{date:string;label:string}[]{
 	const m=new Map<string,string[]>(BASE_DATES.map(d=>[d,[]]));for(const p of peaks()){const l=m.get(p.date)??[];l.push(`${p.id} peak`);m.set(p.date,l);}
-	return [...m].sort((a,b)=>a[0]<b[0]?-1:1).map(([date,l])=>({date,label:l.length?l.join(', '):''}));
+	const only=process.env.ANYHEALTH_CLIP_DATES?.split(',');
+	return [...m].sort((a,b)=>a[0]<b[0]?-1:1).filter(([date])=>!only||only.includes(date)).map(([date,l])=>({date,label:l.length?l.join(', '):''}));
 }
 
 // ── The per-date measurements (one pass per date, cached) ──
 /** Hull containment: vertices out, the farthest out, and the exit side of each out vertex (dominant axis of the exit face normal). */
-interface HullStat {out:number;maxOut:number;n:number;exits:Record<string,number>}
+interface HullStat {out:number;maxOut:number;n:number;/** per exit side: vertices out through it and the farthest (metres) */exits:Record<string,{n:number;max:number}>}
 /** Skin containment of a vertex set: n tested, outside now, `inRest` = inside at rest, newly outside (inside at rest, now more than OUT_MM outside) and the farthest of those (mm, over all of them). */
 interface SkinStat {n:number;outside:number;inRest:number;newOut:number;worstMM:number}
 interface Measure {
 	date:string|null;
 	chest:Map<string,HullStat>;abd:Map<string,HullStat>;
-	eyes:Record<'Left'|'Right',{dev:number}&SkinStat>;
+	/** Per side: globe centre deviation (metres), Skin containment of the globe, and cornea ↔ each eyelid tarsal plate penetration (metres, both ways). */
+	eyes:Record<'Left'|'Right',{dev:number;lids:Record<'upper'|'lower',number>}&SkinStat>;
 	/** Visible teeth: the largest root-end vertex displacement from where the jaw carries it (metres). */
 	teeth:Map<string,number>;
 	/** The same without the tooth's own fx (the eruption offset shows): proves the metric can see a tooth leave its seat. */
@@ -143,10 +158,14 @@ interface Measure {
 	flags:Map<number,Uint8Array>;
 	/** Per joint: parent vs child joint point error; the most-closed pair: gap now, rest gap, and gap − rest gap × the smallest along / bone scale of the two segments. */
 	joints:{id:string;err:number;minD:number;gap:number;restGap:number;pair:string;/** the smallest absolute gap over the joint's pairs (metres; negative = the bones cross) */minGap:number}[];
+	/** AXIAL_PAIRS: the most-closed pair's rest-relative closure (metres) and its pair count, over every joint's pairs. */
+	axial:Map<string,{minD:number;pairs:number}>;
 	/** Neighbouring vertebra / disk pairs: penetration depth, both ways (metres). */
 	vert:Map<string,number>;
 	/** Rest only: the Skin shell's triangle classes. */
 	skinOuter:Uint8Array|null;
+	/** Rest only: the rest Skin grid (the winding-number confirmation of a newly-outside vertex needs its rest position against the rest Skin). */
+	skinGrid:TriGrid|null;
 	/** Organ ↔ neighbour: the deepest vertex of either inside the other (metres, sampled every SAMPLE-th vertex). */
 	neigh:Map<string,number>;
 }
@@ -176,7 +195,7 @@ function measureNow(s:Setup,date:string|null,rest:Measure|null):Measure{
 	const hullFrom=(names:string[],extraZ=0):Hull=>{const pts=concat(s.byName(names).map(W));if(!extraZ)return hullOf(pts);const sh=pts.slice();for(let k=2;k<sh.length;k+=3)sh[k]+=extraZ;return hullOf(concat([pts,sh]));};
 	const inHull=(h:Hull,names:string[],inflate=0,sel?:(i:number)=>ArrayLike<number>):Map<string,HullStat>=>{
 		const out=new Map<string,HullStat>();
-		for(const nm of names){let o=0,n=0,mx=0,any=false;const exits:Record<string,number>={};for(const i of g.indicesOf(nm)){if(!visibleOn(pose,i))continue;any=true;const P=sel?sel(i):W(i);for(let k=0;k<P.length;k+=3*(sel?1:SAMPLE)){const d=h.dist(P[k],P[k+1],P[k+2])-inflate;n++;if(d>0){o++;if(d>mx)mx=d;const e=exitSide(h.exitNormal(P[k],P[k+1],P[k+2]));exits[e]=(exits[e]??0)+1;}}}if(any)out.set(nm,{out:o,n,maxOut:mx,exits});}
+		for(const nm of names){let o=0,n=0,mx=0,any=false;const exits:HullStat['exits']={};for(const i of g.indicesOf(nm)){if(!visibleOn(pose,i))continue;any=true;const P=sel?sel(i):W(i),st=sel||P.length/3<SMALL?1:SAMPLE;for(let k=0;k<P.length;k+=3*st){const d=h.dist(P[k],P[k+1],P[k+2])-inflate;n++;if(d>0){o++;if(d>mx)mx=d;const e=exitSide(h.exitNormal(P[k],P[k+1],P[k+2])),x=exits[e]??={n:0,max:0};x.n++;x.max=Math.max(x.max,d);}}}if(any)out.set(nm,{out:o,n,maxOut:mx,exits});}
 		return out;
 	};
 	// 1 · organs in the rib cage; 2 · abdominal organs in the pelvis / abdomen hull (+1 cm anterior).
@@ -188,12 +207,17 @@ function measureNow(s:Setup,date:string|null,rest:Measure|null):Measure{
 	/** Skin containment of the named parts' visible vertices (every `stride`-th), per vertex against the rest flags. */
 	const skinStat=(names:string[],stride:number):SkinStat=>{
 		let n=0,outside=0,inRest=0,newOut=0,worst=0;
-		for(const nm of names)for(const i of g.indicesOf(nm)){if(!visibleOn(pose,i))continue;const P=W(i),rf=rest?.flags.get(i),f=new Uint8Array(Math.ceil(P.length/3/stride));
-			for(let k=0,v=0;k<P.length;k+=3*stride,v++){n++;const inside=skin.inside(P[k],P[k+1],P[k+2]);f[v]=+inside;if(rf?rf[v]:inside)inRest++;if(inside)continue;outside++;
-				if(rf&&rf[v]){const d=skin.nearest(P[k],P[k+1],P[k+2],0.05);if(d*MM>OUT_MM){newOut++;if(d>worst)worst=d;}}}
+		for(const nm of names)for(const i of g.indicesOf(nm)){if(!visibleOn(pose,i))continue;const P=W(i),rf=rest?.flags.get(i),st=P.length/3<SMALL?1:stride,f=new Uint8Array(Math.ceil(P.length/3/st));
+			for(let k=0,v=0;k<P.length;k+=3*st,v++){n++;const inside=skin.inside(P[k],P[k+1],P[k+2]);f[v]=+inside;if(rf?rf[v]:inside)inRest++;if(inside)continue;outside++;
+				// Newly outside: inside at rest, now > OUT_MM from the Skin, and confirmed by the generalized winding number of the Skin's outer surface (≥ 0.5 at rest, < 0.5 now). The fast test is a ray vote, and a ray that also crosses
+				// another sheet (an arm on the flank, the thighs at the perineum, the eye pocket) flips it: Task 15b found rib 7, hip bone and ethmoid vertices 4–18 mm deep inside the body (winding 0.97–1.00) voted outside.
+				if(rf&&rf[v]){const d=skin.nearest(P[k],P[k+1],P[k+2],0.05),R=g.parts[i].position;if(d*MM>OUT_MM&&skin.winding(P[k],P[k+1],P[k+2])<0.5&&rest!.skinGrid!.winding(R[k],R[k+1],R[k+2])>=0.5){newOut++;if(d>worst)worst=d;}}}
 			if(!rest)flags.set(i,f);}
 		return {n,outside,inRest,newOut,worstMM:worst*MM};
 	};
+	// Penetration: the deepest vertex (every `stride`-th) of part a inside part b (parity), metres.
+	const grids=new Map<string,TriGrid>(),grid=(nm:string)=>{let t=grids.get(nm);if(!t){const ix=s.byName([nm]),P=concat(ix.map(W));let o=0;const I:number[]=[];for(const i of ix){for(const v of g.parts[i].index)I.push(v+o);o+=g.parts[i].position.length/3;}t=new TriGrid(P,I,0.005,{parityOnly:true});grids.set(nm,t);}return t;};
+	const depth=(a:string,b:string,stride=SAMPLE)=>{const t=grid(b);let d=0;for(const i of s.byName([a])){if(!visibleOn(pose,i))continue;const P=W(i);for(let k=0;k<P.length;k+=3*stride)if(t.inside(P[k],P[k+1],P[k+2]))d=Math.max(d,t.nearest(P[k],P[k+1],P[k+2],0.05));}return d;};
 	// 3 · eyes: globe centre (warped sclera bounds centre) vs the rest-relative orbit centre, carried by a least-squares affine fit of the orbit-bone vertices within 2.5 cm of it; globe vertices outside the Skin.
 	const eyes={} as Measure['eyes'];
 	for(const side of ['Left','Right'] as const){
@@ -201,7 +225,8 @@ function measureNow(s:Setup,date:string|null,rest:Measure|null):Measure{
 		for(const i of s.byName(ORBIT_BONES)){const R=g.parts[i].position,Wp=W(i);for(let k=0;k<R.length;k+=3)if(Math.hypot(R[k]-c0[0],R[k+1]-c0[1],R[k+2]-c0[2])<0.025){rest.push(R[k],R[k+1],R[k+2]);warped.push(Wp[k],Wp[k+1],Wp[k+2]);}}
 		const want=affineFit(rest,warped)(c0),sc=W(g.indicesOf(`${side} sclera`)[0]),lo=[Infinity,Infinity,Infinity],hi=[-Infinity,-Infinity,-Infinity];
 		for(let k=0;k<sc.length;k+=3)for(let j=0;j<3;j++){lo[j]=Math.min(lo[j],sc[k+j]);hi[j]=Math.max(hi[j],sc[k+j]);}
-		eyes[side]={dev:Math.hypot(...[0,1,2].map(j=>(lo[j]+hi[j])/2-want[j])),...skinStat(s.names(x=>GLOBE.test(x)&&x.toLowerCase().includes(side.toLowerCase())),SAMPLE)};
+		const l=side.toLowerCase(),globe=[`${side} cornea`,`Anterior chamber of ${l} eyeball`,`${side} sclera`,`${side} vitreous body`,`${side} lens`],lid=(u:'upper'|'lower')=>{const plate=`Tarsal plate of ${l} ${u} eyelid`;return Math.max(depth(`${side} cornea`,plate,1),...globe.map(gp=>depth(plate,gp,1)));};
+		eyes[side]={dev:Math.hypot(...[0,1,2].map(j=>(lo[j]+hi[j])/2-want[j])),lids:{upper:lid('upper'),lower:lid('lower')},...skinStat(s.names(x=>GLOBE.test(x)&&x.toLowerCase().includes(l)),SAMPLE)};
 	}
 	// 4 · teeth: the root-end 30% of each visible tooth's rest vertices (upper: highest, lower: lowest) vs where the jaw carries them: the tooth's own fx in rest space, then the least-squares affine map
 	// (rest → warped) of the maxillae / mandible vertices within JAW_R of the root-end centroid. Rest: 0 by construction.
@@ -225,33 +250,42 @@ function measureNow(s:Setup,date:string|null,rest:Measure|null):Measure{
 		for(const p of J.pairs){if(!visibleOn(pose,p.pa)||!visibleOn(pose,p.pb))continue;const A=W(p.pa),B=W(p.pb),gp=[0,1,2].reduce((x,j)=>x+(B[p.vb*3+j]-A[p.va*3+j])*p.dir[j],0),d=gp-p.d*sc;minGap=Math.min(minGap,gp);if(d<minD){minD=d;gap=gp;restGap=p.d;pair=`${g.atlas.parts[p.pa].name} / ${g.atlas.parts[p.pb].name}`;}}
 		return {id:J.id,err,minD,gap,restGap,pair,minGap};
 	});
+	const axial=new Map<string,{minD:number;pairs:number}>(),scOf=(a:number,b:number)=>pose.ws?Math.min(pose.ws.alongScale[a],pose.ws.boneScale[a],pose.ws.alongScale[b],pose.ws.boneScale[b]):1;
+	for(const [label,ta,tb] of AXIAL_PAIRS){let minD=Infinity,pairs=0;
+		for(const J of jointPairs(s,boneIdx)){const sc=scOf(J.parent,J.child);for(const p of J.pairs){const na=g.atlas.parts[p.pa].name,nb=g.atlas.parts[p.pb].name;if(!((ta.test(na)&&tb.test(nb))||(tb.test(na)&&ta.test(nb))))continue;pairs++;
+			if(!visibleOn(pose,p.pa)||!visibleOn(pose,p.pb))continue;const A=W(p.pa),B=W(p.pb),gp=[0,1,2].reduce((x,j)=>x+(B[p.vb*3+j]-A[p.va*3+j])*p.dir[j],0);minD=Math.min(minD,gp-p.d*sc);}}
+		axial.set(label,{minD,pairs});}
 	// Organ neighbours: the deepest (sampled) vertex of one part inside the other, both ways.
-	const grids=new Map<string,TriGrid>(),grid=(nm:string)=>{let t=grids.get(nm);if(!t){const ix=g.indicesOf(nm),P=concat(ix.map(W));let o=0;const I:number[]=[];for(const i of ix){for(const v of g.parts[i].index)I.push(v+o);o+=g.parts[i].position.length/3;}t=new TriGrid(P,I,0.005,{parityOnly:true});grids.set(nm,t);}return t;};
-	const depth=(a:string,b:string)=>{const t=grid(b);let d=0;for(const i of g.indicesOf(a)){if(!visibleOn(pose,i))continue;const P=W(i);for(let k=0;k<P.length;k+=3*SAMPLE)if(t.inside(P[k],P[k+1],P[k+2]))d=Math.max(d,t.nearest(P[k],P[k+1],P[k+2],0.05));}return d;};
 	const neigh=new Map<string,number>();for(const [a,bs] of NEIGHBOURS)for(const b of bs)neigh.set(`${a} ↔ ${b}`,Math.max(depth(a,b),depth(b,a)));
 	// 7 · vertebrae and disks: penetration between neighbours down the column (vertebra ↔ its disk ↔ the next vertebra, and vertebra ↔ next vertebra).
 	const column=VERTEBRAE.flatMap(v=>g.indicesOf(disk(v)).length?[v,disk(v)]:[v]),vert=new Map<string,number>();
 	for(let k=0;k+1<column.length;k++){const a=column[k],b=column[k+1];vert.set(`${a} / ${b}`,Math.max(depth(a,b),depth(b,a)));if(b.startsWith('Intervertebral')&&k+2<column.length){const c2=column[k+2];vert.set(`${a} / ${c2}`,Math.max(depth(a,c2),depth(c2,a)));}}
-		return {date,chest,abd,eyes,teeth,teethNoFx,bones,flags,joints,vert,neigh,skinOuter:rest?null:skin.outer};
+		return {date,chest,abd,eyes,teeth,teethNoFx,bones,flags,joints,axial,vert,neigh,skinOuter:rest?null:skin.outer,skinGrid:rest?null:skin};
 }
 
 // ── Reporting ──
 const mm=(v:number)=>(v*MM).toFixed(1),pct=(v:number)=>(v*100).toFixed(1);
 const log=(s:string)=>console.log(`     ${s}`);
-/** Run `row` over every test date and print one line per date plus a breach summary; asserts only that each date measured something. */
-async function perDate(c:CheckContext,title:string,row:(m:Measure,rest:Measure,date:string)=>{line:string;breaches:string[]}){
-	const rest=await measure(c,null);let total=0;log(`${title} (warped vs rest; ✗ = a breach once this is a hard gate)`);
-	for(const {date,label} of testDates()){const m=await measure(c,date),r=row(m,rest,date);total+=r.breaches.length;log(`${date}${label?` [${label}]`:''} · ${r.line}${r.breaches.length?` · ✗ ${r.breaches.length}: ${r.breaches.slice(0,4).join('; ')}${r.breaches.length>4?' …':''}`:''}`);}
-	log(`${total} breaches in total (reporting mode: not failing)`);
+/** One date's row: the printed line, the breaches, and optionally its worst value (larger = worse) with a label for the all-dates summary. */
+interface Row {line:string;breaches:string[];worst?:{v:number;label:string}}
+/** Run `row` over every test date: one line per date, the breaches, the worst over all dates; fails on any breach (hard gate), after `after` has printed its summary. */
+async function perDate(c:CheckContext,title:string,row:(m:Measure,rest:Measure,date:string)=>Row,after?:()=>void){
+	const rest=await measure(c,null),all:string[]=[];let worst:{v:number;label:string;date:string}|null=null;log(`${title} (warped vs rest; ✗ = a breach)`);
+	for(const {date,label} of testDates()){const m=await measure(c,date),r=row(m,rest,date);all.push(...r.breaches.map(b=>`${date} ${b}`));if(r.worst&&(!worst||r.worst.v>worst.v))worst={...r.worst,date};
+		log(`${date}${label?` [${label}]`:''} · ${r.line}${r.breaches.length?` · ✗ ${r.breaches.length}: ${r.breaches.join('; ')}`:''}`);}
+	if(worst)log(`worst over all dates: ${worst.label} (${worst.date})`);after?.();log(`${all.length} breaches in total`);
+	c.assert(!all.length,`${title}: ${all.length} breaches: ${all.slice(0,6).join('; ')}${all.length>6?' …':''}`);
 }
-/** Hull containment rows (checks 1, 2): worst part by distance worsening, with its exit sides; breaches = fraction out +HULL_FRAC or max out +tolerance vs rest. */
-function hullRow(m:Map<string,HullStat>,rest:Map<string,HullStat>,tolMM:number,fracTol:number){
-	let wv=-Infinity,line='';const breaches:string[]=[];
-	const sides=(e:Record<string,number>)=>Object.entries(e).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`${k} ${v}`).join(', ');
-	for(const [nm,st] of m){const r=rest.get(nm)??{out:0,n:1,maxOut:0,exits:{}},df=st.out/st.n-r.out/r.n,dm=st.maxOut-r.maxOut;
-		if(dm>wv){wv=dm;line=`worst ${nm}: out ${mm(st.maxOut)} mm (rest ${mm(r.maxOut)}), ${pct(st.out/st.n)}% out (rest ${pct(r.out/r.n)}%)${st.out?`; exits ${sides(st.exits)}`:''}`;}
+const sidesOf=(e:HullStat['exits'])=>Object.entries(e).sort((a,b)=>b[1].max-a[1].max).map(([k,v])=>`${k} ${v.n} (≤${mm(v.max)} mm)`).join(', ');
+/** Hull containment rows (checks 1, 2): worst part by distance worsening, with its exit sides; breaches = fraction out +HULL_FRAC or max out +tolerance vs rest. Thymus lobes: only exits on a non-superior side, at most THYMUS_SIDE_MM. */
+function hullRow(m:Map<string,HullStat>,rest:Map<string,HullStat>,tolMM:number,fracTol:number):Row{
+	let wv=-Infinity,line='';const breaches:string[]=[],thy:string[]=[];
+	for(const [nm,st] of m){const r=rest.get(nm)??{out:0,n:1,maxOut:0,exits:{}};
+		if(THYMUS.test(nm)){const side=Math.max(0,...Object.entries(st.exits).filter(([k])=>k!=='superior').map(([,v])=>v.max));thy.push(`${nm.split(' ')[0]} ${pct(st.out/st.n)}% out, max ${mm(st.maxOut)} mm${st.out?` [${sidesOf(st.exits)}]`:''}`);if(side*MM>THYMUS_SIDE_MM)breaches.push(`${nm} ${mm(side)} mm out on a non-superior side`);continue;}
+		const df=st.out/st.n-r.out/r.n,dm=st.maxOut-r.maxOut;
+		if(dm>wv){wv=dm;line=`worst ${nm}: out ${mm(st.maxOut)} mm (rest ${mm(r.maxOut)}), ${pct(st.out/st.n)}% out (rest ${pct(r.out/r.n)}%)${st.out?`; exits ${sidesOf(st.exits)}`:''}`;}
 		if(dm*MM>tolMM||df>fracTol)breaches.push(`${nm} +${mm(dm)} mm / +${pct(df)}%`);}
-	return {line:line||'no visible parts',breaches};
+	return {line:(line||'no visible parts')+(thy.length?` · thymus: ${thy.join('; ')}`:''),breaches,worst:{v:wv,label:line}};
 }
 
 export const checks:Check[]=[
@@ -264,7 +298,7 @@ export const checks:Check[]=[
 		}
 		log(`test dates: ${testDates().map(d=>d.date+(d.label?` (${d.label})`:'')).join(', ')}`);
 	}},
-	{name:'organs inside rib cage (heart, bronchial trees, main bronchi, thymus; ≤2% more out, ≤3 mm farther vs rest)',async run(c){
+	{name:'organs inside rib cage (heart, bronchial trees, main bronchi: ≤2% more out, ≤3 mm farther vs rest; thymus lobes: superior exits allowed, any other side ≤1 mm)',async run(c){
 		const rest=await measure(c,null);c.assert(rest.chest.size>20,`only ${rest.chest.size} chest organs measured`);
 		await perDate(c,'rib-cage hull',(m,r)=>hullRow(m.chest,r.chest,HULL_MM,HULL_FRAC));
 	}},
@@ -272,51 +306,58 @@ export const checks:Check[]=[
 		const rest=await measure(c,null);c.assert(rest.abd.size===ABD_ORGANS.length,'abdominal organs');
 		await perDate(c,'pelvis/abdomen hull',(m,r)=>hullRow(m.abd,r.abd,HULL_MM,HULL_FRAC));
 	}},
-	{name:'organ neighbours (rectum, descending colon, thymus): penetration ≤1 mm deeper than at rest',async run(c){
-		const rest=await measure(c,null);c.assert(rest.neigh.size>10,'neighbour pairs');log(`rest penetration: ${[...rest.neigh].map(([k,v])=>`${k} ${mm(v)} mm`).join(', ')}`);
-		await perDate(c,'neighbours',(m,r)=>{const b:string[]=[];let worst='',wv=-Infinity;for(const [k,v] of m.neigh){const rv=r.neigh.get(k)!,d=v-rv;if(d>wv){wv=d;worst=`${k} ${mm(v)} mm (rest ${mm(rv)})`;}if(d*MM>NEIGH_MM)b.push(`${k} +${mm(d)} mm`);}return {line:`worst ${worst}`,breaches:b};});
+	{name:'organ neighbours (rectum, descending colon, thymus): penetration ≤1.5 mm deeper than at rest; encopresis rectum ratchets; descending colon × external oblique ≤1 mm',async run(c){
+		const rest=await measure(c,null);c.assert(rest.neigh.size>10,'neighbour pairs');for(const k of Object.keys(NEIGH_CAP))c.assert(rest.neigh.has(k),`NEIGH_CAP names an unmeasured pair ${k}`);
+		log(`rest penetration: ${[...rest.neigh].map(([k,v])=>`${k} ${mm(v)} mm`).join(', ')}`);
+		const peak=new Map<string,number>();
+		await perDate(c,'neighbours',(m,r)=>{const b:string[]=[];let worst='',wv=-Infinity;for(const [k,v] of m.neigh){const rv=r.neigh.get(k)!,d=v-rv,tol=NEIGH_CAP[k]??NEIGH_MM;peak.set(k,Math.max(peak.get(k)??-Infinity,d));if(d>wv){wv=d;worst=`${k} ${mm(v)} mm (rest ${mm(rv)})`;}if(d*MM>tol)b.push(`${k} +${mm(d)} mm (limit ${tol})`);}return {line:`worst ${worst}`,breaches:b,worst:{v:wv,label:worst}};},
+			()=>log(`largest worsening per capped pair: ${Object.entries(NEIGH_CAP).map(([k,t])=>`${k} +${mm(peak.get(k)!)} (limit ${t})`).join(', ')}`));
 	}},
-	{name:'eyes inside the orbits (globe centre ≤4 mm from the rest-relative orbit centre; ≤1.5% of the globe vertices inside the Skin at rest end up >0.5 mm outside it)',async run(c){
+	{name:'eyes inside the orbits (globe centre ≤1 mm from the rest-relative orbit centre; ≤1.5% of the globe vertices inside the Skin at rest end up >0.5 mm outside it; cornea × eyelid tarsal plates ≤0.5 mm deeper than at rest)',async run(c){
 		const rest=await measure(c,null);c.assert(rest.eyes.Left.n>1000&&rest.eyes.Right.n>1000,'globe vertices');
-		log(`rest: globe vertices outside the Skin (the globe front sits in the Skin's eye pocket) L ${rest.eyes.Left.outside}/${rest.eyes.Left.n}, R ${rest.eyes.Right.outside}/${rest.eyes.Right.n}`);
-		await perDate(c,'orbits',m=>{const b:string[]=[];const line=(['Left','Right'] as const).map(sd=>{const e=m.eyes[sd],f=e.newOut/Math.max(1,e.inRest);if(e.dev*MM>EYE_MM)b.push(`${sd} centre ${mm(e.dev)} mm`);if(f>GLOBE_FRAC)b.push(`${sd} ${pct(f)}% newly outside, up to ${e.worstMM.toFixed(1)} mm`);return `${sd[0]} centre ${mm(e.dev)} mm, newly outside ${e.newOut}/${e.inRest} (${pct(f)}%, farthest ${e.worstMM.toFixed(1)} mm)`;}).join(' · ');return {line,breaches:b};});
+		log(`rest: globe vertices outside the Skin (the globe front sits in the Skin's eye pocket) L ${rest.eyes.Left.outside}/${rest.eyes.Left.n}, R ${rest.eyes.Right.outside}/${rest.eyes.Right.n}; cornea × tarsal plates L ${mm(rest.eyes.Left.lids.upper)} / ${mm(rest.eyes.Left.lids.lower)}, R ${mm(rest.eyes.Right.lids.upper)} / ${mm(rest.eyes.Right.lids.lower)} mm (upper / lower)`);
+		const W={dev:0,frac:0,lid:-Infinity};
+		await perDate(c,'orbits',(m,r)=>{const b:string[]=[];const line=(['Left','Right'] as const).map(sd=>{const e=m.eyes[sd],f=e.newOut/Math.max(1,e.inRest),lu=e.lids.upper-r.eyes[sd].lids.upper,ll=e.lids.lower-r.eyes[sd].lids.lower;W.dev=Math.max(W.dev,e.dev);W.frac=Math.max(W.frac,f);W.lid=Math.max(W.lid,lu,ll);
+			if(e.dev*MM>EYE_MM)b.push(`${sd} centre ${mm(e.dev)} mm`);if(f>GLOBE_FRAC)b.push(`${sd} ${pct(f)}% newly outside, up to ${e.worstMM.toFixed(1)} mm`);for(const [u,d] of [['upper',lu],['lower',ll]] as const)if(d*MM>LID_MM)b.push(`${sd} cornea × ${u} tarsal plate +${mm(d)} mm`);
+			return `${sd[0]} centre ${mm(e.dev)} mm, newly outside ${e.newOut}/${e.inRest} (${pct(f)}%, farthest ${e.worstMM.toFixed(1)} mm), lids ${mm(e.lids.upper)} / ${mm(e.lids.lower)} mm`;}).join(' · ');return {line,breaches:b};},
+			()=>log(`worst over all dates: centre ${mm(W.dev)} mm, globe newly outside ${pct(W.frac)}%, cornea × tarsal plate +${mm(W.lid)} mm vs rest`));
 	}},
 	{name:'teeth seated (root-end 30% of each visible tooth within 1.5 mm of where the jaw carries it: own fx, then the affine fit of the jaw bone around it)',async run(c){
 		const rest=await measure(c,null);c.assert(rest.teeth.size===TEETH.length,`teeth measured ${rest.teeth.size}`);c.assert([...rest.teeth.values()].every(v=>v<1e-6),'rest displacement is 0');
 		// Sensitivity: at 10 y premolars and canines are erupting (ERUPT_TRAVEL 6 mm), so leaving the tooth's fx out of the expected position must show millimetres.
 		const probe=await measure(c,'2013-06-22'),seen=Math.max(...probe.teethNoFx.values());log(`sensitivity: 2013-06-22 without the teeth's own fx, the largest root displacement is ${mm(seen)} mm (eruption offset)`);c.assert(seen>0.002,`the teeth metric does not see a ${mm(seen)} mm eruption offset`);
 		await perDate(c,'teeth vs jaw',m=>{const b:string[]=[];let worst='',wv=-Infinity;for(const [nm,d] of m.teeth){if(d>wv){wv=d;worst=`${nm} ${mm(d)} mm`;}if(d*MM>TOOTH_MM)b.push(`${nm} ${mm(d)} mm`);}
-			return {line:m.teeth.size?`${m.teeth.size} visible · worst ${worst}`:'no visible teeth',breaches:b};});
+			return {line:m.teeth.size?`${m.teeth.size} visible · worst ${worst}`:'no visible teeth',breaches:b,worst:{v:wv,label:worst}};});
 	}},
-	{name:'bones inside the skin (≤0.5% of the vertices inside the Skin at rest end up >0.5 mm outside it; hands and feet 1%)',async run(c){
+	{name:'bones inside the skin (≤0.5% of the vertices inside the Skin at rest end up >0.5 mm outside it, none >2 mm; Mandible none >1 mm)',async run(c){
 		const rest=await measure(c,null);c.assert(rest.bones.size>200,`bones measured ${rest.bones.size}`);
 		const restOut=[...rest.bones].filter(([,b])=>b.outside/b.n>0.005).sort((a,b)=>b[1].outside/b[1].n-a[1].outside/a[1].n);
 		log(`rest: ${restOut.length} bones already >0.5% outside the Skin (baseline, excluded vertex by vertex): ${restOut.slice(0,10).map(([n,b])=>`${n} ${pct(b.outside/b.n)}%`).join(', ')}`);
+		let mand=0,far=0,farBy='';
 		await perDate(c,'Skin containment',m=>{const b:string[]=[];let worst='',wv=-Infinity;
-			for(const [nm,st] of m.bones){const f=st.newOut/Math.max(1,st.inRest);if(f>wv||(f===wv&&st.worstMM>0)){wv=f;worst=`${nm}: ${pct(f)}% newly outside, farthest ${st.worstMM.toFixed(1)} mm (${pct(st.outside/st.n)}% outside in all)`;}if(f>(HAND_FOOT.test(nm)?BONE_FRAC_HF:BONE_FRAC))b.push(`${nm} ${pct(f)}% / ${st.worstMM.toFixed(1)} mm`);}
-			return {line:`worst ${worst}`,breaches:b};});
+			for(const [nm,st] of m.bones){const f=st.newOut/Math.max(1,st.inRest),lim=nm==='Mandible'?MANDIBLE_MM:BONE_MM;if(nm==='Mandible')mand=Math.max(mand,st.worstMM);if(st.worstMM>far){far=st.worstMM;farBy=nm;}
+				if(f>wv||(f===wv&&st.worstMM>0)){wv=f;worst=`${nm}: ${pct(f)}% newly outside, farthest ${st.worstMM.toFixed(1)} mm (${pct(st.outside/st.n)}% outside in all)`;}if(f>BONE_FRAC||st.worstMM>lim)b.push(`${nm} ${pct(f)}% / ${st.worstMM.toFixed(1)} mm`);}
+			return {line:`worst ${worst} · Mandible ${(m.bones.get('Mandible')?.worstMM??0).toFixed(1)} mm`,breaches:b,worst:{v:wv,label:worst}};},
+			()=>log(`farthest newly outside over all dates: ${far.toFixed(1)} mm (${farBy}); Mandible ${mand.toFixed(1)} mm`));
 	}},
-	{name:'joint seams (parent vs child joint point ≤1 mm; bones across each joint within 1 cm at rest close ≤1 mm beyond the rest gap × the segments\' smallest scale; hard for hip bone × femur and scapula × humerus, Task 14d)',async run(c){
-		const rest=await measure(c,null);c.assert(rest.joints.length===14,'14 joints');log(`pairs per joint: ${jointCache!.map(j=>`${j.id} ${j.pairs.length}`).join(', ')}`);
-		// Task 14d: hip bone × femur is a hard gate (the thigh map is Jacobian-matched to the axial remap at the hip): never more than CROSS_MM closed beyond the scaled rest gap, on every date. So is scapula × humerus (below). The others still report.
-		const hips:string[]=[],shoulders:string[]=[];
-		await perDate(c,'joints',(m,_r,date)=>{const b:string[]=[];let we=0,wj='',wd=Infinity,wl='';
+	{name:'joint seams (parent vs child joint point ≤1 mm; bones across each joint within 1 cm at rest close ≤1 mm beyond the rest gap × the segments\' smallest scale, atlas × occipital and C7 / T1 ≤0.5 mm; scapula × humerus never cross)',async run(c){
+		const rest=await measure(c,null);c.assert(rest.joints.length===14,'14 joints');log(`pairs per joint: ${jointCache!.map(j=>`${j.id} ${j.pairs.length}`).join(', ')}; axial pairs: ${[...rest.axial].map(([k,v])=>`${k} ${v.pairs}`).join(', ')}`);
+		for(const [k,v] of rest.axial)c.assert(v.pairs>0,`no ${k} pairs within ${PAIR_NEAR*100} cm at rest`);
+		await perDate(c,'joints',m=>{const b:string[]=[];let we=0,wj='',wd=Infinity,wl='';
 			for(const j of m.joints){if(j.err>we){we=j.err;wj=j.id;}if(j.minD<wd){wd=j.minD;wl=`${j.id} (${j.pair}) ${mm(j.minD)} mm: gap ${mm(j.gap)} (rest ${mm(j.restGap)})`;}if(j.err*MM>JOINT_MM)b.push(`${j.id} joint ${mm(j.err)} mm`);if(j.minD*MM<-CROSS_MM)b.push(`${j.id} ${mm(j.minD)} mm (${j.pair}, gap ${mm(j.gap)})`);}
-			const hip=m.joints.filter(j=>j.id==='lThigh'||j.id==='rThigh');for(const j of hip)if(j.minD*MM<-CROSS_MM)hips.push(`${date} ${j.id} ${mm(j.minD)} mm`);
-			// Fix round 1: scapula × humerus is hard too, rest-relative closure ≥ −CROSS_MM and no pair crossing (absolute gap ≥ 0).
-			const sh=m.joints.filter(j=>j.id==='lUpperArm'||j.id==='rUpperArm');for(const j of sh){if(j.minD*MM<-CROSS_MM)shoulders.push(`${date} ${j.id} closes ${mm(j.minD)} mm`);if(j.minGap<0)shoulders.push(`${date} ${j.id} crosses (gap ${mm(j.minGap)} mm)`);}
-			return {line:`joint point max ${mm(we)} mm${wj?` (${wj})`:''} · most closed ${wl} · hip bone × femur L ${mm(hip[0].minD)} / R ${mm(hip[1].minD)} mm · scapula × humerus ${sh.map(j=>`${j.id[0].toUpperCase()} ${Number.isFinite(j.minD)?`${mm(j.minD)} (gap ${mm(j.minGap)})`:'hidden'}`).join(' / ')} mm`,breaches:b};});
-		c.assert(!hips.length,`hip bone × femur closes more than ${CROSS_MM} mm beyond the scaled rest gap: ${hips.join(', ')}`);
-		c.assert(!shoulders.length,`scapula × humerus: ${shoulders.join(', ')}`);
+			for(const [k,v] of m.axial)if(v.minD*MM<-AXIAL_MM)b.push(`${k} ${mm(v.minD)} mm`);
+			// Task 14d: scapula × humerus never crosses (absolute gap ≥ 0).
+			const sh=m.joints.filter(j=>j.id==='lUpperArm'||j.id==='rUpperArm');for(const j of sh)if(j.minGap<0)b.push(`${j.id} scapula × humerus crosses (gap ${mm(j.minGap)} mm)`);
+			return {line:`joint point max ${mm(we)} mm${wj?` (${wj})`:''} · most closed ${wl} · ${[...m.axial].map(([k,v])=>`${k} ${mm(v.minD)}`).join(' · ')} mm · scapula × humerus gap ${sh.map(j=>`${j.id[0].toUpperCase()} ${Number.isFinite(j.minGap)?mm(j.minGap):'hidden'}`).join(' / ')} mm`,breaches:b,worst:{v:-wd,label:wl}};});
 	}},
 	{name:'vertebrae and disks don\'t interpenetrate (penetration between neighbours ≤1 mm deeper than at rest; scoliosis peak and every test date)',async run(c){
 		const rest=await measure(c,null),sp=peaks().find(p=>p.id.startsWith('scoliosis'));c.assert(!!sp,'scoliosis peak');c.assert(rest.vert.size>40,`vertebral pairs ${rest.vert.size}`);log(`scoliosis peak ${sp!.date}; ${rest.vert.size} pairs; rest penetration > 1 mm: ${[...rest.vert].filter(([,v])=>v>0.001).map(([k,v])=>`${k} ${mm(v)}`).join(', ')||'none'}`);
 		await perDate(c,'vertebrae / disks',(m,r)=>{const b:string[]=[];let worst='',wv=-Infinity;for(const [k,v] of m.vert){const rv=r.vert.get(k)!,d=v-rv;if(d>wv){wv=d;worst=`${k} ${mm(v)} mm (rest ${mm(rv)})`;}if(d*MM>VERT_MM)b.push(`${k} +${mm(d)} mm`);}
-			return {line:`worst ${worst}`,breaches:b};});
+			return {line:`worst ${worst}`,breaches:b,worst:{v:wv,label:worst}};});
 	}},
-	{name:'fracture fragments vs callus at days 0, 10, 25, 45 (distal cap inside the callus shell or within 2 mm of the proximal cap)',async run(c){
+	{name:'fracture fragments vs callus at days 0, 10, 25, 45 (distal cap inside the callus shell or within 2 mm of the proximal cap; never fewer seated than in the rest pose)',async run(c){
 		const s=await setup(c),res=fractureMeasure(s);c.assert(typeof res!=='string',String(res));
-		for(const r of res as Exclude<typeof res,string>)log(`day ${r.day} (${r.date}): ${r.line}`);
+		for(const r of res as Exclude<typeof res,string>){log(`day ${r.day} (${r.date}): ${r.line}`);c.assert(!r.worse,`fracture day ${r.day}: fewer distal-cap vertices seated than in the rest pose`);}
 	}},
 	{name:'GLSL/TS parity at scale (2,048 real vertices from mixed-weight parts, real merged fx; max error < 1e-5 m)',async run(c){
 		const s=await setup(c),r=await gpuParity(s.g,s.seg,s.segOff,s.soft,(date:string)=>{const p=poseAt(s,date);return {ws:p.ws!,fx:p.fx};},['2003-06-22',peaks().find(p=>p.id.startsWith('encopresis'))?.date??'2011-01-01']);
@@ -337,7 +378,7 @@ function fractureMeasure(s:Setup){
 	if(meshes.length<5||!meshes.slice(2,5).every(m=>m instanceof T.Mesh))return `the fracture layer changed: expected head fragment, shaft fragment, head cap, shaft cap and callus meshes as the group's first 5 children, got ${meshes.length} children`;
 	// Children in build order: head fragment, shaft fragment, head cap, shaft cap, callus, two clots. The caps' pose uniforms come from their onBeforeCompile.
 	const poseOf=(m:T.Mesh)=>{const sh={uniforms:{} as Record<string,{value:T.Matrix4}>,vertexShader:'#include <common>\n#include <begin_vertex>',fragmentShader:'#include <color_fragment>\n#include <opaque_fragment>'};try{(m.material as T.Material).onBeforeCompile(sh as never,undefined as never);}catch(e){return null;}return sh.uniforms.uPose?.value instanceof T.Matrix4?sh.uniforms.uPose.value:null;};
-	const capHead=meshes[2],capShaft=meshes[3],callus=meshes[4],Mp=poseOf(capHead),Md=poseOf(capShaft),seg=SEGMENTS.indexOf('lUpperArm'),out:{day:number;date:string;line:string}[]=[];
+	const capHead=meshes[2],capShaft=meshes[3],callus=meshes[4],Mp=poseOf(capHead),Md=poseOf(capShaft),seg=SEGMENTS.indexOf('lUpperArm'),out:{day:number;date:string;line:string;worse:boolean}[]=[];
 	if(!Mp||!Md)return 'the fracture layer changed: the caps\' materials no longer expose a uPose Matrix4 uniform from onBeforeCompile';
 	const posed=(m:T.Mesh,M:T.Matrix4|null)=>{const a=(m.geometry.getAttribute('position').array as Float32Array).slice();if(M){const v=new T.Vector3();for(let k=0;k<a.length;k+=3){v.fromArray(a,k).applyMatrix4(M);v.toArray(a,k);}}return a;};
 	const warped=(a:Float32Array,ws:WarpState|null)=>{if(!ws)return a;const o=new Float32Array(a.length),q:Vec3=[0,0,0];for(let k=0;k<a.length;k+=3){warpPoint(ws,[a[k],a[k+1],a[k+2]],seg,seg,1,false,q);o.set(q,k);}return o;};
@@ -351,7 +392,10 @@ function fractureMeasure(s:Setup){
 			return {ok:ok/n,worst,inCallus:inCallus/n};
 		};
 		const w=stat(ws),r=stat(null);
-		out.push({day,date,line:`${pct(w.ok)}% of distal-cap vertices seated (rest pose ${pct(r.ok)}%), ${pct(w.inCallus)}% inside the callus (rest ${pct(r.inCallus)}%), worst unseated ${mm(w.worst)} mm from the proximal cap (rest ${mm(r.worst)})${callus.visible?'':' · callus not yet visible'}${w.ok<r.ok-1e-9?' · ✗ worse than rest':''}`});
+		out.push({day,date,line:`${pct(w.ok)}% of distal-cap vertices seated (rest pose ${pct(r.ok)}%), ${pct(w.inCallus)}% inside the callus (rest ${pct(r.inCallus)}%), worst unseated ${mm(w.worst)} mm from the proximal cap (rest ${mm(r.worst)})${callus.visible?'':' · callus not yet visible'}${w.ok<r.ok-1e-9?' · ✗ worse than rest':''}`,worse:w.ok<r.ok-1e-9});
 	}
 	layer.dispose();return out;
 }
+
+/** For scratch probes (not used by the checks): the per-date pose and warp, as measured. */
+export const clipDebug={setup,poseAt,warpPart,measure};

@@ -40,18 +40,19 @@ const SEAM_X=0.0006;
  * groin (the midline crotch rides the pelvis, the inner thigh the femur: 3.7 mm apart at birth 10 cm below the hip). The narrowed groin blend (rig ROOT_T) wins most of it back. Before → after fix round 1, flipped / torn / out:
  * birth 182/756/31 → 186/762/37, 1 y 136/644/19 → 132/666/31, 10 y 6/68/0 → 9/224/0, 14 y 3/82/0 → 3/217/0 (hip torn 27 → 124), the infants 136/4/12 → 206/18/24 and 122/4/14 → 135/9/10, ±2% 2/87/0 → 2/103/0;
  * the new bodies (trunk-only stature renormalisation) move the rest.
+ * Task 15b lowered it (the rig's Skin facing rule: the flank Skin under the resting forearm rides the trunk): birth 186/762/37 → 178/753/35, 1 y 132/666/31 → 123/661/29, 3 y torn 216 → 197, 6 y 328 → 325, 10 y 9/224 → 7/191, 14 y torn 217 → 193, ±2% torn 103 → 93.
  * The goal is 0; lower the entries as the warp improves, never raise them. '±2%' counts every triangle. */
 const SEAM_RATCHET:Record<string,[number,number,number]>={
 	'hand-built child (S .75, head 1.2, legs .9)':[9,8,0],
-	'bodyAt 2003-06-22':[186,762,37],
-	'bodyAt 2004-06-22':[132,666,31],
-	'bodyAt 2006-06-22':[30,216,0],
-	'bodyAt 2009-06-22':[15,328,0],
-	'bodyAt 2013-06-22':[9,224,0],
-	'bodyAt 2017-06-22':[3,217,0],
+	'bodyAt 2003-06-22':[178,753,35],
+	'bodyAt 2004-06-22':[123,661,29],
+	'bodyAt 2006-06-22':[30,197,0],
+	'bodyAt 2009-06-22':[15,325,0],
+	'bodyAt 2013-06-22':[7,191,0],
+	'bodyAt 2017-06-22':[3,193,0],
 	'infant (S .3, head 2, legs 0.7)':[206,18,24],
 	'infant (S .3, head 2, legs 0.8)':[135,9,10],
-	'±2%':[2,103,0],
+	'±2%':[2,93,0],
 };
 /** The Task 14c limb ratchet (flipped / torn / out-of-ratio), kept as the baseline of LIMB_GOAL. */
 const LIMB_14C:Record<string,[number,number,number]>={
@@ -81,8 +82,9 @@ const AXIAL_RESIDUAL:Record<string,[number,number,number]>={
 	'infant (S .3, head 2, legs 0.7)':[17,0,0],
 	'infant (S .3, head 2, legs 0.8)':[17,0,0],
 };
-/** Skin triangles welded between a resting hand / forearm and the thigh / trunk that seamDefects excludes (seam.ts). Frozen: any change means the weights or the mesh changed. */
-const SEAM_BRIDGED=65;
+/** Skin triangles welded between a resting hand / forearm and the thigh / trunk that seamDefects excludes (seam.ts). Frozen: any change means the weights or the mesh changed. Task 15b's Skin facing rule (rig script FACE: the flank
+ * Skin under the resting forearm rides the trunk) turned 11 of the 65 welds into ordinary counted triangles (65 → 54). */
+const SEAM_BRIDGED=54;
 /** The ratchet entry for a label, or a clear failure when there is none. */
 const ratchetFor=(c:CheckContext,label:string):[number,number,number]=>{const r=SEAM_RATCHET[label];c.assert(!!r,`SEAM_RATCHET has no entry for "${label}": measure it and add one`);return r??[0,0,0];};
 /** The seam gate's bodies: bodyAt at birth, 1, 3, 6, 10 and 14 y, the hand-built child and the two hand-built infants (S .3, head 2, bone .9 / soft 1.25). */
