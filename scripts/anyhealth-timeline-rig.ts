@@ -1,12 +1,13 @@
 // Builds the AnyHealth timeline rig and per-vertex segment weights from the rest-pose atlas: npx tsx scripts/anyhealth-timeline-rig.ts
 // Writes app/anyhealth/timeline/growth/rig.json (a Rig) and public/anyhealth/models/segments.bin
-// (per atlas part in order, vertexCount × 4 bytes: byte0 = segA | segB<<4, byte1 = round(weightA*255), bytes 2-3 = uint16 LE round(dBone / 2 µm), the rest distance to the nearest bone (distance field); see growth/warp.ts SEG_STRIDE).
+// (per atlas part in order, vertexCount × 4 bytes: byte0 = segA | segB<<4, byte1 = round(weightA*255), bytes 2-3 = uint16 LE round(dBone / 2 µm), the rest distance to the nearest bone (distance field; made sliver-safe on soft parts, SLIVER_BETA); see growth/warp.ts SEG_STRIDE).
 // Weights (Task 14a): per joint, a child-side indicator centred on the joint plane, faded into the nearest-bone side where one bone clearly owns the tissue; the indicators combine into a tree partition of unity (see WEIGHTS below).
 import fs from 'node:fs';
 import {loadAtlasNode} from '../app/anyhealth/timeline/check/node-atlas';
 import {boneSegment} from '../app/anyhealth/timeline/growth/segment-map';
 import {SEG_STRIDE,D_UNIT} from '../app/anyhealth/timeline/growth/warp';
 import {SEGMENTS,type Rig,type Segment,type SegmentId,type Vec3} from '../app/anyhealth/timeline/types';
+import {SOFT_SYSTEMS} from '../app/anyhealth/timeline/engine';
 
 const RIG_OUT='app/anyhealth/timeline/growth/rig.json',BIN_OUT='public/anyhealth/models/segments.bin';
 /** Contact radius for joints, widened step by step if two bones never come that close. */
@@ -19,6 +20,24 @@ const CONTACT=[0.006,0.008,0.010,0.012];
  * Chosen by a sweep (see the Task 14a report); overridable as ANYHEALTH_<NAME> (pairs as "lo,hi"). */
 const env=(k:string,d:number)=>Number(process.env[`ANYHEALTH_${k}`]??d),pair=(k:string,d:string)=>(process.env[`ANYHEALTH_${k}`]??d).split(',').map(Number);
 const GRID=env('GRID',0.005),PLANE_B=env('PLANE_B',0.05),BLEND=env('BLEND',0.02),FADE=pair('FADE','0.02,0.06'),SIB=env('SIB',0.3),SIB_FAR=pair('SIB_FAR','0.1,0.4');
+/** Sliver-safe bone distance (Task 14c). The soft inflation moves a vertex by S(γs − γb)·min(1, dBone/ρ)·r, so a per-vertex dBone that is not near-linear across a thin triangle tilts that triangle past 90° (a flip):
+ * the distance field is only C0 (trilinear on GRID voxels, with medial-axis kinks between bones), and the atlas has slivers with altitudes down to 0.01 mm on 5 mm edges (intercostals, pharyngeal constrictors).
+ * So, per soft part, every triangle's apex (the vertex opposite its longest edge, at altitude h from it, projecting to parameter s along it) must satisfy |dBone_apex − lerp(dBone_a, dBone_b, s)| ≤ SLIVER_BETA·h.
+ * Cyclic projection onto these convex slabs (and dBone ≥ 0), moving the apex and both edge ends by the least-squares split, until no vertex moves more than D_UNIT (or SLIVER_ITERS passes): it converges because a constant field satisfies every slab.
+ * With |γs − γb| ≤ 0.4·γb that bounds the inflation's tilt of any triangle well below 90° (Task 14c report: axial seam flips at birth 136 → 34; the hand-built infants 1483 → 13). */
+const SLIVER_BETA=env('SLIVER_BETA',1),SLIVER_ITERS=env('SLIVER_ITERS',400);
+/** One sliver-safe pass over a part (see SLIVER_BETA); returns how many constraints moved a vertex by more than D_UNIT. */
+function sliverPass(pos:Float32Array,index:Uint32Array,D:Float64Array,beta:number):number{
+	let m=0;const L=(i:number,j:number)=>Math.hypot(pos[i*3]-pos[j*3],pos[i*3+1]-pos[j*3+1],pos[i*3+2]-pos[j*3+2]);
+	for(let t=0;t<index.length;t+=3){
+		const v0=index[t],v1=index[t+1],v2=index[t+2],e0=L(v1,v2),e1=L(v2,v0),e2=L(v0,v1),k=e0>=e1&&e0>=e2?0:e1>=e2?1:2,c=index[t+k],a=index[t+(k+1)%3],b=index[t+(k+2)%3],ab=[e0,e1,e2][k];if(ab<1e-9)continue;
+		const ux=pos[b*3]-pos[a*3],uy=pos[b*3+1]-pos[a*3+1],uz=pos[b*3+2]-pos[a*3+2],wx=pos[c*3]-pos[a*3],wy=pos[c*3+1]-pos[a*3+1],wz=pos[c*3+2]-pos[a*3+2];
+		const s=Math.min(1,Math.max(0,(ux*wx+uy*wy+uz*wz)/(ab*ab))),h=Math.hypot(uy*wz-uz*wy,uz*wx-ux*wz,ux*wy-uy*wx)/ab,lim=beta*h,dd=D[c]-(D[a]+(D[b]-D[a])*s);
+		const ex=dd>lim?dd-lim:dd<-lim?dd+lim:0;if(!ex)continue;
+		const l=ex/(1+(1-s)*(1-s)+s*s);D[c]=Math.max(0,D[c]-l);D[a]=Math.max(0,D[a]+l*(1-s));D[b]=Math.max(0,D[b]+l*s);if(Math.abs(ex)>D_UNIT)m++;
+	}
+	return m;
+}
 const NS=SEGMENTS.length,SEG=(id:SegmentId)=>SEGMENTS.indexOf(id);
 const r5=(v:number)=>Math.round(v*1e5)/1e5;
 const smoothstep=(a:number,b:number,x:number)=>{const t=Math.min(1,Math.max(0,(x-a)/(b-a)));return t*t*(3-2*t);};
@@ -122,7 +141,7 @@ async function main(){
 	const SUBTREE=SEGMENTS.map((_,i)=>{const out=[i];for(let k=0;k<out.length;k++)out.push(...KIDS[out[k]]);return out;});
 	const D=new Float64Array(NS),DS=new Float64Array(NS),c=new Float64Array(NS),W=new Float64Array(NS),EPS=1e-4;
 	const out=new Uint8Array(parts.reduce((s,p)=>s+p.position.length/3,0)*SEG_STRIDE);let o=0,mixed=0,dropped=0,maxDrop=0;
-	const dbgF=process.env.ANYHEALTH_FLOAT_OUT?new Float32Array(out.length/SEG_STRIDE*2):null;
+	const dbgF=process.env.ANYHEALTH_FLOAT_OUT?new Float32Array(out.length/SEG_STRIDE*2):null,dB=new Float64Array(out.length/SEG_STRIDE);
 	parts.forEach((g,pi)=>{
 		const fixed=boneSegment(atlas.parts[pi].name),v=g.position,nv=v.length/3;
 		if(fixed){const s=SEG(fixed);for(let i=0;i<nv;i++){if(dbgF){dbgF[o/SEG_STRIDE*2]=1;dbgF[o/SEG_STRIDE*2+1]=0;}out[o++]=s|s<<4;out[o++]=255;out[o++]=0;out[o++]=0;}return;}
@@ -147,9 +166,16 @@ async function main(){
 			let w=sB<0||kept<=0?1:W[sA]/kept;
 			if(Math.round(w*255)>=255){w=1;sB=sA;}else mixed++;
 			let dBone=Infinity;for(let s=0;s<NS;s++)dBone=Math.min(dBone,D[s]);
-			if(dbgF){dbgF[o/SEG_STRIDE*2]=w;dbgF[o/SEG_STRIDE*2+1]=dBone;}const du=Math.min(65535,Math.round(dBone/D_UNIT));out[o++]=sA|sB<<4;out[o++]=Math.round(w*255);out[o++]=du&255;out[o++]=du>>8;
+			if(dbgF){dbgF[o/SEG_STRIDE*2]=w;dbgF[o/SEG_STRIDE*2+1]=dBone;}dB[o/SEG_STRIDE]=dBone;out[o++]=sA|sB<<4;out[o++]=Math.round(w*255);o+=2;
 		}
 	});
+	// Sliver-safe dBone for the soft parts (the only ones inflated), then the uint16 bytes.
+	{let vo=0,maxMove=0,left=0;const t1=Date.now();
+		parts.forEach((g,pi)=>{const nv=g.position.length/3;
+			if(!boneSegment(atlas.parts[pi].name)&&SOFT_SYSTEMS.includes(atlas.parts[pi].system)){const D=dB.subarray(vo,vo+nv),D0=D.slice();let m=1;for(let it=0;it<SLIVER_ITERS&&m;it++)m=sliverPass(g.position,g.index,D,SLIVER_BETA);left+=m;for(let v=0;v<nv;v++)maxMove=Math.max(maxMove,Math.abs(D[v]-D0[v]));}
+			vo+=nv;});
+		for(let v=0;v<dB.length;v++){const du=Math.min(65535,Math.round(dB[v]/D_UNIT));out[v*SEG_STRIDE+2]=du&255;out[v*SEG_STRIDE+3]=du>>8;}
+		console.log(`sliver-safe dBone (beta ${SLIVER_BETA}): largest change ${(maxMove*1000).toFixed(2)} mm, ${left} constraints still moving after ${SLIVER_ITERS} passes (${Date.now()-t1} ms)`);}
 	if(dbgF)fs.writeFileSync(process.env.ANYHEALTH_FLOAT_OUT!,Buffer.from(dbgF.buffer));
 	if(o!==out.length)throw new Error(`wrote ${o} of ${out.length} bytes`);
 	fs.writeFileSync(BIN_OUT,out);

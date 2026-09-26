@@ -1,5 +1,5 @@
 /** Seam defects of the body warp over every atlas triangle whose part mixes segments (node checks only). */
-import {warpPoint,warpNormal,SEG_STRIDE,D_UNIT,type WarpState} from '../growth/warp';
+import {warpPoint,warpNormal,axialRates,AXIAL_SEGMENTS,SEG_STRIDE,D_UNIT,type WarpState} from '../growth/warp';
 import {SOFT_SYSTEMS} from '../engine';
 import type {NodeAtlas} from './node-atlas';
 import {SEGMENTS,type Rig,type Vec3} from '../types';
@@ -18,7 +18,7 @@ const MIN_EDGE=1e-4,MIN_AREA2=1e-10,TEAR=0.001;
 
 /** Counts, over triangles of parts with mixed segment weights (segments.bin: per part in atlas order, vertexCount × SEG_STRIDE bytes; soft parts get the soft-girth inflation from their bone distance, as in the engine):
  * - flipped: the warped face normal · the blended warped normal (warpNormal of the rest face normal, summed over the three vertices' weights) ≤ 0, i.e. an inverted triangle;
- * - torn: some warped edge > rest edge × the triangle's max segment scale + 1 mm;
+ * - torn: some warped edge > rest edge × the triangle's max segment scale + 1 mm (a limb segment: max(S·ℓ, S·γ); trunk / neck / head: the axial remap's local max(f′, g) at the vertex's rest height, Task 14c);
  * - ratioOut: some warped / rest edge ratio outside [0.2, 5] × the triangle's max segment scale.
  * Excluded (a rest-pose mesh defect, counted in `bridged`): Skin triangles that weld two vertices each wholly owned (weight 1) by a hand / forearm segment and a thigh / trunk segment (the resting hand and forearm
  * touch the thigh and flank). The rig moves those segments independently, so no blend weights can keep such a triangle intact. Every other weld between non-adjacent segments counts as a defect. */
@@ -31,7 +31,9 @@ export function seamDefects(ws:WarpState,geometry:NodeAtlas,segBin:Uint8Array):S
 		const sa=(v:number)=>bin[o+v*Z]&15,sb=(v:number)=>bin[o+v*Z]>>4,wa=(v:number)=>bin[o+v*Z+1]/255,R=part.position,isAx=(v:number)=>AXIAL[sa(v)]&&(wa(v)>=1||AXIAL[sb(v)]);
 		let mixed=false;for(let v=0;v<n&&!mixed;v++)mixed=bin[o+v*Z]!==bin[o]||(bin[o+v*Z+1]<255&&(bin[o+v*Z]&15)!==bin[o+v*Z]>>4)||AXIAL[sa(v)]||(wa(v)<1&&AXIAL[sb(v)]);if(!mixed)return;
 		const w=new Float64Array(n*3);for(let v=0;v<n;v++){P[0]=R[v*3];P[1]=R[v*3+1];P[2]=R[v*3+2];w.set(warpPoint(ws,P,sa(v),sb(v),wa(v),soft,[0,0,0],(bin[o+v*Z+2]|bin[o+v*Z+3]<<8)*D_UNIT),v*3);}
-		const segMax=(v:number)=>{const a=sa(v),b=sb(v),s=Math.max(ws.alongScale[a],girth[a]);return wa(v)<1?Math.max(s,ws.alongScale[b],girth[b]):s;};
+		// A limb segment's scale bound is max(S·ℓ, S·γ); an axial one's is the remap's local max(f′, g) at the vertex's rest height (soft parts: also the segment's soft girth, as for the limbs).
+		const segScale=(i:number,v:number)=>{if(i>=AXIAL_SEGMENTS)return Math.max(ws.alongScale[i],girth[i]);const [fp,gg]=axialRates(ws,R[v*3+1]);return Math.max(fp,gg,soft?ws.softScale[i]:0);};
+		const segMax=(v:number)=>{const a=sa(v),b=sb(v),s=segScale(a,v);return wa(v)<1?Math.max(s,segScale(b,v)):s;};
 		const len=(A:ArrayLike<number>,u:number,v:number)=>Math.hypot(A[u*3]-A[v*3],A[u*3+1]-A[v*3+1],A[u*3+2]-A[v*3+2]);
 		const cross=(A:ArrayLike<number>,a:number,b:number,c:number):Vec3=>{const ux=A[b*3]-A[a*3],uy=A[b*3+1]-A[a*3+1],uz=A[b*3+2]-A[a*3+2],vx=A[c*3]-A[a*3],vy=A[c*3+1]-A[a*3+1],vz=A[c*3+2]-A[a*3+2];return [uy*vz-uz*vy,uz*vx-ux*vz,ux*vy-uy*vx];};
 		const ix=part.index,name=geometry.atlas.parts[i].name,isSkin=name==='Skin';
@@ -42,7 +44,7 @@ export function seamDefects(ws:WarpState,geometry:NodeAtlas,segBin:Uint8Array):S
 			for(const [u,v] of [[a,b],[b,c],[c,a]]){const r0=len(R,u,v);if(r0<MIN_EDGE)continue;const r1=len(w,u,v),r=r1/r0;if(r1>r0*hi+TEAR)isTorn=true;if(r<0.2*hi||r>5*hi)isOut=true;}
 			if(isTorn){torn++;bin3.torn++;if(!worst)worst=`torn: ${name}`;}if(isOut){ratioOut++;bin3.ratioOut++;}let bad=isTorn||isOut;
 			const nr=cross(R,a,b,c);if(Math.hypot(...nr)<MIN_AREA2){if(bad)mark(name);continue;}
-			const nw=cross(w,a,b,c);let bx=0,by=0,bz=0;for(const v of [a,b,c]){warpNormal(ws,nr,sa(v),sb(v),wa(v),M);bx+=M[0];by+=M[1];bz+=M[2];}
+			const nw=cross(w,a,b,c);let bx=0,by=0,bz=0;for(const v of [a,b,c]){P[0]=R[v*3];P[1]=R[v*3+1];P[2]=R[v*3+2];warpNormal(ws,P,nr,sa(v),sb(v),wa(v),M);bx+=M[0];by+=M[1];bz+=M[2];}
 			if(nw[0]*bx+nw[1]*by+nw[2]*bz<=0){flipped++;bin3.flipped++;bad=true;if(!worst.startsWith('flipped'))worst=`flipped: ${name}`;}
 			if(bad)mark(name);
 		}
