@@ -45,6 +45,8 @@ export function seamDefects(ws:WarpState,geometry:NodeAtlas,segBin:Uint8Array):S
 		let mixed=false;for(let v=0;v<n&&!mixed;v++)mixed=bin[o+v*Z]!==bin[o]||(bin[o+v*Z+1]<255&&(bin[o+v*Z]&15)!==bin[o+v*Z]>>4)||AXIAL[sa(v)]||(wa(v)<1&&AXIAL[sb(v)]);if(!mixed)return;
 		const w=new Float64Array(n*3);for(let v=0;v<n;v++){P[0]=R[v*3];P[1]=R[v*3+1];P[2]=R[v*3+2];w.set(warpPoint(ws,P,sa(v),sb(v),wa(v),soft,[0,0,0],(bin[o+v*Z+2]|bin[o+v*Z+3]<<8)*D_UNIT),v*3);}
 		// A limb segment's scale bound is max(S·ℓ, S·γ); an axial one's is the remap's local max(f′, g) at the vertex's rest height (soft parts: also the remap's blended soft girth gs there, as the limbs use their soft girth).
+		// Ruling (Task 14d review): the bound is the local soft / bone Jacobian, as the brief's item 5 asks, and stays so: inside the taper soft parts use max(λ) + κ, past it S·γs, both the local soft Jacobian (the bone girth under tissue
+		// wrapped round a bone is the local map, not a seam; the torn counts are reported under this bound).
 		// A limb's, for a vertex in its joint taper (rest t < t1, the parent side included; Task 14d), is the local max(F′, λu, λv), as the axial one's includes the bone girth g (soft parts: also max(λ) + κ, the soft girth there);
 		// past the taper it is max(S·ℓe, S·γ) as before (soft parts S·γs; ℓe = the length-keeping along rate, header of growth/warp.ts).
 		const segScale=(i:number,v:number)=>{if(i>=AXIAL_SEGMENTS){const [F,lu,lv,k,tapered]=limbRates(ws,i,R[v*3],R[v*3+1],R[v*3+2]);return tapered?Math.max(F,lu,lv,soft?Math.max(lu,lv)+k:0):Math.max(F,soft?ws.softScale[i]:ws.boneScale[i]);}const [fp,gg,gs]=axialRates(ws,R[v*3+1]);return Math.max(fp,gg,soft?gs:0);};

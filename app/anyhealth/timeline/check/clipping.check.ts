@@ -142,7 +142,7 @@ interface Measure {
 	/** Rest only: per part, 1 where a (sampled) vertex is inside the Skin. */
 	flags:Map<number,Uint8Array>;
 	/** Per joint: parent vs child joint point error; the most-closed pair: gap now, rest gap, and gap − rest gap × the smallest along / bone scale of the two segments. */
-	joints:{id:string;err:number;minD:number;gap:number;restGap:number;pair:string}[];
+	joints:{id:string;err:number;minD:number;gap:number;restGap:number;pair:string;/** the smallest absolute gap over the joint's pairs (metres; negative = the bones cross) */minGap:number}[];
 	/** Neighbouring vertebra / disk pairs: penetration depth, both ways (metres). */
 	vert:Map<string,number>;
 	/** Rest only: the Skin shell's triangle classes. */
@@ -221,9 +221,9 @@ function measureNow(s:Setup,date:string|null,rest:Measure|null):Measure{
 	// 6 · joints.
 	const boneIdx=s.byName(boneNames),joints=jointPairs(s,boneIdx).map(J=>{
 		let err=0;if(pose.ws){const a=warpPoint(pose.ws,[...J.joint],J.parent,J.parent,1,false,[0,0,0]),b=warpPoint(pose.ws,[...J.joint],J.child,J.child,1,false,[0,0,0]);err=Math.hypot(a[0]-b[0],a[1]-b[1],a[2]-b[2]);}
-		const w=pose.ws,sc=w?Math.min(w.alongScale[J.parent],w.boneScale[J.parent],w.alongScale[J.child],w.boneScale[J.child]):1;let minD=Infinity,gap=0,restGap=0,pair='';
-		for(const p of J.pairs){if(!visibleOn(pose,p.pa)||!visibleOn(pose,p.pb))continue;const A=W(p.pa),B=W(p.pb),gp=[0,1,2].reduce((x,j)=>x+(B[p.vb*3+j]-A[p.va*3+j])*p.dir[j],0),d=gp-p.d*sc;if(d<minD){minD=d;gap=gp;restGap=p.d;pair=`${g.atlas.parts[p.pa].name} / ${g.atlas.parts[p.pb].name}`;}}
-		return {id:J.id,err,minD,gap,restGap,pair};
+		const w=pose.ws,sc=w?Math.min(w.alongScale[J.parent],w.boneScale[J.parent],w.alongScale[J.child],w.boneScale[J.child]):1;let minD=Infinity,gap=0,restGap=0,pair='',minGap=Infinity;
+		for(const p of J.pairs){if(!visibleOn(pose,p.pa)||!visibleOn(pose,p.pb))continue;const A=W(p.pa),B=W(p.pb),gp=[0,1,2].reduce((x,j)=>x+(B[p.vb*3+j]-A[p.va*3+j])*p.dir[j],0),d=gp-p.d*sc;minGap=Math.min(minGap,gp);if(d<minD){minD=d;gap=gp;restGap=p.d;pair=`${g.atlas.parts[p.pa].name} / ${g.atlas.parts[p.pb].name}`;}}
+		return {id:J.id,err,minD,gap,restGap,pair,minGap};
 	});
 	// Organ neighbours: the deepest (sampled) vertex of one part inside the other, both ways.
 	const grids=new Map<string,TriGrid>(),grid=(nm:string)=>{let t=grids.get(nm);if(!t){const ix=g.indicesOf(nm),P=concat(ix.map(W));let o=0;const I:number[]=[];for(const i of ix){for(const v of g.parts[i].index)I.push(v+o);o+=g.parts[i].position.length/3;}t=new TriGrid(P,I,0.005,{parityOnly:true});grids.set(nm,t);}return t;};
@@ -296,15 +296,18 @@ export const checks:Check[]=[
 			for(const [nm,st] of m.bones){const f=st.newOut/Math.max(1,st.inRest);if(f>wv||(f===wv&&st.worstMM>0)){wv=f;worst=`${nm}: ${pct(f)}% newly outside, farthest ${st.worstMM.toFixed(1)} mm (${pct(st.outside/st.n)}% outside in all)`;}if(f>(HAND_FOOT.test(nm)?BONE_FRAC_HF:BONE_FRAC))b.push(`${nm} ${pct(f)}% / ${st.worstMM.toFixed(1)} mm`);}
 			return {line:`worst ${worst}`,breaches:b};});
 	}},
-	{name:'joint seams (parent vs child joint point ≤1 mm; bones across each joint within 1 cm at rest close ≤1 mm beyond the rest gap × the segments\' smallest scale; hard for hip bone × femur, Task 14d)',async run(c){
+	{name:'joint seams (parent vs child joint point ≤1 mm; bones across each joint within 1 cm at rest close ≤1 mm beyond the rest gap × the segments\' smallest scale; hard for hip bone × femur and scapula × humerus, Task 14d)',async run(c){
 		const rest=await measure(c,null);c.assert(rest.joints.length===14,'14 joints');log(`pairs per joint: ${jointCache!.map(j=>`${j.id} ${j.pairs.length}`).join(', ')}`);
-		// Task 14d: hip bone × femur is a hard gate (the thigh map is Jacobian-matched to the axial remap at the hip): never more than CROSS_MM closed beyond the scaled rest gap, on every date. The others still report.
-		const hips:string[]=[];
+		// Task 14d: hip bone × femur is a hard gate (the thigh map is Jacobian-matched to the axial remap at the hip): never more than CROSS_MM closed beyond the scaled rest gap, on every date. So is scapula × humerus (below). The others still report.
+		const hips:string[]=[],shoulders:string[]=[];
 		await perDate(c,'joints',(m,_r,date)=>{const b:string[]=[];let we=0,wj='',wd=Infinity,wl='';
 			for(const j of m.joints){if(j.err>we){we=j.err;wj=j.id;}if(j.minD<wd){wd=j.minD;wl=`${j.id} (${j.pair}) ${mm(j.minD)} mm: gap ${mm(j.gap)} (rest ${mm(j.restGap)})`;}if(j.err*MM>JOINT_MM)b.push(`${j.id} joint ${mm(j.err)} mm`);if(j.minD*MM<-CROSS_MM)b.push(`${j.id} ${mm(j.minD)} mm (${j.pair}, gap ${mm(j.gap)})`);}
 			const hip=m.joints.filter(j=>j.id==='lThigh'||j.id==='rThigh');for(const j of hip)if(j.minD*MM<-CROSS_MM)hips.push(`${date} ${j.id} ${mm(j.minD)} mm`);
-			return {line:`joint point max ${mm(we)} mm${wj?` (${wj})`:''} · most closed ${wl} · hip bone × femur L ${mm(hip[0].minD)} / R ${mm(hip[1].minD)} mm`,breaches:b};});
+			// Fix round 1: scapula × humerus is hard too, rest-relative closure ≥ −CROSS_MM and no pair crossing (absolute gap ≥ 0).
+			const sh=m.joints.filter(j=>j.id==='lUpperArm'||j.id==='rUpperArm');for(const j of sh){if(j.minD*MM<-CROSS_MM)shoulders.push(`${date} ${j.id} closes ${mm(j.minD)} mm`);if(j.minGap<0)shoulders.push(`${date} ${j.id} crosses (gap ${mm(j.minGap)} mm)`);}
+			return {line:`joint point max ${mm(we)} mm${wj?` (${wj})`:''} · most closed ${wl} · hip bone × femur L ${mm(hip[0].minD)} / R ${mm(hip[1].minD)} mm · scapula × humerus ${sh.map(j=>`${j.id[0].toUpperCase()} ${Number.isFinite(j.minD)?`${mm(j.minD)} (gap ${mm(j.minGap)})`:'hidden'}`).join(' / ')} mm`,breaches:b};});
 		c.assert(!hips.length,`hip bone × femur closes more than ${CROSS_MM} mm beyond the scaled rest gap: ${hips.join(', ')}`);
+		c.assert(!shoulders.length,`scapula × humerus: ${shoulders.join(', ')}`);
 	}},
 	{name:'vertebrae and disks don\'t interpenetrate (penetration between neighbours ≤1 mm deeper than at rest; scoliosis peak and every test date)',async run(c){
 		const rest=await measure(c,null),sp=peaks().find(p=>p.id.startsWith('scoliosis'));c.assert(!!sp,'scoliosis peak');c.assert(rest.vert.size>40,`vertebral pairs ${rest.vert.size}`);log(`scoliosis peak ${sp!.date}; ${rest.vert.size} pairs; rest penetration > 1 mm: ${[...rest.vert].filter(([,v])=>v>0.001).map(([k,v])=>`${k} ${mm(v)}`).join(', ')||'none'}`);
