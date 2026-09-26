@@ -1,5 +1,5 @@
 'use client';
-/** The timeline's Issue tracker: an always-open glass panel on the right listing the issues active on the shown date, each with an Isolate issue / Show all toggle. It sits in the issue panel's footprint (--issue-panel-w / --panel-inset), so scene.tsx's issueFootprint() reserves its space and the body stays centred between the panels. On ≤767px it is a bottom sheet with a 44px peek bar. */
+/** The timeline's Issue tracker: an always-open glass panel on the right listing the issues active on the shown date, each with an Isolate issue / Show all button. It sits in the issue panel's footprint (--issue-panel-w / --panel-inset), so scene.tsx's issueFootprint() reserves its space and the body stays centred between the panels. On ≤767px it is a bottom sheet with a 44px peek bar. */
 import './tracker.css';
 import {useEffect,useMemo,useState} from 'react';
 import {ChevronUp} from 'lucide-react';
@@ -23,7 +23,7 @@ export default function IssueTracker({date,today,isolated,onIsolate}:{date:strin
 	const isolate=(id:string|null)=>{setOpen(false);onIsolate(id);};
 	return <aside className={`issue-tracker glass${open?' open':''}`} aria-label="Issue tracker">
 		<div className="tracker-head">
-			<span>Issue tracker</span><span className="tracker-count">{active} active</span>
+			<h2>Issue tracker</h2><span className="tracker-count">{active} active</span>
 		</div>
 		<button type="button" className="tracker-peek" aria-expanded={open} aria-controls="tracker-list" onClick={()=>setOpen(o=>!o)}>
 			<span>{plural(active,'active issue')}</span><ChevronUp size={16} aria-hidden/>
@@ -53,7 +53,8 @@ function Card({entry:{issue,script,state,day},isolated,onIsolate}:{entry:Tracker
 		{!!issue.chart?.items?.length&&<Chart chart={issue.chart}/>}
 		<div className="tracker-foot">
 			<span className="issue-source">Source: {issue.source==='Self-reported'?'Self-reported':`${issue.source} Records`}</span>
-			<button type="button" className="tracker-isolate" aria-pressed={isolated} onClick={()=>onIsolate(isolated?null:issue.id)}>{isolated?'Show all':'Isolate issue'}</button>
+			{/* An action button, not a toggle: its label names what a click does (no aria-pressed, which with a changing label would announce the opposite state). */}
+			<button type="button" className={`tracker-isolate${isolated?' on':''}`} onClick={()=>onIsolate(isolated?null:issue.id)}>{isolated?'Show all':'Isolate issue'}</button>
 		</div>
 	</article>;
 }
