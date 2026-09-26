@@ -289,7 +289,7 @@ export function fractureLayer():CustomLayer{
 				}
 				if(restyle||fade!==lastFade){
 					lastFade=fade;changed=true;solids.forEach(s=>fadeMesh(s.mesh,s.own,frame.ghost));fadeMaterial(callusMat,callusOwn,frame.ghost);
-					clots.forEach(k=>{k.uOpacity.value=k.opacity*hematoma*fade;});
+					clots.forEach(k=>{k.uOpacity.value=k.opacity*hematoma*fade;(k.mesh.material as T.Material).depthWrite=fade<1;});// faded: a frontmost surface for the ghost pass (issues/layer-fade.ts)
 				}
 			}else lastKey='';
 			return {changed,animating};

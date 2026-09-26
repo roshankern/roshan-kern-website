@@ -23,6 +23,7 @@ import {FX_ROWS,createFxTexture,mergeFx,writeFx,applyFxPoint,identityFx,type Res
 import {FX_PARS,FX_APPLY,FX_DISCARD,FX_GHOST} from './fx/part-fx-glsl';
 import {BIRTH_DATE} from '../health/types';
 import {twinOf} from './issues/layer-fade';
+import {climaxDay} from './camera/pose';
 import {toDays,fromDays} from '../health/dates';
 
 export interface EngineFrame {date:string;visible:SystemId[];isolate:string|null;now:number;
@@ -138,7 +139,7 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 		if(partFx){
 			// Ghost twins: clones with TFX_GHOST_PASS, sharing the hooks (so the same uniform objects); one program serves both (colour / depth state only).
 			const twin=(depth:boolean)=>{const t=m.clone();t.defines={...m.defines,TFX_GHOST_PASS:''};t.onBeforeCompile=m.onBeforeCompile;t.customProgramCacheKey=m.customProgramCacheKey;t.transparent=true;t.depthWrite=depth;t.colorWrite=!depth;return t;};
-			ghostTwins.get(m)?.color.dispose();ghostTwins.set(m,{color:twin(false),depth:m.depthWrite?twin(true):null});
+			{const old=ghostTwins.get(m);old?.color.dispose();old?.depth?.dispose();}ghostTwins.set(m,{color:twin(false),depth:m.depthWrite?twin(true):null});
 		}
 	};
 
@@ -312,10 +313,10 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 	const renderGhostPass=(renderer:T.WebGLRenderer,scene:T.Scene,camera:T.Camera)=>{
 		if(ghostU.tfxGhost.value<=.001)return;
 		// Only partFx meshes draw, each with its material's permanent ghost twins (no material is modified: no program switch); everything else (ground, platform, layers) is hidden for the pass.
-		const hidden:T.Object3D[]=[],swapped:{o:T.Mesh;m:T.Material;tw:{color:T.Material;depth:T.Material|null}}[]=[];
+		const hidden:T.Object3D[]=[],swapped:{o:T.Mesh;m:T.Material;tw:{color:T.Material;depth:T.Material|null};order:number}[]=[];
 		scene.traverseVisible(o=>{
 			const m=(o as T.Mesh).material as T.Material|T.Material[]|undefined;if(!m)return;const tw=Array.isArray(m)?undefined:ghostTwins.get(m);
-			if(tw)swapped.push({o:o as T.Mesh,m:m as T.Material,tw});else{o.visible=false;hidden.push(o);}
+			if(tw)swapped.push({o:o as T.Mesh,m:m as T.Material,tw,order:o.renderOrder});else{o.visible=false;hidden.push(o);}
 		});
 		const background=scene.background,autoClear=renderer.autoClear,shadows=renderer.shadowMap.autoUpdate,autoReset=renderer.info.autoReset;
 		try{
@@ -324,11 +325,12 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 				scene.background=null;renderer.autoClear=false;renderer.shadowMap.autoUpdate=false;renderer.info.autoReset=false;
 				// Depth pre-pass (colour off) of the non-focus parts whose own material writes depth (not the translucent skin), then the colour pass at LessEqual: only the frontmost ghost surface blends in, a silhouette, not an unsorted fog.
 				swapped.forEach(x=>{if(x.tw.depth)x.o.material=x.tw.depth;else x.o.visible=false;});renderer.render(scene,camera);
-				swapped.forEach(x=>{x.o.material=x.tw.color;x.o.visible=true;});renderer.render(scene,camera);
+				// Every twin is transparent, so three sorts them by centre; a twin with no depth twin (the translucent skin, which writes no depth) must draw after the ghosts behind it, as in pass 0 (opaque, then transparent).
+				swapped.forEach(x=>{x.o.material=x.tw.color;x.o.visible=true;if(!x.tw.depth)x.o.renderOrder=x.order+1e6;});renderer.render(scene,camera);
 			}
 		}finally{
 			scene.background=background;renderer.autoClear=autoClear;renderer.shadowMap.autoUpdate=shadows;renderer.info.autoReset=autoReset;
-			swapped.forEach(x=>{x.o.material=x.m;x.o.visible=true;});hidden.forEach(o=>{o.visible=true;});
+			swapped.forEach(x=>{x.o.material=x.m;x.o.visible=true;x.o.renderOrder=x.order;});hidden.forEach(o=>{o.visible=true;});
 		}
 	};
 
@@ -355,7 +357,8 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 			for(const s of SCRIPTS){if(!s.layer)continue;let ok=false;try{const layer=s.layer();ok=layer.init(layerCtx);if(ok)layers.push({script:s,layer});else layer.dispose();}catch(e){console.warn(`AnyHealth timeline: layer ${s.id} failed`,e);}if(!ok)noLayer.add(s.id);}
 			forceChange=true;remerge=true;boxCache.clear();boxJob=null;
 			// Prefetch every script's climax focus box (the guided stops) in idle time after the settle (settleSlice).
-			prefetchQueue=SCRIPTS.map(s=>({id:s.id,day:toDays(s.onset)-BIRTH+(s.climax??0)}));
+			// The day is pose.ts climaxDay, the one scene.tsx freezes each stop's box at (stopBoxDay), so every guided stop's lookup hits this key.
+			prefetchQueue=SCRIPTS.map(s=>({id:s.id,day:climaxDay(s)}));
 			// Software GL (SwiftShader, llvmpipe): pixel ratio 1 from the start.
 			if(o.renderer)try{const gl=o.renderer.getContext(),ext=gl.getExtension('WEBGL_debug_renderer_info') as {UNMASKED_RENDERER_WEBGL:number}|null,name=String(gl.getParameter(ext?ext.UNMASKED_RENDERER_WEBGL:0x1f01/* RENDERER */));if(/SwiftShader|llvmpipe/i.test(name))lowResNow();}catch{/* no GPU info: keep the ratio */}
 		},

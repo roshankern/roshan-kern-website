@@ -5,6 +5,7 @@ import {DEFAULT_VISIBLE} from '../../atlas/anatomy';
 import {nodeEngine} from './engine-node';
 import {ghostGpu} from './ghost-gpu';
 import {SCRIPTS,scriptFor,dayOf} from '../issues';
+import {climaxDay,stopBoxDay} from '../camera/pose';
 import {GHOST_ALPHA} from '../director/types';
 import {FX_ROWS} from '../fx/part-fx';
 import {toDays} from '../../health/dates';
@@ -28,7 +29,7 @@ const boxNear=(c:CheckContext,a:T.Box3|null,b:T.Box3|null,tol:number,what:string
 const fracture=(scene:T.Scene)=>{const g=scene.getObjectByName('fracture')!,mesh=g.children[0] as T.Mesh;return {group:g,mesh,own:mesh.material as T.Material,head:()=>mesh.material as T.Material};};
 
 /** The GPU run: the focused script's first part (F), a non-focus Heart (N), a switched-off Liver (H), a non-focus part half behind F (O) and a translucent skin-like part (S), on a date with no issue fx on them. */
-const gpu=()=>ghostGpu({date:'2010-01-01',focus:SCOLIOSIS,names:{F:scriptFor(SCOLIOSIS)!.parts[0],N:'Heart',H:'Liver',S:'Skin (ghost check)',O:'Aorta (ghost check)'}});
+const gpu=()=>ghostGpu({date:'2010-01-01',focus:SCOLIOSIS,names:{F:scriptFor(SCOLIOSIS)!.parts[0],N:'Heart',H:'Liver',S:'Skin (ghost check)',O:'Aorta (ghost check)',K:'Skin 2 (ghost check)',K2:'Skin far (ghost check)',M:'Pericardium (ghost check)',P:'Pleura (ghost check)'}});
 async function gpuRun(c:CheckContext){
 	const r=await gpu();if(!r){c.assert(process.env.ANYHEALTH_SKIP_GPU==='1','SKIPPED: playwright-core or Chromium not found (set ANYHEALTH_PLAYWRIGHT, see docs/anyhealth/timeline-checks.md) — set ANYHEALTH_SKIP_GPU=1 to skip this check explicitly');return null;}
 	c.assert(!r.errors.length,`shader compile: ${r.errors.join('\n')}`);return r;
@@ -80,6 +81,14 @@ export const checks:Check[]=[
 		for(const k of Object.keys(a) as (keyof typeof a)[])if(a[k].some((v,j)=>Math.abs(v-b[k][j])>3))bad.push(`${k}: ${a[k]} vs ${b[k]}`);
 		c.assert(!bad.length,bad.join('; '));c.assert(WHITE(b.N)&&WHITE(b.O),`non-focus parts still read solid at 0.002 (${b.N}, ${b.O})`);
 	}},
+	{name:'GPU ghost: onset keeps the translucent skin over the ghosts behind it, even when its mesh centre sorts behind them (ghost 0.001 vs 0.002 within 3 levels)',async run(c){
+		const r=await gpuRun(c);if(!r)return;const a=r.steps['ghost0.001'].K,b=r.steps['ghost0.002'].K;
+		c.assert(a[0]>=250&&a[1]>60&&a[1]<200,`red skin over the white part behind it at 0.001: a blend (${a})`);c.assert(a.every((v,j)=>Math.abs(v-b[j])<=3),`skin at 0.001 ${a} vs 0.002 ${b}`);
+	}},
+	{name:'GPU ghost: onset keeps a faded layer (fadeMesh ghost twin) in front of the ghost behind it (ghost 0.001 vs 0.002 within 3 levels)',async run(c){
+		const r=await gpuRun(c);if(!r)return;const a=r.steps['ghost0.001'].L,b=r.steps['ghost0.002'].L;
+		c.assert(a[1]>=250&&a[0]<=5,`the layer at 0.001 (${a})`);c.assert(a.every((v,j)=>Math.abs(v-b[j])<=3),`layer at 0.001 ${a} vs 0.002 ${b}`);
+	}},
 	{name:'GPU ghost: after prewarm no render compiles a program (ghost twins, depth twins, every ghost value)',async run(c){
 		const r=await gpuRun(c);if(!r)return;c.assert(r.programs.prewarm>0,`programs after prewarm: ${r.programs.prewarm}`);c.assert(r.programs.end===r.programs.prewarm,`programs: ${r.programs.prewarm} after prewarm, ${r.programs.end} after the run`);
 	}},
@@ -95,7 +104,7 @@ export const checks:Check[]=[
 		const at=(o:Partial<EngineFrame>)=>{engine.update(frame(date,{now:now+=16,...o}));const m=head();return {shown:group.visible,opacity:m.opacity,transparent:m.transparent,depthWrite:m.depthWrite};};
 		const v0=ownMat.version;
 		c.assert(at({}).shown&&head()===ownMat&&ownMat.opacity===1,'drawn solid with nothing focused');
-		for(const ghost of [.25,.5,1]){const r=at({focus:{id:SCOLIOSIS,ghost}});c.assert(r.shown,`ghost ${ghost}: drawn`);c.near(r.opacity,1+(GHOST_ALPHA-1)*ghost,1e-9,`ghost ${ghost}: opacity`);c.assert(r.transparent&&!r.depthWrite&&head()!==ownMat,`ghost ${ghost}: on its transparent ghost twin, no depth writes`);}
+		for(const ghost of [.25,.5,1]){const r=at({focus:{id:SCOLIOSIS,ghost}});c.assert(r.shown,`ghost ${ghost}: drawn`);c.near(r.opacity,1+(GHOST_ALPHA-1)*ghost,1e-9,`ghost ${ghost}: opacity`);c.assert(r.transparent&&r.depthWrite&&head()!==ownMat,`ghost ${ghost}: on its transparent ghost twin, writing depth`);}
 		c.assert(!at({focus:{id:SCOLIOSIS,ghost:.5},visible:DEFAULT_VISIBLE.filter(s=>s!=='skeletal')}).shown,'skeleton switched off: hidden, not ghosted');
 		const own=at({focus:{id:FRACTURE,ghost:1},visible:DEFAULT_VISIBLE.filter(s=>s!=='skeletal')});c.assert(own.shown&&own.opacity===1&&!own.transparent&&own.depthWrite,'own focus: solid, even with the skeleton off');
 		c.assert(at({focus:{id:CALLUS,ghost:1}}).opacity<1||!!scriptFor(CALLUS)!.focusAlso?.includes(FRACTURE),'callus focus without focusAlso ghosts the fracture layer');
@@ -135,12 +144,13 @@ export const checks:Check[]=[
 		c.assert(birth<today*.4,`spine box height at birth ${birth.toFixed(3)} m, today ${today.toFixed(3)} m`);
 		const b=engine.focusBox(SCOLIOSIS,0)!;c.assert(b.max.y<.6,`birth box top ${b.max.y.toFixed(3)} m is within a newborn's height`);
 	}},
-	{name:'focusBox prefetch: ready() queues every script\'s climax box, settleSlice finishes it in budgeted slices, and the guided stops then hit the cache',async run(c){
+	{name:'focusBox prefetch: ready() queues every script\'s climax box, settleSlice finishes it in budgeted slices, and every real stop (scene.tsx stopBoxDay: fractional climaxes included) then hits the cache',async run(c){
 		const g=await c.geometry(),{engine}=nodeEngine(g),fresh=nodeEngine(g).engine;engine.update(frame('2012-01-01'));
 		let slices=0,worst=0;for(;;){const t=performance.now(),done=engine.settleSlice(4);worst=Math.max(worst,performance.now()-t);slices++;if(done)break;c.assert(slices<5000,'prefetch never finished');}
-		const st=engine.stats().boxes,stops=SCRIPTS.map(s=>({id:s.id,day:toDays(s.onset)-BIRTH+(s.climax??0)})),keys=new Set(stops.map(s=>`${s.id}|${Math.floor(s.day)}`));
-		c.assert(st.pending===0&&st.cached>=keys.size&&st.misses===0,`after ${slices} slices: ${JSON.stringify(st)}, ${keys.size} stops`);c.assert(worst<50,`slowest slice ${worst.toFixed(1)} ms for a 4 ms budget`);
-		for(const s of stops)engine.focusBox(s.id,s.day+.5);const after=engine.stats().boxes;
+		const st=engine.stats().boxes,stops=SCRIPTS.map(s=>({id:s.id,day:stopBoxDay(s.id,0,scriptFor)})),keys=new Set(stops.map(s=>`${s.id}|${Math.floor(s.day)}`));
+		c.assert(st.pending===0&&st.cached>=keys.size&&st.misses===0,`after ${slices} slices: ${JSON.stringify(st)}, ${keys.size} stops`);c.assert(worst<15,`slowest slice ${worst.toFixed(1)} ms for a 4 ms budget`);
+		c.assert(stops.every(s=>s.day===climaxDay(scriptFor(s.id)!)),'stop box days are the climax days');
+		for(const s of stops)engine.focusBox(s.id,s.day);const after=engine.stats().boxes;
 		c.assert(after.misses===0&&after.hits===stops.length,`stop lookups: ${JSON.stringify(after)}`);
 		for(const s of stops.filter(x=>[FRACTURE,SCOLIOSIS,ACNE].includes(x.id)))boxNear(c,engine.focusBox(s.id,s.day),fresh.focusBox(s.id,s.day),1e-9,`${s.id}: prefetched = computed`);
 	}},

@@ -78,7 +78,7 @@ export const checks:Check[]=[
 		step('2009-09-20',1,3000);c.assert(shown(scene)>0,'fragments drawn at day 18');
 		step('2009-09-20',1,3100,{skeletal:false});c.assert(shown(scene)===0,'skeleton switched off hides the layer');
 		const head=scene.getObjectByName('fracture')!.children[0] as T.Mesh,look=()=>{const m=head.material as T.Material;return [m.opacity,m.transparent,m.depthWrite];};
-		step('2009-09-20',1,3200,{ghost:1});c.assert(shown(scene)>0,'focusing another issue fades the layer, it does not hide it');c.near(look()[0] as number,GHOST_ALPHA,1e-9,'fragment opacity at ghost 1');c.assert(look()[1]===true&&look()[2]===false,'a faded fragment is transparent without depth writes');
+		step('2009-09-20',1,3200,{ghost:1});c.assert(shown(scene)>0,'focusing another issue fades the layer, it does not hide it');c.near(look()[0] as number,GHOST_ALPHA,1e-9,'fragment opacity at ghost 1');c.assert(look()[1]===true&&look()[2]===true,'a faded fragment is transparent and writes depth (a frontmost surface for the ghost pass)');
 		step('2009-09-20',1,3300,{ghost:.5,skeletal:false});c.assert(shown(scene)===0,'the skeleton switch still hides a ghosted layer');
 		step('2009-09-20',1,3400);c.assert(shown(scene)>0&&JSON.stringify(look())==='[1,false,true]',`back to solid at ghost 0: ${look()}`);
 		step('2009-08-30',-1,4000);c.assert(shown(scene)===0,'reverse scrub before the break: nothing drawn');
