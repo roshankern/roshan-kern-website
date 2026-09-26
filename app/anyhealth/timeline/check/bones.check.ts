@@ -10,6 +10,7 @@ import {toDays,fromDays} from '../../health/dates';
 import {HEALED_DAY,TIMELINE_DENSITY,FRACTURE_DATE,FRACTURE_PART} from '../../fracture/model';
 import {createEngine} from '../engine';
 import {SEG_STRIDE} from '../growth/warp';
+import {GHOST_ALPHA} from '../director/types';
 import rigJson from '../growth/rig.json';
 import type {Rig} from '../types';
 
@@ -31,7 +32,8 @@ async function fakeContext(c:Parameters<Check['run']>[0]){
 	};
 	return {ctx,flies,scene,segments};
 }
-const frame=(date:string,direction:-1|0|1,now:number,o:{skeletal?:boolean;hidden?:boolean}={}):LayerFrame=>({systemVisible:s=>s==='skeletal'?o.skeletal??true:true,hiddenByIsolate:!!o.hidden,isolated:false,now,direction,ctx:{body:bodyAt(date),date}});
+/** `ghost`: another script is focused at that ghost. */
+const frame=(date:string,direction:-1|0|1,now:number,o:{skeletal?:boolean;ghost?:number}={}):LayerFrame=>({systemVisible:s=>s==='skeletal'?o.skeletal??true:true,ghost:o.ghost??0,focused:()=>false,isolated:false,now,direction,ctx:{body:bodyAt(date),date}});
 const shown=(scene:T.Scene)=>{let n=0;scene.traverseVisible(o=>{if((o as T.Mesh).isMesh)n++;});return n;};
 
 export const checks:Check[]=[
@@ -67,7 +69,7 @@ export const checks:Check[]=[
 		const {ctx,flies,scene,segments}=await fakeContext(c),layer=script(FRACTURE).layer!();
 		c.assert(layer.init(ctx),'init');c.assert(segments.length>0&&segments.every(s=>s==='lUpperArm'),'every material rides the left upper arm');
 		const box=layer.box();c.assert(!!box&&!box.isEmpty()&&box.containsPoint(new T.Vector3(.1904,1.261,-.0244)),'box frames the humerus');
-		const step=(date:string,dir:-1|0|1,now:number,o?:{skeletal?:boolean;hidden?:boolean})=>layer.update(toDays(date)-toDays(FRACTURE_DATE),frame(date,dir,now,o));
+		const step=(date:string,dir:-1|0|1,now:number,o?:{skeletal?:boolean;ghost?:number})=>layer.update(toDays(date)-toDays(FRACTURE_DATE),frame(date,dir,now,o));
 		step('2009-08-30',0,0);c.assert(shown(scene)===0,'nothing drawn before the break');
 		const cross=step('2009-09-02',1,100);c.assert(flies.length===1,`one fly on the forward crossing (${flies.length})`);c.assert(cross.animating,'snap animating');
 		step('2009-09-02',1,200);c.assert(flies.length===1,'no second fly while paused on the same day');
@@ -75,7 +77,10 @@ export const checks:Check[]=[
 		c.assert(!step('2009-09-02',1,100+380+700+10).animating,'snap finished');
 		step('2009-09-20',1,3000);c.assert(shown(scene)>0,'fragments drawn at day 18');
 		step('2009-09-20',1,3100,{skeletal:false});c.assert(shown(scene)===0,'skeleton switched off hides the layer');
-		step('2009-09-20',1,3200,{hidden:true});c.assert(shown(scene)===0,'isolating another issue hides the layer');
+		const head=scene.getObjectByName('fracture')!.children[0] as T.Mesh,look=()=>{const m=head.material as T.Material;return [m.opacity,m.transparent,m.depthWrite];};
+		step('2009-09-20',1,3200,{ghost:1});c.assert(shown(scene)>0,'focusing another issue fades the layer, it does not hide it');c.near(look()[0] as number,GHOST_ALPHA,1e-9,'fragment opacity at ghost 1');c.assert(look()[1]===true&&look()[2]===false,'a faded fragment is transparent without depth writes');
+		step('2009-09-20',1,3300,{ghost:.5,skeletal:false});c.assert(shown(scene)===0,'the skeleton switch still hides a ghosted layer');
+		step('2009-09-20',1,3400);c.assert(shown(scene)>0&&JSON.stringify(look())==='[1,false,true]',`back to solid at ghost 0: ${look()}`);
 		step('2009-08-30',-1,4000);c.assert(shown(scene)===0,'reverse scrub before the break: nothing drawn');
 		step('2009-09-05',1,5000);c.assert(flies.length===2,'a new forward crossing flies again');
 		step('2009-08-20',-1,6000);step('2009-09-05',-1,7000);c.assert(flies.length===2,'a crossing with direction -1 does not fly');

@@ -78,13 +78,13 @@ export interface CustomLayer {
 	dispose():void;
 }
 export interface LayerFrame {
-	/** Visibility of each system (the switches), or for isolate, whether this script is isolated. */
+	/** Visibility of each system (the switches); always true for a focused script's layer (the focused id or its focusAlso: a focus shows its issue whatever the switches say, as its parts). */
 	systemVisible:(s:SystemId)=>boolean;
-	/** True when some script is isolated and it isn't this one: hide everything. @deprecated v2: replaced by `ghost` (Task 3 removes it). */
-	hiddenByIsolate:boolean;
-	/** v2: 0..1, how far this layer fades toward GHOST_ALPHA (director/types.ts) because another script is focused; 0 when this script is focused or nothing is. Layers scale their opacity by mix(1, GHOST_ALPHA, ghost) instead of hiding. Optional until Task 3 makes the engine always set it. */
-	ghost?:number;
-	/** True when this script is the one isolated. */
+	/** 0..1, how far this layer fades toward GHOST_ALPHA (director/types.ts) because another script is focused; 0 when this script is focused (or in the focused script's focusAlso) or nothing is. Layers scale their opacity by mix(1, GHOST_ALPHA, ghost) (issues/layer-fade.ts) instead of hiding. */
+	ghost:number;
+	/** Whether a script is focused as `isolated` means it (the focused id or in its focusAlso, at ghost > 0), e.g. for a layer that yields to another script's copy of its marks. */
+	focused(id:string):boolean;
+	/** True when this script is focused (the focused id, or listed in its focusAlso) at ghost > 0, guided or manual Isolate: what a layer drawn "only when isolated" keys on. */
 	isolated:boolean;
 	now:number;
 	/** Wall-clock direction of the last date change: 1 forward, -1 back, 0 none. */
@@ -125,6 +125,8 @@ export interface IssueScript {
 	approachDays?:number;
 	/** v2 director: unit direction from the focus target to the camera for this stop. Default: the default view's direction. */
 	view?:Vec3;
+	/** v2: script ids whose layers and parts stay solid when this script is focused (a stop drawn by another script's layer, e.g. the callus by the fracture layer). The engine's focus flags, layer ghosting and focusBox all include them. */
+	focusAlso?:string[];
 	/** Effects at `day` days since onset (fractional; may be negative or past resolve: return [] when there is nothing to show). Must be a pure function of (day, ctx). */
 	fxAt(day:number,ctx:FxContext):PartFx[];
 	/** Optional custom geometry. It may also return PartFx from fxAt to hide parts it replaces. */

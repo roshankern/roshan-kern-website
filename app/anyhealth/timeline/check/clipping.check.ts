@@ -392,7 +392,7 @@ function fractureMeasure(s:Setup){
 	const warped=(a:Float32Array,ws:WarpState|null)=>{if(!ws)return a;const o=new Float32Array(a.length),q:Vec3=[0,0,0];for(let k=0;k<a.length;k+=3){warpPoint(ws,[a[k],a[k+1],a[k+2]],seg,seg,1,false,q);o.set(q,k);}return o;};
 	const tris=(n:number)=>Uint32Array.from({length:n},(_,i)=>i);
 	for(const day of [0,10,25,45]){
-		const date=fromDays(toDays(FRACTURE_DATE)+day),body=bodyAt(date);layer.update(day,{systemVisible:()=>true,hiddenByIsolate:false,isolated:false,now:1e9,direction:0,ctx:{body,date}});
+		const date=fromDays(toDays(FRACTURE_DATE)+day),body=bodyAt(date);layer.update(day,{systemVisible:()=>true,ghost:0,focused:()=>false,isolated:false,now:1e9,direction:0,ctx:{body,date}});
 		const ws=warpState(rig,body),stat=(w:WarpState|null)=>{
 			const dist=warped(posed(capShaft,Md),w),prox=warped(posed(capHead,Mp),w),pg=new TriGrid(prox,tris(prox.length/3),0.005,{parityOnly:true});
 			let cg:TriGrid|null=null;if(callus.visible){const cp=warped(posed(callus,null),w);cg=new TriGrid(cp,callus.geometry.getIndex()!.array,0.005,{parityOnly:true});}

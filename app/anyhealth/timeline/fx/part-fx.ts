@@ -1,7 +1,8 @@
 /** Per-part effects: merges every PartFx for a date into one resolved effect per atlas part and packs them into a float texture the shaders read (see docs/superpowers/plans/2026-09-25-anyhealth-timeline.md, Task 6). `applyFxPoint` is the TS mirror of the GLSL in part-fx-glsl.ts; keep the two line for line (scripts/anyhealth-timeline-glsl.ts checks parity).
  *
  * Texture: FX_ROWS rows × width = ceilPowerOfTwo(partCount) columns (column = part index), RGBA float, nearest filtering.
- * row 0 (visible, swell, swellBandY0, swellBandY1; a band of (0,0) = none) · row 1 tint (r,g,b,amount) · row 2 (pivot.xyz, 0) · row 3 rotate quat (x,y,z,w) · row 4 (scale.xyz, 0) · row 5 (translate.xyz, 0). */
+ * row 0 (visible, swell, swellBandY0, swellBandY1; a band of (0,0) = none) · row 1 tint (r,g,b,amount) · row 2 (pivot.xyz, 0) · row 3 rotate quat (x,y,z,w) · row 4 (scale.xyz, focus) · row 5 (translate.xyz, 0).
+ * Row 4 .w is the focus flag (1 = the part is one of the focused script's parts, engine.ts ghosting); FX_APPLY reads only row 4 .xyz. */
 import * as T from 'three';
 import type {PartFx,Quat,Vec3} from '../types';
 
@@ -45,13 +46,13 @@ export function mergeFx(list:PartFx[],indicesOf:(name:string)=>number[],restCent
 	return out;
 }
 
-/** Write every column: the merged effect, or identity for parts not in `merged`. Flags the texture for upload and returns true if any texel changed. */
-export function writeFx(tex:FxTexture,merged:Map<number,ResolvedFx>):boolean{
+/** Write every column: the merged effect, or identity for parts not in `merged`, and row 4 .w = `focus[i]` (0 when absent). Flags the texture for upload and returns true if any texel changed. */
+export function writeFx(tex:FxTexture,merged:Map<number,ResolvedFx>,focus?:ArrayLike<number>):boolean{
 	const {data,width}=tex,id=identityFx();let changed=false;
 	const f32=Math.fround,put=(row:number,col:number,a:number,b:number,c:number,d:number)=>{const o=(row*width+col)*4;if(data[o]!==f32(a)||data[o+1]!==f32(b)||data[o+2]!==f32(c)||data[o+3]!==f32(d)){data[o]=a;data[o+1]=b;data[o+2]=c;data[o+3]=d;changed=true;}};
 	for(let i=0;i<width;i++){
 		const f=merged.get(i)??id,band=f.swellBand??[0,0];
-		put(0,i,f.visible,f.swell,band[0],band[1]);put(1,i,...f.tint);put(2,i,...f.pivot,0);put(3,i,...f.rotate);put(4,i,...f.scale,0);put(5,i,...f.translate,0);
+		put(0,i,f.visible,f.swell,band[0],band[1]);put(1,i,...f.tint);put(2,i,...f.pivot,0);put(3,i,...f.rotate);put(4,i,...f.scale,focus?.[i]??0);put(5,i,...f.translate,0);
 	}
 	if(changed)tex.texture.needsUpdate=true;return changed;
 }
