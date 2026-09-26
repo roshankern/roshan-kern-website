@@ -92,21 +92,25 @@ checks.push(
 		console.log(`     ±2%: ${d.flipped} flipped, ${d.torn} torn, ${d.ratioOut} out-of-ratio (ratchet ${f}/${t}/${o})`);
 		c.assert(d.flipped<=f&&d.torn<=t&&d.ratioOut<=o,`±2%: ${d.flipped} flipped, ${d.torn} torn, ${d.ratioOut} out-of-ratio (e.g. ${d.worst}) > ratchet ${f}/${t}/${o}`);
 	}},
-	{name:'seam ratchet: real child bodies (birth, 1, 3, 6, 10, 14 y) and the hand-built child / infant bodies have no more seam defects than measured (goal 0)',async run(c){
-		// Task 14a (Ruling 15): joint-plane distance-field weights + one bone-girth map with a radial soft inflation. Triangles welding two segments the rig moves independently are excluded and counted (seam.ts `bridged`).
+	{name:'seam gate: the axial region (trunk / neck / head) has 0 flipped / torn / out-of-ratio triangles on every seam body, and the limb seams stay at or below the ratchet (goal 0)',async run(c){
+		// Task 14c: the axial height remap (growth/warp.ts) is fold-free by construction (det J = g²·f′ > 0), so the axial gate is hard. Limb seams (any vertex with limb weight) keep the Task 14a ratchet, re-baselined downward only.
+		// Triangles welding two segments the rig moves independently are excluded and counted (seam.ts `bridged`).
 		const g=await c.geometry(),fs=await import('node:fs'),bin=fs.readFileSync(SEG_BIN),bad:string[]=[];
-		for(const [label,b] of seamBodies()){const d=seamDefects(warpState(R,b),g,bin),top=[...d.byPart].sort((x,y)=>y[1]-x[1]).slice(0,4).map(([n,k])=>`${n} ${k}`).join(', ');
+		for(const [label,b] of seamBodies()){const d=seamDefects(warpState(R,b),g,bin),top=[...d.byPart].sort((x,y)=>y[1]-x[1]).slice(0,4).map(([n,k])=>`${n} ${k}`).join(', '),A=d.axial,L=d.limb;
 			const [f,t,o]=ratchetFor(c,label);c.assert(d.bridged===SEAM_BRIDGED,`${label}: ${d.bridged} welded hand / forearm ↔ thigh / trunk Skin triangles excluded, expected exactly ${SEAM_BRIDGED}`);
-			console.log(`     ${label}: ${d.flipped} flipped, ${d.torn} torn, ${d.ratioOut} out-of-ratio of ${d.triangles} (${d.bridged} welded triangles excluded; ratchet ${f}/${t}/${o})${top?`; most in ${top}`:''}`);
-			if(d.flipped>f||d.torn>t||d.ratioOut>o)bad.push(`${label}: ${d.flipped}/${d.torn}/${d.ratioOut} > ${f}/${t}/${o}`);}
-		c.assert(!bad.length,`seam defects above the ratchet (flipped/torn/out-of-ratio): ${bad.join('; ')}`);
+			console.log(`     ${label}: axial ${A.flipped}/${A.torn}/${A.ratioOut} of ${A.triangles}; limb ${L.flipped}/${L.torn}/${L.ratioOut} of ${L.triangles} (ratchet ${f}/${t}/${o}; ${d.bridged} welded excluded)${top?`; most in ${top}`:''}`);
+			if(A.flipped||A.torn||A.ratioOut)bad.push(`${label}: axial ${A.flipped}/${A.torn}/${A.ratioOut} (goal 0/0/0)`);
+			if(L.flipped>f||L.torn>t||L.ratioOut>o)bad.push(`${label}: limb ${L.flipped}/${L.torn}/${L.ratioOut} > ${f}/${t}/${o}`);}
+		c.assert(!bad.length,`seam defects (flipped/torn/out-of-ratio): ${bad.join('; ')}`);
 	}},
-	{name:'KNOWN(axial remap): chin clearance = warped mandible bottom − max(warped clavicle tops, manubrium top) per seam date',async run(c){
-		// Reports only (expected negative at birth / 1 y: the per-segment bone maps sink the chin below the collar bones). Task 14c (axial height remap) makes it hard: > +1 cm at every date.
+	{name:'chin clearance: warped mandible bottom − max(warped clavicle tops, manubrium top) ≥ +1 cm at every seam date',async run(c){
+		// Task 14c: the axial remap keeps rest height order (f′ > 0) and the neck / face rates are solved so the chin clears the collar bones by ≥ 1 cm (growth.md growth#face-cranium).
 		const g=await c.geometry(),fs=await import('node:fs'),bin=fs.readFileSync(SEG_BIN),q:Vec3=[0,0,0],offs:number[]=[];let off=0;g.parts.forEach(p=>{offs.push(off);off+=p.position.length/3*SEG_STRIDE;});
 		const extreme=(ws:WarpState,names:string[],lo:boolean)=>{let e=lo?Infinity:-Infinity;for(const name of names)for(const i of g.indicesOf(name)){const P=g.parts[i].position;for(let v=0;v<P.length/3;v++){const s=segAt(bin,offs[i],v);warpPoint(ws,[P[v*3],P[v*3+1],P[v*3+2]],s[0],s[1],s[2],false,q);e=lo?Math.min(e,q[1]):Math.max(e,q[1]);}}return e;};
+		const bad:string[]=[];
 		for(const [label,b] of seamBodies()){if(!label.startsWith('bodyAt'))continue;const ws=warpState(R,b),chin=extreme(ws,['Mandible'],true),collar=extreme(ws,['Left clavicle','Right clavicle','Manubrium'],false);
-			c.assert(Number.isFinite(chin)&&Number.isFinite(collar),'mandible / clavicles / manubrium found');
-			console.log(`     KNOWN ${label}: chin clearance ${((chin-collar)*100).toFixed(2)} cm (mandible min y ${chin.toFixed(4)}, collar top ${collar.toFixed(4)})`);}
+			c.assert(Number.isFinite(chin)&&Number.isFinite(collar),'mandible / clavicles / manubrium found');const cl=(chin-collar)*100;
+			console.log(`     ${label}: chin clearance ${cl.toFixed(2)} cm (mandible min y ${chin.toFixed(4)}, collar top ${collar.toFixed(4)})`);if(!(cl>=1))bad.push(`${label} ${cl.toFixed(2)} cm`);}
+		c.assert(!bad.length,`chin clearance under +1 cm: ${bad.join(', ')}`);
 	}},
 );
