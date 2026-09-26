@@ -36,7 +36,7 @@ What the user said, verbatim decisions:
 
 ```ts
 export type Phase='idle'|'release'|'cruise'|'approach'|'hold'|'end';
-export interface Stop {id:string;/** Fractional days since BIRTH_DATE. */day:number;approachDays:number;view:Vec3|null}
+export interface Stop {id:string;/** Fractional days since BIRTH_DATE. */day:number;approachDays:number;view:Vec3|null;/** issues.json title, for bar ticks. */title:string}
 export interface Sample {
   storyMs:number;
   /** Fractional days since BIRTH_DATE (smooth; the engine animates sub-day). */ day:number;
@@ -96,9 +96,9 @@ React glue: `useDirector(today)` hook in `timeline/director/use-director.ts` —
 - **Growth framing:** `defaultPoseFor(day)`: the adult default pose (today's body, the existing fit but fitting the body height, not body + platform) with target and camera position scaled about the floor origin by `s = stature(day)/stature(today)`; view offset unchanged. Because the body grows about the floor origin, the projected body height stays ≈ constant (checked ±3%). The platform does **not** scale: at birth it spreads well past the body (it may overflow the frame sideways — intended, it is the scale cue).
 - **Focus pose:** `focusPoseFor(box, view)`: target = box centre; direction = `view ?? default direction`; distance fits the box ×1.35 in the open area (the tracker footprint excluded), with minDistance respected.
 - **Posed path:** pose(zoom) interpolates target linearly, distance geometrically (`d0^(1−z)·d1^z`), direction by slerp, view offset linearly — so a zoom from the full body to a 6 cm tooth is uniform speed in perceived scale.
-- **Guided mode** (`timeline.cue` present and the director playing or holding): each frame the camera is set from the sample: `pose(defaultPoseFor(day), focusPoseFor(focusBox(stop,…), view), zoom)`. The focus box is computed once when a stop's approach begins and frozen for that stop.
+- **Guided mode** (`cue.guided`; superseded definition: see "Rulings made during execution", Free mode): each frame the camera is set from the sample: `pose(defaultPoseFor(day), focusPoseFor(focusBox(stop,…), view), zoom)`. The focus box is computed once when a stop's approach begins and frozen for that stop.
 - **Manual input** (orbit, pan, wheel, double-click) during guided mode: the scene calls `onManualCamera()` (the director pauses; in a hold it just stays held) and stops posing. When guided posing resumes (Play / Continue), a **rejoin blend** runs: pose = lerpPose(userPose, scripted, smootherstep(t/800 ms)), same interpolation rules. Deterministic, no springs.
-- **Free mode** (scrubbing, paused, not holding): the camera follows `defaultPoseFor(day)` until the user moves it, then stays where they put it; double-click on empty space returns to the default pose.
+- **Free mode** (after a scrub or reset; see the execution rulings): the camera follows `defaultPoseFor(day)` until the user moves it, then stays where they put it; double-click on empty space returns to the default pose.
 - **Manual Isolate** (tracker button, not guided): ghost crossfades 0→1 over 600 ms (smootherstep) and the camera flies with the posed path over 1200 ms to the focus pose; Show all reverses to `defaultPoseFor(day)`. The v1 420 ms cubic flight stays for non-timeline pages only.
 
 ### 5. UI
@@ -139,3 +139,10 @@ Audio, narration text beyond the tracker card, per-stop custom camera paths (orb
 - **Manual Isolate at a hold.** It leaves guided mode (`seekDay` at the same day), so Play returns to that climax.
 - **Release ramp ordering.** The check asserts zoom ≤ 0.05 before ghost drops below 0.5, mirroring the approach. The ramps overlap on purpose, for smoothness.
 - **Record-date holds.** Record-window glows (CBCs, allergy tests, thalassemia) pre-roll so these stops hold on the record date (climax 0).
+- **Final fix wave.**
+  - `Clock.seekMs` provides an exact story-time seek. Isolate at a hold and bar drags use it, so a same-day stop pair never re-holds the first stop.
+  - `CameraCue.seq` counts seeks. A seek while guided, or a switch between guided and free mode, starts a rejoin, so a tick click from a hold flies instead of cutting. Ghost and focus hand over by blending from the last rendered value.
+  - Under reduced motion the camera cuts at the ramp midpoints, the ghost keeps a 0.2 s fade, and flights and rejoins last 150 ms.
+  - The focus-box prefetch runs in stop order, 1.5 ms per frame, even during play.
+  - The birth trip eases in from rest.
+  - Each clock tick advances at most 100 ms.
