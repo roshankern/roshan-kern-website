@@ -31,11 +31,13 @@ export const checks:Check[]=[
 		engine.update(frame('2005-06-22'));c.assert(engine.partVisible(i)===0,`age 2: visible ${engine.partVisible(i)}`);
 		engine.update(frame('2020-06-22'));c.assert(engine.partVisible(i)===1,`age 17: visible ${engine.partVisible(i)}`);
 	}},
-	{name:'partVisible is the final row-0 visibility: switches, Isolate and PartFx visible all apply',async run(c){
+	{name:'partVisible is the final row-0 visibility: switches, Isolate (as a ghost) and PartFx visible all apply',async run(c){
 		const g=await c.geometry(),{engine}=nodeEngine(g),heart=g.indicesOf('Heart')[0]??g.atlas.parts.findIndex(p=>p.system==='cardiac'),hum=g.indicesOf('Left humerus').find(i=>g.atlas.parts[i].system==='skeletal')!;
 		engine.update(frame('2012-01-01'));c.assert(engine.partVisible(heart)===1&&engine.partVisible(hum)===1,'all on');
 		engine.update({...frame('2012-01-01'),visible:['skeletal']});c.assert(engine.partVisible(heart)===0,'cardiac switched off');
 		engine.update(frame('2009-09-10'));c.assert(engine.partVisible(hum)===0,'fracture hides the atlas humerus (its layer draws the fragments)');
+		engine.update(frame('2012-01-01',0,'left-humerus-fracture-2009'));c.assert(engine.partVisible(hum)===1&&engine.partVisible(heart)===0,'Isolate: the humerus pickable, the ghosted heart not');
+		engine.update({...frame('2012-01-01',0,'left-humerus-fracture-2009'),visible:['cardiac']});c.assert(engine.partVisible(hum)===1,'Isolate shows its part with its system switched off');
 	}},
 	{name:'default pivots (restCenter) come from the decoded vertices: every part\'s lies inside its decoded bounds',async run(c){
 		const g=await c.geometry(),{engine}=nodeEngine(g),bad:string[]=[];
@@ -128,7 +130,7 @@ export const checks:Check[]=[
 		const miss=[...CROUP_EPISODES.map(e=>`croup ${e.date}`),'sky-ridge-er-airway-2016 2016-11-02','chco-picu-subglottitis-2016 2016-11-03','chin-laceration-er-2010 2010-04-10','forehead-laceration-2011 2011-03-14','right-shin-laceration-2014 2014-01-27','egg-anaphylaxis-daycare 2005-05-02','walnut-accidental-exposure-2026 2026-03-01'].filter(x=>!slow(x.split(' ')[1]));
 		c.assert(!miss.length,`not slowed: ${miss.join(', ')}`);
 	}},
-	{name:'acne and isotretinoin never draw the same marks twice: the isotretinoin layer shows only when isotretinoin is isolated',async run(c){
+	{name:'acne and isotretinoin never draw the same marks twice: the isotretinoin layer shows only when isotretinoin is isolated (focused), and the acne layer yields to it',async run(c){
 		const g=await c.geometry(),{engine,scene}=nodeEngine(g),ACNE='acne-diagnosis-topical-treatment',ISO='isotretinoin-accutane-course';
 		const mesh=(id:string)=>scene.getObjectByName(`marks:${id}`) as import('three').Mesh|undefined;c.assert(!!mesh(ACNE)&&!!mesh(ISO),'marks meshes are named by script');
 		c.assert(mesh(ISO)!.material&&(mesh(ISO)!.material as import('three').Material).depthFunc!==1/* LessDepth */,'no strict-depth dedupe trick');
@@ -136,6 +138,7 @@ export const checks:Check[]=[
 		const [a0,i0]=on(null);c.assert(a0&&!i0,`nothing isolated: acne ${a0}, isotretinoin ${i0}`);
 		const [a1,i1]=on(ISO);c.assert(!a1&&i1,`isotretinoin isolated: acne ${a1}, isotretinoin ${i1}`);
 		const [a2,i2]=on(ACNE);c.assert(a2&&!i2,`acne isolated: acne ${a2}, isotretinoin ${i2}`);
+		const [a3,i3]=on('left-humerus-fracture-2009');c.assert(a3&&!i3&&(mesh(ACNE)!.material as import('three').Material).opacity<1,`another issue isolated: acne ghosted ${a3}, isotretinoin ${i3}`);
 	}},
 	{name:'skin marks stay on the warped skin at growth scale (every mark vertex within 3 mm of the warped Skin on its script\'s dates)',async run(c){
 		const g=await c.geometry(),{scene}=nodeEngine(g),fs=await import('node:fs'),bin=fs.readFileSync('public/anyhealth/models/segments.bin'),si=g.indicesOf('Skin')[0];

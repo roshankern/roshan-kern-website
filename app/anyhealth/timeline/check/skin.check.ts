@@ -12,6 +12,7 @@ import {sutureCount} from '../issues/skin/lacerations';
 import {acneLesionCount} from '../issues/skin/acne';
 import {SEGMENTS,type Body,type SegmentId} from '../types';
 import {segAt,SEG_STRIDE} from '../growth/warp';
+import {GHOST_ALPHA} from '../director/types';
 
 /** Day just before a script's effects may start (the LEAD_DAYS ruling). */
 const before=(id:string)=>-(LEAD_DAYS[id]??0)-1;
@@ -67,9 +68,11 @@ export const checks:Check[]=[
 	}},
 	{name:'skin: layer update reports a change only when the day or visibility moves, and hides with the integumentary switch',async run(c){
 		const na=await c.geometry(),ctx=fakeCtx(na),s=AREA.find(x=>x.id==='right-shin-laceration-2014')!,layer=s.layer!() as MarksLayer;c.assert(layer.init(ctx),'init');
-		const mesh=ctx.scene.children.at(-1) as T.Mesh,fr=(on:boolean,iso=false)=>({systemVisible:()=>on,hiddenByIsolate:iso,isolated:false,now:0,direction:0 as const,ctx:{body:bodyAt('2014-01-27'),date:'2014-01-27'}});
+		const mesh=ctx.scene.children.at(-1) as T.Mesh,fr=(on:boolean,ghost=0)=>({systemVisible:()=>on,ghost,focused:()=>false,isolated:false,now:0,direction:0 as const,ctx:{body:bodyAt('2014-01-27'),date:'2014-01-27'}}),mat=mesh.material as T.Material;
 		c.assert(layer.update(3,fr(true)).changed&&mesh.visible,'day 3 drawn');c.assert(!layer.update(3,fr(true)).changed,'same day: no change');
-		c.assert(layer.update(3,fr(false)).changed&&!mesh.visible,'integumentary off hides');c.assert(layer.update(3,fr(true,true)).changed===false&&!mesh.visible,'hidden by isolate');
+		c.assert(layer.update(3,fr(false)).changed&&!mesh.visible,'integumentary off hides');c.assert(layer.update(3,fr(false,1)).changed===false&&!mesh.visible,'switched off stays hidden while another issue is focused');
+		c.assert(layer.update(3,fr(true,1)).changed&&mesh.visible&&Math.abs(mat.opacity-GHOST_ALPHA)<1e-9&&!mat.depthWrite,`another issue focused: drawn faded (opacity ${mat.opacity})`);c.assert(!layer.update(3,fr(true,1)).changed,'same ghost: no change');
+		c.assert(layer.update(3,fr(true)).changed&&mat.opacity===1&&mat.depthWrite,'ghost 0: solid again');
 		c.assert(layer.update(-1,fr(true)).changed&&!mesh.visible,'nothing before onset');layer.dispose();c.assert(!ctx.scene.children.includes(mesh),'disposed');
 	}},
 	{name:'skin: marks carry per-vertex seg from the Skin (the shin cut rides the right shank)',async run(c){

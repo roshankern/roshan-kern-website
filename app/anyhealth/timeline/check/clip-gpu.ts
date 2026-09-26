@@ -10,14 +10,14 @@ import {FX_PARS,FX_APPLY} from '../fx/part-fx-glsl';
 import type {Vec3} from '../types';
 
 const N=2048;
-type Page={evaluate<R,A>(fn:((a:A)=>R|Promise<R>)|string,arg?:A):Promise<R>};
-type Launch={launch(o:{executablePath:string;headless:boolean;args:string[]}):Promise<{newPage():Promise<Page>;close():Promise<void>}>};
-function loadPlaywright():{chromium:Launch}|null{
+export type Page={evaluate<R,A>(fn:((a:A)=>R|Promise<R>)|string,arg?:A):Promise<R>};
+export type Launch={launch(o:{executablePath:string;headless:boolean;args:string[]}):Promise<{newPage():Promise<Page>;close():Promise<void>}>};
+export function loadPlaywright():{chromium:Launch}|null{
 	const d=process.env.ANYHEALTH_PLAYWRIGHT;if(!d)return null;
 	for(const p of [path.join(d,'node_modules','playwright-core'),d]){if(!fs.existsSync(path.join(p,'package.json')))continue;try{return createRequire(path.resolve('package.json'))(p);}catch{/* next */}}
 	return null;
 }
-function findChrome():string|null{
+export function findChrome():string|null{
 	if(process.env.ANYHEALTH_CHROME)return fs.existsSync(process.env.ANYHEALTH_CHROME)?process.env.ANYHEALTH_CHROME:null;
 	const root=path.join(os.homedir(),'Library/Caches/ms-playwright');if(!fs.existsSync(root))return null;
 	for(const d of fs.readdirSync(root).filter(d=>/^chromium-\d+$/.test(d)).sort((a,b)=>+b.split('-')[1]-+a.split('-')[1])){const exe=path.join(root,d,'chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing');if(fs.existsSync(exe))return exe;}

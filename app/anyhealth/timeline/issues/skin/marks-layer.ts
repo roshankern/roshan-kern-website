@@ -4,8 +4,10 @@
  * - Segments: every mark vertex carries the `seg` (segA, segB, weightA) and `segD` (bone distance, for the soft-girth inflation) of the Skin vertex nearest it (segOfVertex / boneDistOfVertex, read from ctx.restGeometry(skin), i.e. segments.bin), and the material leaves `segment` unset and is `soft`, so marks follow the blended body warp exactly like the skin under them.
  * - Look (update): the script's pure `state(day)` gives each mark an alpha and colour; the layer rewrites its RGBA vertex colours only when that changes. The Skin part is drawn at opacity 0.1, so marks use their own material (vertex colours, alphaTest) and draw after it.
  * - Size: a mark's physical size is divided by the local warp scale at its segment on `scaleDate` (localScale), so it is life-size on that date.
- * - One mesh per layer (named `marks:<script id>`), frustumCulled off (the warp moves it far from its rest bounds). A spec with `onlyIsolated` draws only while its script is isolated: the isotretinoin layer repeats the acne marks, so it shows them only on its own Isolate and never doubles the acne layer's copy. */
+ * - While another script is focused the marks fade by frame.ghost (issues/layer-fade.ts) instead of hiding.
+ * - One mesh per layer (named `marks:<script id>`), frustumCulled off (the warp moves it far from its rest bounds). A spec with `onlyIsolated` draws only while its script is focused, and one with `yieldsTo` hides while that script is focused: the isotretinoin layer repeats the acne marks, so it shows them only on its own Isolate and never doubles the acne layer's copy. */
 import * as T from 'three';
+import {fadeMaterial,ghostOpacity} from '../layer-fade';
 import {SEGMENTS,type Body,type CustomLayer,type LayerContext,type LayerFrame,type Rig,type Vec3} from '../../types';
 import {bodyAt} from '../../growth/proportions';
 import rigJson from '../../growth/rig.json';
@@ -13,7 +15,7 @@ import {skinSurface,type SkinSurface,type SurfaceHit} from './surface';
 import {MARK_LIFT,rng,type MarkDef,type MarkState} from './marks';
 
 /** What a skin script hands the layer: its marks and their look as a pure function of days since onset. */
-export interface MarksSpec {marks:MarkDef[];state(day:number):MarkState[];/** Draw only while this script is isolated (a layer that repeats another script's marks). */onlyIsolated?:boolean}
+export interface MarksSpec {marks:MarkDef[];state(day:number):MarkState[];/** Draw only while this script is focused (LayerFrame.isolated: guided or manual, ghost > 0), for a layer that repeats another script's marks. */onlyIsolated?:boolean;/** Hide while this script is focused at ghost > 0 (it draws the same marks then: never two copies, not even a ghosted one). */yieldsTo?:string}
 /** Where a mark landed (rest space), for checks and Isolate. */
 export interface PlacedMark {def:MarkDef;/** The hint projected onto the Skin. */anchor:Vec3;center:Vec3;normal:Vec3;/** Vertex range in the layer mesh. */start:number;count:number}
 export interface MarksLayer extends CustomLayer {
@@ -103,10 +105,11 @@ export function marksLayer(spec:MarksSpec,id=''):MarksLayer{
 		update(day:number,f:LayerFrame){
 			if(!mesh||!colors)return {changed:false,animating:false};
 			// Called every frame: the state is a pure function of the day, so skip it unless the day or visibility moved.
-			const on=f.systemVisible('integumentary')&&!f.hiddenByIsolate&&(!spec.onlyIsolated||f.isolated),input=on?String(day):'off';if(input===lastIn)return {changed:false,animating:false};lastIn=input;
+			const on=f.systemVisible('integumentary')&&(!spec.onlyIsolated||f.isolated)&&!(spec.yieldsTo&&f.focused(spec.yieldsTo)),input=on?`${day}|${ghostOpacity(f.ghost)}`:'off';if(input===lastIn)return {changed:false,animating:false};lastIn=input;
+			const faded=on&&fadeMaterial(mesh.material as T.Material,{opacity:1,transparent:true,depthWrite:true},f.ghost);
 			const states=on?spec.state(day):[];
 			const key=on?states.map(s=>`${s.alpha.toFixed(3)}:${s.color??''}`).join('|'):'off';
-			if(key===lastKey)return {changed:false,animating:false};lastKey=key;
+			if(key===lastKey)return {changed:faded,animating:false};lastKey=key;
 			const arr=colors.array as Float32Array;let any=false;
 			placed.forEach((m,j)=>{const s=states[j]??{alpha:0};tmp.setHex(s.color??m.def.color);if(s.alpha>0)any=true;for(let v=m.start;v<m.start+m.count;v++){arr[v*4]=tmp.r;arr[v*4+1]=tmp.g;arr[v*4+2]=tmp.b;arr[v*4+3]=s.alpha;}});
 			colors.needsUpdate=true;mesh.visible=any;

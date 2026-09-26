@@ -2,9 +2,10 @@
  *
  * Contract with engine.ts (patchMaterial, only for materials patched with `partFx:true`, i.e. atlas parts):
  * - The engine declares, after `#include <common>` and before FX_PARS: `uniform sampler2D tfxState; uniform float tfxWidth;` and `vec4 tfxRow(float row)`, which returns this vertex's part texel for row 0..5 (the layout in part-fx.ts). The atlas's `attribute float partIndex` is declared by scene.tsx.
- * - The engine itself handles visibility (row 0 .x: `visible < 0.5` discards) and tint (row 1: `diffuseColor.rgb = mix(diffuseColor.rgb, tint.rgb, tint.a)` after `#include <color_fragment>`), through the varyings `tfxVisible` and `tfxTint`. FX_PARS / FX_APPLY do the geometry only.
+ * - The engine itself handles visibility (row 0 .x: `visible < 0.5` discards), ghosting (row 4 .w focus flag, FX_DISCARD / FX_GHOST below) and tint (row 1: `diffuseColor.rgb = mix(diffuseColor.rgb, tint.rgb, tint.a)` after `#include <color_fragment>`), through the varyings `tfxVisible`, `tfxFocus` and `tfxTint` and the shared uniforms `tfxGhost` / `tfxPass`. FX_PARS / FX_APPLY do the geometry only.
  * - FX_PARS is injected after the engine's declarations. FX_APPLY is injected just before WARP_APPLY, where `transformed` (still equal to `position`, rest space) and `objectNormal` are live; it rewrites both (pivot / rotate / scale / translate, then swell along the normal with the swell band on rest `position.y`). */
 import {SWELL_EDGE} from './part-fx';
+import {GHOST_ALPHA} from '../director/types';
 
 /** GLSL declarations (functions; the uniforms and tfxRow are the engine's). */
 export const FX_PARS=`
@@ -24,3 +25,7 @@ export const FX_APPLY=`
 	objectNormal = tfxM;
 }
 `;
+/** Fragment, after `#include <clipping_planes_fragment>`: hidden parts never draw. Pass 0 (tfxPass 0, the normal render) also drops non-focus parts while tfxGhost > 0.001 (their opacity mix(1, GHOST_ALPHA, ghost) is then < 0.999); pass 1 (Engine.renderGhostPass) draws only the non-focus ones. */
+export const FX_DISCARD='if (tfxVisible < 0.5 || (tfxPass < 0.5 ? (tfxFocus < 0.5 && tfxGhost > 0.001) : tfxFocus > 0.5)) discard;';
+/** Fragment, just before `#include <opaque_fragment>` (reads `normal` and `vViewPosition`: lit materials only). In the ghost pass: alpha × mix(1, GHOST_ALPHA, tfxGhost) × (0.35 + 0.65·rim), rim = (1 − |n·v|)^1.5 (a fresnel silhouette, not a fog); the material's own opacity (the translucent skin) stays multiplied in. */
+export const FX_GHOST=`if (tfxPass > 0.5) { float tfxRim = pow(max(0.0, 1.0 - abs(dot(normalize(normal), normalize(vViewPosition)))), 1.5); diffuseColor.a *= mix(1.0, ${GHOST_ALPHA.toFixed(3)}, tfxGhost) * (0.35 + 0.65 * tfxRim); }`;

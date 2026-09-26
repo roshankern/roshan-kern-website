@@ -3,11 +3,13 @@
  *  Differences from the /anyhealth/test build:
  *  - Every mesh uses ctx.material(segment 'lUpperArm'), so it gets the body warp and grows with the arm. Fragment, cap and clot poses are a `uPose` matrix applied to the rest-space vertex before the engine's fx/warp block (a mesh matrix would act after the warp and pivot about the wrong, un-grown joints); the callus is posed on the CPU in rest space as before. Meshes keep identity matrices and are not frustum-culled.
  *  - The original humerus is hidden by the script's fxAt ({part:'Left humerus',visible:0} while fractureAt is non-null), not by writing the part texture. So while the snap waits for the camera the fragments are drawn intact (kick 0) instead.
- *  - The snap plays, and the camera fly is requested (ctx.requestFly, once), only when the date crosses day 0 with direction 1. */
+ *  - The snap plays, and the camera fly is requested (ctx.requestFly, once), only when the date crosses day 0 with direction 1.
+ *  - While another script is focused, every mesh fades by frame.ghost (issues/layer-fade.ts) instead of hiding; the skeletal switch still hides it (a focus on this script overrides the switch, as for atlas parts). */
 import * as T from 'three';
 import {SYSTEMS} from '../../../atlas/anatomy';
 import {BREAK_MS,CALLUS_BULGE,CALLUS_HALF_LENGTH,FRACTURE_DATE,FRACTURE_LEVEL,FRACTURE_PART,breakKick,fractureAt} from '../../../fracture/model';
 import type {CustomLayer,LayerContext,LayerFrame} from '../../types';
+import {fadeMaterial,ghostOpacity,SOLID} from '../layer-fade';
 
 const BONE=SYSTEMS.find(s=>s.id==='skeletal')?.mesh??'#e2d9ba',CARTILAGE='#abcddb',WOVEN='#cbb98d';
 /** Mesh refinement around the break: edge length in the break zone and over the rest of the callus. */
@@ -135,8 +137,10 @@ export function fractureLayer():CustomLayer{
 		// Fragment surfaces: the skeletal material plus a dark, blood-stained band along the crack, faded by `line`.
 		const uLine={value:1},poseHead={value:new T.Matrix4()},poseShaft={value:new T.Matrix4()},poseClot={value:new T.Matrix4()};
 		const crackVertex=(sh:Shader)=>{sh.vertexShader=sh.vertexShader.replace('#include <common>',()=>'#include <common>\nattribute float cutDist; varying float vCut;').replace('#include <begin_vertex>',()=>'#include <begin_vertex>\nvCut = cutDist;');};
+		// Opaque materials (fragments, caps), faded together by the ghost.
+		const solids:T.Material[]=[];
 		const boneMat=(pose:{value:T.Matrix4},key:string)=>{
-			const m=ctx.material({color:BONE,segment:SEGMENT});disposables.push(m);
+			const m=ctx.material({color:BONE,segment:SEGMENT});disposables.push(m);solids.push(m);
 			withPose(m,pose,`bone-${key}`,sh=>{
 				sh.uniforms.uLine=uLine;crackVertex(sh);
 				sh.fragmentShader='uniform float uLine; varying float vCut;\n'+sh.fragmentShader.replace('#include <color_fragment>',()=>'#include <color_fragment>\nfloat crack = uLine * (1.0 - smoothstep(0.0005, 0.005, vCut));\ncrack *= crack * (3.0 - 2.0 * crack);\ndiffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.045, 0.014, 0.01), crack * 0.90);');
@@ -177,7 +181,7 @@ export function fractureLayer():CustomLayer{
 			// Wind each triangle to face out of its fragment: +u from the head, -u from the shaft.
 			for(let i=0;i<p.length;i+=9){v0.fromArray(p,i);v1.fromArray(p,i+3);v2.fromArray(p,i+6);if(v1.sub(v0).cross(v2.sub(v0)).dot(u)*dir<0)for(let k=0;k<3;k++){const x=p[i+3+k];p[i+3+k]=p[i+6+k];p[i+6+k]=x;}}
 			const g=geo(new T.BufferGeometry());g.setAttribute('position',new T.Float32BufferAttribute(p,3));g.setAttribute('color',new T.Float32BufferAttribute(capCol,3));g.computeVertexNormals();g.computeBoundingSphere();
-			const m=ctx.material({color:'#ffffff',segment:SEGMENT});m.vertexColors=true;m.metalness=0;m.roughness=.86;disposables.push(m);withPose(m,pose,`cap-${key}`);
+			const m=ctx.material({color:'#ffffff',segment:SEGMENT});m.vertexColors=true;m.metalness=0;m.roughness=.86;disposables.push(m);solids.push(m);withPose(m,pose,`cap-${key}`);
 			add(new T.Mesh(g,m));
 		};
 		cap(1,poseHead,'head');cap(-1,poseShaft,'shaft');
@@ -255,9 +259,10 @@ export function fractureLayer():CustomLayer{
 			nrm.needsUpdate=true;
 		};
 
-		let lastKey='',lastDay:number|null=null,snapAt:number|null=null;
+		// The callus's own (unfaded) look and the hematoma amount, from the state; the ghost fade is applied on top of them.
+		let lastKey='',lastDay:number|null=null,snapAt:number|null=null,lastFade=-1,hematoma=0;const callusOwn={opacity:1,transparent:true,depthWrite:false};
 		apply=(day,frame)=>{
-			let changed=false;const state=fractureAt(FRACTURE_DATE,day),now=frame.now,see=frame.systemVisible('skeletal')&&!frame.hiddenByIsolate;
+			let changed=false;const state=fractureAt(FRACTURE_DATE,day),now=frame.now,see=frame.systemVisible('skeletal');
 			if(day!==lastDay){
 				if(day<0)snapAt=null;
 				else if(lastDay!==null&&lastDay<0&&state&&frame.direction===1){if(see&&layerBox)ctx.requestFly(layerBox);snapAt=now+(see?SNAP_DELAY:0);}
@@ -267,17 +272,21 @@ export function fractureLayer():CustomLayer{
 			if(snapAt!==null&&!animating)snapAt=null;
 			const show=!!state&&see;if(group.visible!==show){group.visible=show;changed=true;}
 			if(state){
-				const key=`${day}|${kick}`;
-				if(key!==lastKey){
+				const key=`${day}|${kick}`,fade=ghostOpacity(frame.ghost),restyle=key!==lastKey;
+				if(restyle){
 					lastKey=key;changed=true;place(state.gap*kick,state.shift*kick,state.angle*kick);
 					// No crack while the snap is pending: the bone is still drawn intact.
 					uLine.value=pending?0:state.line;
 					const soft=1-state.mineral;callus.visible=state.callus>.004;uCallus.fadeMix.value=state.mineral**2;
-					callusMat.opacity=(.72*soft+state.mineral)*Math.min(1,state.callus*3);callusMat.depthWrite=state.mineral>.6;
+					callusOwn.opacity=(.72*soft+state.mineral)*Math.min(1,state.callus*3);callusOwn.depthWrite=state.mineral>.6;
 					if(callus.visible)pose(state.callus,smooth(50,200,state.day));
 					// Cartilage, then woven bone (a touch darker and matte so the cuff reads), remodelled to plain bone.
 					callusMat.color.set(CARTILAGE).lerp(col.set(WOVEN),state.mineral).lerp(col.set(BONE),smooth(50,300,state.day));callusMat.roughness=.62+.1*state.mineral*(1-smooth(50,300,state.day))-.09*state.mineral;
-					clots.forEach(k=>{k.mesh.visible=state.hematoma>.005;k.uOpacity.value=k.opacity*state.hematoma;});
+					hematoma=state.hematoma;clots.forEach(k=>{k.mesh.visible=hematoma>.005;});
+				}
+				if(restyle||fade!==lastFade){
+					lastFade=fade;changed=true;solids.forEach(m=>fadeMaterial(m,SOLID,frame.ghost));fadeMaterial(callusMat,callusOwn,frame.ghost);
+					clots.forEach(k=>{k.uOpacity.value=k.opacity*hematoma*fade;});
 				}
 			}else lastKey='';
 			return {changed,animating};

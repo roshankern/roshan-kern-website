@@ -12,11 +12,11 @@ const ctx:CheckContext={
 // tsx transpiles this script to CommonJS, which cannot have top-level await: run the loop from an async main instead.
 async function main(){
 	for(const [group,checks] of Object.entries(ALL))for(const c of checks){
-		if(filter&&!group.includes(filter)&&!c.name.includes(filter))continue;ran++;if(c.name.startsWith('GLSL/TS parity'))gpuRan=true;
+		if(filter&&!group.includes(filter)&&!c.name.includes(filter))continue;ran++;if(/^(GLSL\/TS parity|GPU )/.test(c.name))gpuRan=true;
 		try{await c.run(ctx);console.log(`ok   ${group} · ${c.name}`);}catch(e){failed++;console.log(`FAIL ${group} · ${c.name}\n     ${e instanceof Error?e.message:e}`);}
 	}
 	console.log(`\n${ran-failed}/${ran} passed`);
-	if(gpuRan&&!process.env.ANYHEALTH_PLAYWRIGHT)console.log(`hint: GPU parity was ${process.env.ANYHEALTH_SKIP_GPU==='1'?'skipped (ANYHEALTH_SKIP_GPU=1)':'not run'}; set ANYHEALTH_PLAYWRIGHT=<dir with playwright-core> to run it (docs/anyhealth/timeline-checks.md)`);
+	if(gpuRan&&!process.env.ANYHEALTH_PLAYWRIGHT)console.log(`hint: the GPU checks (GLSL parity, ghost passes) were ${process.env.ANYHEALTH_SKIP_GPU==='1'?'skipped (ANYHEALTH_SKIP_GPU=1)':'not run'}; set ANYHEALTH_PLAYWRIGHT=<dir with playwright-core> to run them (docs/anyhealth/timeline-checks.md)`);
 	process.exit(failed?1:0);
 }
 main();
