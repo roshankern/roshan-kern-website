@@ -1,5 +1,5 @@
 /** Task 14 integration checks: the real engine in node (check/engine-node.ts) with every area's scripts, growth and the warp merged. */
-import type {Check} from './harness';
+import type {Check,CheckContext} from './harness';
 import {DEFAULT_VISIBLE} from '../../atlas/anatomy';
 import {nodeEngine} from './engine-node';
 import {SCRIPTS} from '../issues';
@@ -19,6 +19,11 @@ import {LEAD_DAYS as skinLead} from '../issues/catalog/skin';
 
 const LEAD:Record<string,number>={...boneLead,...airwayLead,...digestiveLead,...skinLead},TODAY='2026-09-25';
 const frame=(date:string,now=0,isolate:string|null=null)=>({date,visible:DEFAULT_VISIBLE,isolate,now});
+/** Two node engines hold the same picking geometry: every part's bounds and warped positions. */
+const sameGeometry=(c:CheckContext,g:{atlas:{parts:{name:string}[]}},A:ReturnType<typeof nodeEngine>,B:ReturnType<typeof nodeEngine>,what:string)=>{
+	A.bounds.forEach((b,i)=>{for(const key of ['min','max'] as const)for(const ax of ['x','y','z'] as const)c.near(b[key][ax],B.bounds[i][key][ax],1e-9,`${what}: ${g.atlas.parts[i].name} ${key}.${ax}`);});
+	A.pickers.forEach((m,i)=>{const a=m?.geometry.getAttribute('position').array,b=B.pickers[i]?.geometry.getAttribute('position').array;if(!a||!b)return;for(let v=0;v<a.length;v++)if(a[v]!==b[v])throw new Error(`${what}: ${g.atlas.parts[i].name} position ${v} ${a[v]} vs ${b[v]}`);});
+};
 
 export const checks:Check[]=[
 	{name:'eruptionFx is wired: a permanent first molar is hidden at 2 y and shown at 17 y (final fx visibility)',async run(c){
@@ -71,6 +76,28 @@ export const checks:Check[]=[
 		B.engine.update(frame('2026-03-02'));B.engine.settle();
 		A.bounds.forEach((b,i)=>{for(const key of ['min','max'] as const)for(const ax of ['x','y','z'] as const)c.near(b[key][ax],B.bounds[i][key][ax],1e-9,`${g.atlas.parts[i].name} ${key}.${ax}`);});
 		A.engine.update(frame('2012-01-01'));c.assert(A.engine.settle()>n*0.9,'a child date re-warps nearly everything');
+	}},
+	{name:'before ready, settle and isolateBox do nothing; an Isolate made before ready flies once after it, and settle then matches a fresh engine',async run(c){
+		const g=await c.geometry(),id='left-humerus-fracture-2009',date='2009-09-10',A=nodeEngine(g,{deferReady:true}),B=nodeEngine(g);
+		c.assert(A.engine.update(frame(date,0,id)).fly===null,'no fly before ready');c.assert(A.engine.isolateBox(id)===null,'isolateBox before ready: null');c.assert(A.engine.settle()===0,'settle before ready: no-op');
+		A.ready();const r=A.engine.update(frame(date,1,id));c.assert(!!r.fly,'the Isolate made before ready flies on the first frame after it');c.assert(A.engine.update(frame(date,2,id)).fly===null,'and only once');
+		B.engine.update(frame(date,0,id));const b=B.engine.isolateBox(id)!;for(const k of ['min','max'] as const)for(const ax of ['x','y','z'] as const)c.near(r.fly![k][ax],b[k][ax],1e-9,`fly ${k}.${ax}`);
+		A.engine.settle();B.engine.settle();sameGeometry(c,g,A,B,'isolate before ready');
+	}},
+	{name:'a time-sliced settle driven to completion (with a date change mid-way) equals a full settle; finishSettle (before a pick) completes a partial one; slice cost is logged',async run(c){
+		const g=await c.geometry(),n=g.atlas.parts.length,A=nodeEngine(g),B=nodeEngine(g),C=nodeEngine(g);
+		// A: slices at budget 0 (one vertex chunk per call) on one date, a date change mid-way, then slices to completion. B: one full settle on the final date.
+		A.engine.update(frame('2012-01-01'));let k=0;for(;k<40;k++)c.assert(!A.engine.settleSlice(0),`slice ${k} finished early`);
+		A.engine.update(frame('2016-06-01'));let slices=0;while(!A.engine.settleSlice(0)){if(++slices>1e6)throw new Error('sliced settle never finishes');}
+		B.engine.update(frame('2016-06-01'));c.assert(B.engine.settle()===n,'fresh full settle re-warps every part');sameGeometry(c,g,A,B,'sliced vs full');
+		c.assert(A.engine.settle()===0,'after a completed sliced settle a full settle has nothing left');
+		// C: a partial slice, then finishSettle (what scene.tsx calls before a pick) completes it.
+		C.engine.update(frame('2016-06-01'));c.assert(!C.engine.settleSlice(0),'partial');C.engine.finishSettle();sameGeometry(c,g,C,B,'finishSettle after a partial slice');c.assert(C.engine.finishSettle()===0,'finishSettle with nothing in progress: no-op');
+		// Per-frame cost: a child date re-warps nearly everything; 4 ms slices vs one full settle.
+		const D=nodeEngine(g),E=nodeEngine(g);E.engine.update(frame('2008-01-01'));let t=performance.now();E.engine.settle();const full=performance.now()-t;
+		D.engine.update(frame('2008-01-01'));let worst=0,frames=0,sum=0;for(let done=false;!done;){t=performance.now();done=D.engine.settleSlice(4);const dt=performance.now()-t;worst=Math.max(worst,dt);sum+=dt;frames++;}
+		console.log(`     settle cost: full ${full.toFixed(1)} ms; sliced at 4 ms: ${frames} frames, worst ${worst.toFixed(2)} ms, total ${sum.toFixed(1)} ms`);
+		c.assert(worst<12,`worst slice ${worst.toFixed(2)} ms`);sameGeometry(c,g,D,E,'4 ms slices vs full');
 	}},
 	{name:'seg attribute is the 4 segments.bin bytes per vertex (segA | segB<<4, weightA·255, dBone uint16; not normalized); layers get a float seg (weightA 0..1) and segD (metres)',async run(c){
 		const g=await c.geometry(),{engine}=nodeEngine(g),fs=await import('node:fs'),bin=fs.readFileSync('public/anyhealth/models/segments.bin');let off=0,bytes=0;
