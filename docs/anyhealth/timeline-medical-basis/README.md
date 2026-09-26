@@ -135,3 +135,5 @@ Every systemic script is illustrative (see [systemic.md](systemic.md)):
 - **Food allergy** (chronic from 2003-12-22): a faint red on the tongue and lip. The 2004 workup and the 2016 IgE panel add a 14-day glow (the panel also on the nasal conchae), and so does the 2022 re-evaluation (conchae).
 - **Egg anaphylaxis 2005 / walnut exposure 2026:** stylized angioedema: tongue and lip enlarge, the pharyngeal constrictors and epiglottis swell, and the subglottic trachea narrows. Egg peaks in ~30 min and clears by day 2. Walnut is the same pattern at 40%, gone by day 1. The magnitudes are visible stand-ins, not measurements.
 - **Allergic rhinitis** (chronic from 2016-07-11): the inferior conchae swell with a perennial base plus spring and late-summer pollen pulses, as a pure function of the calendar date. Immunotherapy halves the pulse linearly over 2022-08-01 → 2025-08-01.
+
+Running the checks (and the `ANYHEALTH_PLAYWRIGHT` / `ANYHEALTH_SKIP_GPU` variables): [../timeline-checks.md](../timeline-checks.md).
