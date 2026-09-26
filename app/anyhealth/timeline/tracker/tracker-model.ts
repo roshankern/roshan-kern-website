@@ -2,6 +2,7 @@
 import issuesData from '../../health/issues.json';
 import type {Issue} from '../../health/types';
 import type {IssueScript} from '../types';
+import type {Phase} from '../director/types';
 import {toDays} from '../../health/dates';
 import {SCRIPTS,activeWindow,dayOf} from '../issues';
 
@@ -23,18 +24,26 @@ function stateOf(s:IssueScript,date:string,today:string):'active'|'resolved'|nul
 /** The issues.json record for a script, or a bare stand-in (title = id) so a script without a record still lists. */
 const issueOf=(s:IssueScript):Issue=>ISSUES.get(s.id)??{id:s.id,date:s.onset,endDate:s.resolve??null,title:s.id,summary:'',category:'bones',source:'Self-reported'};
 
-/** Tracker entries for `scripts` on `date`: the isolated script first (as `isolated-inactive` when outside its window; an unknown id is ignored), then the rest by onset, newest first. */
-export function entriesFrom(scripts:IssueScript[],date:string,today:string,isolated:string|null):TrackerEntry[]{
-	const out:TrackerEntry[]=[];let iso:IssueScript|undefined;
+/** The director's guided focus: the stop's issue id and the playback phase. */
+export interface TrackerFocus {id:string;phase:Phase}
+/** Phases in which the guided focus is pinned (the director's focusId is null otherwise). */
+export const focusPinned=(f:TrackerFocus|null|undefined):f is TrackerFocus=>!!f&&(f.phase==='approach'||f.phase==='hold'||f.phase==='release');
+
+/** Tracker entries for `scripts` on `date`: the guided focus first (approach/hold/release), then the isolated script (each as `isolated-inactive` when outside its window; an unknown id is ignored), then the rest by onset, newest first. */
+export function entriesFrom(scripts:IssueScript[],date:string,today:string,isolated:string|null,focus:TrackerFocus|null=null):TrackerEntry[]{
+	const out:TrackerEntry[]=[],fid=focusPinned(focus)?focus.id:null;let iso:IssueScript|undefined,foc:IssueScript|undefined;
 	for(const s of scripts){
+		if(s.id===fid){foc=s;continue;}
 		if(s.id===isolated){iso=s;continue;}
 		const state=stateOf(s,date,today);
 		if(state)out.push({issue:issueOf(s),script:s,state,day:dayOf(s,date)});
 	}
 	out.sort((a,b)=>b.script.onset.localeCompare(a.script.onset)||a.issue.title.localeCompare(b.issue.title));
-	if(iso)out.unshift({issue:issueOf(iso),script:iso,state:stateOf(iso,date,today)??'isolated-inactive',day:dayOf(iso,date)});
+	const pin=(s:IssueScript):TrackerEntry=>({issue:issueOf(s),script:s,state:stateOf(s,date,today)??'isolated-inactive',day:dayOf(s,date)});
+	if(iso)out.unshift(pin(iso));
+	if(foc)out.unshift(pin(foc));
 	return out;
 }
 
 /** Tracker entries for `date` over every catalog script. */
-export function trackerEntries(date:string,today:string,isolated:string|null):TrackerEntry[]{return entriesFrom(SCRIPTS,date,today,isolated);}
+export function trackerEntries(date:string,today:string,isolated:string|null,focus:TrackerFocus|null=null):TrackerEntry[]{return entriesFrom(SCRIPTS,date,today,isolated,focus);}

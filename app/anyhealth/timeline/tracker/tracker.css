@@ -28,6 +28,15 @@
 .studio.timeline .tracker-isolate{flex-shrink:0;height:30px;padding:0 11px;border-radius:8px;font-size:11.5px;font-weight:500;color:#3c4956;background:#edf0f2!important}
 .studio.timeline .tracker-isolate:hover{background:#e3e7ea!important}
 .studio.timeline .tracker-isolate.on{background:#263b48!important;color:#fff}
+/* v2 director: the guided stop's card (pinned first), and Continue at its hold, the tracker's one filled button. */
+.studio.timeline .tracker-card.focused{background:#fffffff2;border-color:#263b4833;box-shadow:0 0 0 1px #263b4814,0 8px 24px #2433440f}
+.studio.timeline .tracker-continue{align-self:flex-start;display:inline-flex;align-items:center;gap:8px;height:38px;padding:0 16px 0 18px;border-radius:999px;font-size:13px;font-weight:600;letter-spacing:.01em;color:#fff!important;background:#263b48!important;box-shadow:0 4px 14px #263b4833;animation:tracker-continue-in .24s ease-out}
+.studio.timeline .tracker-continue:hover{background:#1c2d38!important}
+.studio.timeline .tracker-continue svg{transition:transform .18s}.studio.timeline .tracker-continue:hover svg{transform:translateX(2px)}
+@keyframes tracker-continue-in{from{opacity:0;transform:translateY(4px)}}
+/* Bar (director mode): the play button turns into a labelled Continue pill at a hold. */
+.studio.timeline .timeline-play.timeline-continue{width:auto;gap:6px;padding:0 13px 0 15px;border-radius:999px;font-size:12.5px;font-weight:600;color:#fff;background:#263b48!important}
+.studio.timeline .timeline-play.timeline-continue:hover{background:#1c2d38!important;color:#fff}
 
 @media(max-width:1100px) and (min-width:768px){.studio.timeline .issue-tracker{bottom:118px}}
 
@@ -48,6 +57,7 @@
  .studio.timeline .issue-tracker.open .tracker-peek{border-bottom:1px solid #18253612}
  .studio.timeline .tracker-list{padding:10px 10px 12px}
  .studio.timeline .tracker-isolate{height:44px;padding:0 14px;font-size:12.5px}
+ .studio.timeline .tracker-continue{height:44px;padding:0 18px 0 20px}
  .studio.timeline .tracker-card h3{font-size:15px}
 }
 @keyframes tracker-sheet-in{from{opacity:0;transform:translateY(12px)}}
@@ -59,5 +69,5 @@
 }
 
 @media(prefers-reduced-motion:reduce){
- .studio.timeline .issue-tracker,.studio.timeline .tracker-card,.studio.timeline .tracker-peek svg{animation:none!important;transition:none!important}
+ .studio.timeline .issue-tracker,.studio.timeline .tracker-card,.studio.timeline .tracker-peek svg,.studio.timeline .tracker-continue,.studio.timeline .tracker-continue svg{animation:none!important;transition:none!important}
 }

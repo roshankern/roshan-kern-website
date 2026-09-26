@@ -6,11 +6,16 @@ import {scriptFor} from '../issues';
 import {makeWarp,type Density} from '../../health/warp';
 import {toDays,fromDays} from '../../health/dates';
 import {BIRTH_DATE} from '../../health/types';
+import type {Phase,Sample,Schedule} from '../director/types';
+import {YEAR_GAP,dayAtFraction,stopTicks,yearMarks} from '../bar-model';
 const T0='2026-09-25';
 // Quiet share of the birth..today track under a density list (days outside every range, weighted by the warp).
 const quietShare=(dens:Density[],today:string)=>{const min=toDays(BIRTH_DATE),max=toDays(today),w=makeWarp(min,max,dens);let quiet=0;for(let d=min;d<max;d++){const inDense=dens.some(r=>d>=toDays(r.from)&&d<toDays(r.to));if(!inDense)quiet+=w.toT(d+1)-w.toT(d);}return quiet;};
 // Synthetic scripts, so the model's rules are checked independently of what the area catalogs hold.
-const fake=(id:string,onset:string,o:Partial<IssueScript>={}):IssueScript=>({id,parts:['Left humerus'],onset,fxAt:()=>[],...o});
+const fake=(id:string,onset:string,o:Partial<IssueScript>={}):IssueScript=>({id,parts:['Left humerus'],onset,fxAt:()=>[],climax:0,...o});
+// A linear stand-in schedule (story time ∝ day, 1 ms per day) with two stops, so the bar marks are checked without the real director.
+const linear=(today:string):Schedule=>{const max=toDays(today)-toDays(BIRTH_DATE),S=[{id:'a',day:max*.25,approachDays:1,view:null,title:'A'},{id:'b',day:max*.5,approachDays:1,view:null,title:'B'}];
+	return {stops:S,holdMs:S.map(s=>s.day),totalMs:max,storyMsForDay:d=>Math.max(0,Math.min(max,d)),sample:(ms)=>({storyMs:ms,day:ms,date:fromDays(toDays(BIRTH_DATE)+Math.floor(ms)),phase:'cruise',stop:null,focusId:null,ghost:0,zoom:0}) as Sample};};
 export const checks:Check[]=[
 	{name:'fracture is active on 2009-09-10 and gone by 2011',run(c){c.assert(trackerEntries('2009-09-10',T0,null).some(e=>e.issue.id==='left-humerus-fracture-2009'&&e.state==='active'),'active');c.assert(!trackerEntries('2011-01-01',T0,null).some(e=>e.issue.id==='left-humerus-fracture-2009'),'gone');}},
 	{name:'resolved issues linger 7 days with state resolved',run(c){const s=scriptFor('chco-picu-subglottitis-2016')!;const d=fromDays(toDays(s.resolve!)+3);c.assert(trackerEntries(d,T0,null).find(e=>e.issue.id===s.id)?.state==='resolved','resolved chip');c.assert(!trackerEntries(fromDays(toDays(s.resolve!)+8),T0,null).some(e=>e.issue.id===s.id),'faded');}},
@@ -55,5 +60,28 @@ export const checks:Check[]=[
 		const S=[fake('a','2026-09-20',{chronic:true,acute:[{from:0,to:30,k:5}]}),fake('b','2003-06-22',{resolve:'2003-07-01',acute:[{from:-10,to:5,k:2}]})];
 		const d=pacingFrom(S,T0);c.assert(d[0].from===BIRTH_DATE&&d[d.length-1].to===T0,`clipped ${JSON.stringify(d)}`);
 		c.assert(pacing(T0)===pacing(T0),'same array for the same today');
+	}},
+	// v2 director: the focused (guided) issue is pinned first while approached, held or released.
+	{name:'focused entry pinned first during approach/hold/release',run(c){
+		const S=[fake('a','2010-01-01',{resolve:'2010-02-01'}),fake('b','2010-01-05',{resolve:'2010-02-01'}),fake('c','2010-01-03',{resolve:'2010-02-01'})];
+		for(const phase of ['approach','hold','release'] as Phase[]){const e=entriesFrom(S,'2010-01-07',T0,null,{id:'a',phase});c.assert(e[0].script.id==='a'&&e[0].state==='active'&&e.length===3,`${phase}: pinned`);c.assert(e[1].script.id==='b'&&e[2].script.id==='c','rest newest first');}
+		const i=entriesFrom(S,'2010-01-07',T0,'c',{id:'a',phase:'hold'});c.assert(i[0].script.id==='a'&&i[1].script.id==='c'&&i.length===3,'focus first, then the manual isolate');
+	}},
+	{name:'focus outside its active window lists as isolated-inactive',run(c){
+		const S=[fake('a','2010-01-01',{resolve:'2010-01-10'}),fake('b','2010-06-01',{resolve:'2010-07-01'})];
+		const e=entriesFrom(S,'2010-06-05',T0,null,{id:'a',phase:'approach'});c.assert(e[0].script.id==='a'&&e[0].state==='isolated-inactive'&&e.length===2,'inactive focus pinned');
+		c.assert(entriesFrom(S,'2010-06-05',T0,null,{id:'nope',phase:'hold'}).length===1,'unknown focus id ignored');
+	}},
+	{name:'no focus: order unchanged from v1',run(c){
+		for(const d of ['2009-09-10','2016-12-23','2020-01-01',T0]){const v1=trackerEntries(d,T0,null).map(e=>e.issue.id).join();
+			c.assert(trackerEntries(d,T0,null,null).map(e=>e.issue.id).join()===v1,`${d}: null focus`);
+			// Outside approach/hold/release a focus does not pin (cruise/idle/end carry no focus).
+			for(const phase of ['idle','cruise','end'] as Phase[])c.assert(trackerEntries(d,T0,null,{id:'left-humerus-fracture-2009',phase}).map(e=>e.issue.id).join()===v1,`${d}: ${phase}`);}
+	}},
+	{name:'bar: ticks at hold fractions, year labels sparse and ascending, drag fraction maps through the schedule',run(c){
+		const s=linear(T0),t=stopTicks(s);c.assert(t.length===2&&t[0].title==='A',`ticks ${JSON.stringify(t)}`);c.near(t[0].t,.25,1e-9,'tick a');c.near(t[1].t,.5,1e-9,'tick b');
+		const y=yearMarks(s,T0);c.assert(y.length>=3,`years ${y.length}`);
+		for(let i=0;i<y.length;i++){c.assert(y[i].t>=0&&y[i].t<=1,'in track');if(i)c.assert(y[i].year>y[i-1].year&&y[i].t-y[i-1].t>=YEAR_GAP,`gap ${y[i-1].year}→${y[i].year}`);}
+		c.near(dayAtFraction(s,.5),s.totalMs*.5,1e-9,'fraction → day');c.near(dayAtFraction(s,2),s.totalMs,1e-9,'clamped');c.near(dayAtFraction(s,-1),0,1e-9,'clamped low');
 	}},
 ];
