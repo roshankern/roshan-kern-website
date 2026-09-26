@@ -2,7 +2,7 @@
  *
  * Every reference table is a ratio to stature by age (years). A segment's factor is its reference ratio at that age over the same ratio at 18 y
  * (the adult reference), so the adult body reproduces the model's own proportions exactly (every factor 1 from 18 y on), and a child's segment
- * is longer or shorter than the model's by the same proportion the reference child's is. The vertical chain is then renormalised on the real warp
+ * is longer or shorter than the model's by the same proportion the reference child's is. The trunk is then renormalised on the real warp
  * (growth/warp.ts) so the warped floor-to-crown height equals the measured stature. */
 import {SEGMENTS,type Body,type Rig,type SegmentId,type Vec3} from '../types';
 import {warpState,warpPoint,MENTON_Y} from './warp';
@@ -64,8 +64,11 @@ const hipAnkle=f(HIP_ANKLE),head=f(HEAD),neck=f(NECK),ankle=f(ANKLE);
 const trunk=(a:number)=>1-ankle(a)-hipAnkle(a)-neck(a)-head(a); // basis: growth#ratio-trunk
 const LEN:Record<SegmentId,(a:number)=>number>=(()=>{const th=f(THIGH),sh=f(SHANK),ua=f(UPPER_ARM),fa=f(FOREARM),ha=f(HAND),fo=f(FOOT);
 	return {trunk,neck,head,lUpperArm:ua,lForearm:fa,lHand:ha,rUpperArm:ua,rForearm:fa,rHand:ha,lThigh:th,lShank:sh,lFoot:fo,rThigh:th,rShank:sh,rFoot:fo};})();
-/** Segments on the floor-to-vertex chain: the ones the stature renormalisation scales. */
-const VERTICAL:SegmentId[]=['trunk','neck','head','lThigh','lShank','rThigh','rShank'];
+/** A segment's reference length ÷ stature at `age` (years), the growth.md `ratio-*` tables above (checks). */
+export const lengthRatio=(id:SegmentId,age:number)=>LEN[id](age);
+/** The segments the stature renormalisation scales: the trunk only (Task 14d fix round 1). The trunk table is itself the remainder of stature after the other vertical pieces (`trunk` above), so it absorbs the residual
+ * of the model's rest intervals against the reference definitions, and the leg, head and neck factors stay on their growth.md values (before, one factor on the whole chain left the thigh and shank 4% short at birth). */
+const VERTICAL:SegmentId[]=['trunk'];
 
 // Bone girth references: bony breadth / stature (Snyder 1977 2/3–18 y). Before the first node the value is held. Head breadth at 0 and 1 y: Snyder's 2 y head breadth (134.8 mm) scaled by WHO head circumference over WHO length.
 const W_HEAD:Table=[[0,0.193],[1,0.170],[2,0.1522],[3,0.1411],[4,0.1368],[6,0.1222],[8,0.112],[10,0.1054],[12,0.0992],[14,0.093],[16,0.0874],[18,0.0874]]; // basis: growth#girth-bone
@@ -114,7 +117,7 @@ const CIRC:Record<SegmentId,(a:number)=>number>=(()=>{const ua=f(C_UPPER_ARM),fa
 
 /** The atlas's highest rest vertex (the crown, 'Hair of head': soft tissue, head segment at weight 1). Its warped y, with the warp's ground shift, is the body's floor-to-vertex height; the growth check verifies it is still the highest vertex after the warp. */
 const CROWN:Vec3=[-0.0035697,1.7296910,-0.0118096],HEAD_SEG=SEGMENTS.indexOf('head');
-/** Scale the vertical segments by one common factor k so the warped crown height (warpState / warpPoint, ground included) equals `statureM` (to the crown's 5 ppm offset from rig.stature). The height is piecewise affine in k (the ground is a min over the sole points), so a few secant steps converge to float precision. */
+/** Scale the vertical segments (VERTICAL: the trunk) by one factor k so the warped crown height (warpState / warpPoint, ground included) equals `statureM` (to the crown's 5 ppm offset from rig.stature). The height is piecewise affine in k (the ground is a min over the sole points), so a few secant steps converge to float precision. */
 function renormalise(b:Body):void{
 	// Target: the crown at statureM × its rest share of rig.stature (1.729691 of 1.7297 m, 5 ppm), so the adult body stays exactly the model (k = 1).
 	const base={...b.length},q:Vec3=[0,0,0],target=b.scale*CROWN[1];

@@ -1,6 +1,6 @@
 import type {Check} from './harness';
 import {SEGMENTS,type Rig} from '../types';
-import {bodyAt,LAST_MEASURED,BMI_REF,softTerm} from '../growth/proportions';
+import {bodyAt,lengthRatio,LAST_MEASURED,BMI_REF,softTerm} from '../growth/proportions';
 import {growthFx,GLOBE_CENTRE} from '../growth/organs';
 import {toDays,fromDays} from '../../health/dates';
 import growth from '../../health/growth.json';
@@ -89,5 +89,12 @@ export const checks:Check[]=[
 		for(const [age,m] of EPI)c.near(sizeOf(dateAt(age),'Left epididymis','trunk'),Math.cbrt(m/4),0.01,`epididymis ${age} y`);
 	}},
 	// The stature renormalisation scales every vertical factor by one k (0.98 at 2 y since Task 14c applies the head factor to the whole menton → vertex height), so the node is checked against the head factor (2 y: 0.1891 / 0.1255 = 1.507, growth.md ratio-head), where k cancels.
+	{name:'limb lengths: warped thigh / shank / upper-arm / forearm joint-to-joint length ÷ stature = the growth.md factor × the model\'s rest ratio within 1% at the grid ages (the stature residual goes to the trunk)',run(c){
+		const bad:string[]=[];for(const a of [0,0.5,1,2,3,4,6,8,10,12,14,16,18]){const b=bodyAt(dateAt(a)),ws=warpState(R,b);
+			for(const [id,child] of [['lThigh','lShank'],['lShank','lFoot'],['lUpperArm','lForearm'],['lForearm','lHand'],['rThigh','rShank'],['rUpperArm','rForearm']] as const){
+				const i=SEGMENTS.indexOf(id)*3,j=SEGMENTS.indexOf(child)*3,N=ws.newJoint,len=Math.hypot(N[j]-N[i],N[j+1]-N[i+1],N[j+2]-N[i+2]),rest=R.segments[SEGMENTS.indexOf(id)].length;
+				const got=(len/b.statureM)/(rest/R.stature),want=lengthRatio(id,a)/lengthRatio(id,18);if(Math.abs(got/want-1)>0.01)bad.push(`${id} at ${a} y: ${got.toFixed(4)} vs ${want.toFixed(4)}`);}}
+		c.assert(!bad.length,`limb length factors off growth.md by > 1%: ${bad.join(', ')}`);
+	}},
 	{name:'neck carries the explicit 2 y node (R3)',run(c){const b=bodyAt(dateAt(2));c.near(b.length.neck/b.length.head,(0.050/0.064)/(0.1891/0.1255),0.003,'neck ÷ head factor at 2 y');}},
 ];

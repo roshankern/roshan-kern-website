@@ -4,7 +4,7 @@
 // Weights (Task 14a): per joint, a child-side indicator centred on the joint plane, faded into the nearest-bone side where one bone clearly owns the tissue; the indicators combine into a tree partition of unity (see WEIGHTS below).
 import fs from 'node:fs';
 import {loadAtlasNode} from '../app/anyhealth/timeline/check/node-atlas';
-import {boneSegment} from '../app/anyhealth/timeline/growth/segment-map';
+import {boneSegment,trunkOnly} from '../app/anyhealth/timeline/growth/segment-map';
 import {SEG_STRIDE,D_UNIT} from '../app/anyhealth/timeline/growth/warp';
 import {SEGMENTS,type Rig,type Segment,type SegmentId,type Vec3} from '../app/anyhealth/timeline/types';
 import {SOFT_SYSTEMS} from '../app/anyhealth/timeline/engine';
@@ -26,6 +26,20 @@ const GRID=env('GRID',0.005),PLANE_B=env('PLANE_B',0.05),BLEND=env('BLEND',0.02)
  * Cyclic projection onto these convex slabs (and dBone ≥ 0), moving the apex and both edge ends by the least-squares split, until no vertex moves more than D_UNIT (or SLIVER_ITERS passes): it converges because a constant field satisfies every slab.
  * With |γs − γb| ≤ 0.4·γb that bounds the inflation's tilt of any triangle well below 90° (Task 14c report: axial seam flips at birth 136 → 34; the hand-built infants 1483 → 13). */
 const SLIVER_BETA=env('SLIVER_BETA',1),SLIVER_ITERS=env('SLIVER_ITERS',400);
+/** Clean weights (Task 14d): every vertex of a soft part matching growth/segment-map.ts TRUNK_ONLY is set to weight 1 on the trunk (the axial remap). The rules, by whole lower-cased part name:
+ *   rib cage wall — external / internal / innermost intercostal muscles, serratus anterior, external / internal oblique, transversus abdominis / thoracis, subcostales;
+ *   rib cage vessels — lateral thoracic and thoracodorsal arteries / veins, posterior / anterior / superior intercostal arteries and veins;
+ *   genitals — testes, epididymides, testicular arteries / veins, spermatic cords, ductus deferentes (deferent ducts), seminal vesicles, prostate, penis (corpora, glans, dorsal vessels), urethra;
+ *   pelvic floor — coccygeus, iliococcygeus, pubococcygeus, puborectalis, levator ani and its tendinous arch, perineal muscles, external anal sphincter, bulbospongiosus, ischiocavernosus.
+ * Every other vertex keeps its distance-field weights byte for byte (but for the groin, ROOT_T below); the number of vertices this changes (weight bytes differ from the distance-field ones) is asserted, so a rule or mesh change is noticed. dBone is untouched. */
+const TRUNK_ONLY_CHANGED=72234;
+/** Narrow the groin blend (Task 14d fix round 1): past ROOT_T (rest metres along the thigh axis from the hip joint, smoothstep) a vertex is wholly on the limb side of that joint whatever the distance field says, behind a sharp sibling gate
+ * (ROOT_Q: the midline perineum, equidistant from both thighs, still goes to the trunk; the blunt SIB gate had put inner-thigh tissue a third on the trunk). The nearest-bone term had left inner-thigh tissue down to 20 cm below the hip at 20–40% trunk weight (the pubis is as near as the femur there), where the thigh's own along rate
+ * (past its short along window, growth/warp.ts LIMB_ALONG) and the remap's differ and folded it. The vertices this changes are counted and asserted (ROOT_T_CHANGED). */
+const ROOT_T:Partial<Record<SegmentId,number[]>>=Object.fromEntries((['lThigh','rThigh'] as const).map(id=>[id,pair('ROOT_T_HIP','0.04,0.10')]));
+/** ROOT_T acts only inside the limb's cylinder: radius from its axis < ROOT_R (smoothstep off), along it t < the segment length. */
+const ROOT_R=pair('ROOT_R','0.06,0.10'),ROOT_Q=env('ROOT_Q',0.14);
+const ROOT_T_CHANGED=2250;
 /** One sliver-safe pass over a part (see SLIVER_BETA); returns how many constraints moved a vertex by more than D_UNIT. */
 function sliverPass(pos:Float32Array,index:Uint32Array,D:Float64Array,beta:number):number{
 	let m=0;const L=(i:number,j:number)=>Math.hypot(pos[i*3]-pos[j*3],pos[i*3+1]-pos[j*3+1],pos[i*3+2]-pos[j*3+2]);
@@ -140,13 +154,14 @@ async function main(){
 	/** Each segment's subtree (itself and every descendant). */
 	const SUBTREE=SEGMENTS.map((_,i)=>{const out=[i];for(let k=0;k<out.length;k++)out.push(...KIDS[out[k]]);return out;});
 	const D=new Float64Array(NS),DS=new Float64Array(NS),c=new Float64Array(NS),W=new Float64Array(NS),EPS=1e-4;
-	const out=new Uint8Array(parts.reduce((s,p)=>s+p.position.length/3,0)*SEG_STRIDE);let o=0,mixed=0,dropped=0,maxDrop=0;
+	const out=new Uint8Array(parts.reduce((s,p)=>s+p.position.length/3,0)*SEG_STRIDE);let o=0,mixed=0,dropped=0,maxDrop=0,cleaned=0,cleanedParts=0,rootChanged=0;
 	const dbgF=process.env.ANYHEALTH_FLOAT_OUT?new Float32Array(out.length/SEG_STRIDE*2):null,dB=new Float64Array(out.length/SEG_STRIDE);
 	parts.forEach((g,pi)=>{
 		const fixed=boneSegment(atlas.parts[pi].name),v=g.position,nv=v.length/3;
 		if(fixed){const s=SEG(fixed);for(let i=0;i<nv;i++){if(dbgF){dbgF[o/SEG_STRIDE*2]=1;dbgF[o/SEG_STRIDE*2+1]=0;}out[o++]=s|s<<4;out[o++]=255;out[o++]=0;out[o++]=0;}return;}
+		const toTrunk=trunkOnly(atlas.parts[pi].name);if(toTrunk)cleanedParts++;
 		for(let i=0;i<nv;i++){
-			const x=v[3*i],y=v[3*i+1],z=v[3*i+2];sample(x,y,z,D);
+			const x=v[3*i],y=v[3*i+1],z=v[3*i+2];sample(x,y,z,D);let rootMoved=false;
 			for(let s=0;s<NS;s++){let m=Infinity;for(const t of SUBTREE[s])m=Math.min(m,D[t]);DS[s]=m;}
 			// Child-side indicator per joint (WEIGHTS above).
 			c[0]=1;
@@ -155,6 +170,8 @@ async function main(){
 				const plane=smoothstep(-PLANE_B,PLANE_B,(x-J[0])*a[0]+(y-J[1])*a[1]+(z-J[2])*a[2]),near=smoothstep(-BLEND,BLEND,e);
 				let cs=plane+(near-plane)*smoothstep(FADE[0],FADE[1],Math.abs(e));
 				const q=Math.max(1e-3,SIB*(1-smoothstep(SIB_FAR[0],SIB_FAR[1],r)));for(const m of KIDS[P])if(m!==s)cs*=smoothstep(0,q,(DS[m]-DS[s])/(DS[m]+DS[s]+EPS));
+				const rootT=ROOT_T[SEGMENTS[s]];if(rootT){const t=(x-J[0])*a[0]+(y-J[1])*a[1]+(z-J[2])*a[2],rho=Math.hypot(x-J[0]-t*a[0],y-J[1]-t*a[1],z-J[2]-t*a[2]);let raise=smoothstep(rootT[0],rootT[1],t)*(1-smoothstep(ROOT_R[0],ROOT_R[1],rho))*(t<segments[s].length?1:0);
+					if(raise>cs){for(const m of KIDS[P])if(m!==s)raise*=smoothstep(0,ROOT_Q,(DS[m]-DS[s])/(DS[m]+DS[s]+EPS));if(raise>cs){cs=raise;rootMoved=true;}}}
 				c[s]=cs;
 			}
 			// Tree partition of unity: w_s = (Π of c along the path to s) × (1 − Σ c over s's children).
@@ -166,6 +183,8 @@ async function main(){
 			let w=sB<0||kept<=0?1:W[sA]/kept;
 			if(Math.round(w*255)>=255){w=1;sB=sA;}else mixed++;
 			let dBone=Infinity;for(let s=0;s<NS;s++)dBone=Math.min(dBone,D[s]);
+			if(rootMoved&&!toTrunk)rootChanged++;
+			if(toTrunk&&(sA|sB<<4)!==0){cleaned++;if(w<1)mixed--;sA=sB=0;w=1;}
 			if(dbgF){dbgF[o/SEG_STRIDE*2]=w;dbgF[o/SEG_STRIDE*2+1]=dBone;}dB[o/SEG_STRIDE]=dBone;out[o++]=sA|sB<<4;out[o++]=Math.round(w*255);o+=2;
 		}
 	});
@@ -176,6 +195,10 @@ async function main(){
 			vo+=nv;});
 		for(let v=0;v<dB.length;v++){const du=Math.min(65535,Math.round(dB[v]/D_UNIT));out[v*SEG_STRIDE+2]=du&255;out[v*SEG_STRIDE+3]=du>>8;}
 		console.log(`sliver-safe dBone (beta ${SLIVER_BETA}): largest change ${(maxMove*1000).toFixed(2)} mm, ${left} constraints still moving after ${SLIVER_ITERS} passes (${Date.now()-t1} ms)`);}
+	console.log(`trunk-only parts (TRUNK_ONLY): ${cleanedParts} parts, ${cleaned} vertices moved onto the trunk (expected ${TRUNK_ONLY_CHANGED})`);
+	console.log(`limb-root blends (ROOT_T): ${rootChanged} vertices with a raised limb-side indicator (expected ${ROOT_T_CHANGED})`);
+	if(rootChanged!==ROOT_T_CHANGED&&!process.env.ANYHEALTH_ANY_CLEAN)throw new Error(`ROOT_T changed ${rootChanged} vertices, expected ${ROOT_T_CHANGED} (update the constant deliberately, or set ANYHEALTH_ANY_CLEAN=1 to sweep)`);
+	if(cleaned!==TRUNK_ONLY_CHANGED&&!process.env.ANYHEALTH_ANY_CLEAN)throw new Error(`TRUNK_ONLY changed ${cleaned} vertices, expected ${TRUNK_ONLY_CHANGED}: the rules or the mesh changed (update the constant deliberately, or set ANYHEALTH_ANY_CLEAN=1 to sweep)`);
 	if(dbgF)fs.writeFileSync(process.env.ANYHEALTH_FLOAT_OUT!,Buffer.from(dbgF.buffer));
 	if(o!==out.length)throw new Error(`wrote ${o} of ${out.length} bytes`);
 	fs.writeFileSync(BIN_OUT,out);
