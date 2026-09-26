@@ -14,14 +14,14 @@ import type {Issue} from '../health/types';
 import {createFracture,type FractureHandle} from '../fracture/fracture-scene';
 import type {createEngine as CreateEngine} from '../timeline/engine';
 import type {Rig} from '../timeline/types';
-interface Props {atlas:Atlas;state:SceneState;onProgress:(n:number)=>void;onError:(s:string)=>void;issues:Issue[];selectedIssue:string|null;onSelectIssue:(id:string|null)=>void;date?:string;fracture?:boolean;timeline?:{date:string;isolate:string|null;onFly?:()=>void};segments?:ArrayBuffer;rig?:Rig;/** Timeline mode: the engine factory, passed in so the default page never bundles the engine (atlas-app.tsx imports it dynamically). */createEngine?:typeof CreateEngine;onApi?:(api:{focusBox(b:T.Box3):void})=>void}
+interface Props {atlas:Atlas;state:SceneState;onProgress:(n:number)=>void;onError:(s:string)=>void;issues:Issue[];selectedIssue:string|null;onSelectIssue:(id:string|null)=>void;date?:string;fracture?:boolean;timeline?:{date:string;isolate:string|null};/** Timeline mode: segments.bin, still downloading (the chunks load alongside; decoding waits for it, and it counts as one more unit of progress). */segments?:Promise<ArrayBuffer>;rig?:Rig;/** Timeline mode: the engine factory, passed in so the default page never bundles the engine (atlas-app.tsx imports it dynamically). */createEngine?:typeof CreateEngine}
 /** `date` + `fracture` (the /anyhealth/test page) draw the 2009 humerus fracture as of the timeline date; off by default.
  *  `timeline` + `rig` + `segments` + `createEngine` (the /anyhealth/timeline page, read at mount) hand the body to the timeline engine (app/anyhealth/timeline/engine.ts): growth warp, issue effects, Isolate. Visibility then goes through the engine only. Off by default. */
-export default function AnatomyScene({atlas,state,onProgress,onError,issues,selectedIssue,onSelectIssue,date,fracture=false,timeline,segments,rig,createEngine,onApi}:Props){
+export default function AnatomyScene({atlas,state,onProgress,onError,issues,selectedIssue,onSelectIssue,date,fracture=false,timeline,segments,rig,createEngine}:Props){
  const host=useRef<HTMLDivElement>(null),latest=useRef(state),dots=useRef<DotsHandle|null>(null);
  latest.current=state;
  const latestDate=useRef({date,fracture});latestDate.current={date,fracture};
- const latestTimeline=useRef({timeline,onApi});latestTimeline.current={timeline,onApi};
+ const latestTimeline=useRef({timeline});latestTimeline.current={timeline};
  useEffect(()=>{
   const el=host.current!;let disposed=false,frame=0,dirty=true,ready=false;
   let lastState:SceneState|null=null,fx:FractureHandle|null=null,fxTried=false;
@@ -43,7 +43,9 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
   const width=T.MathUtils.ceilPowerOfTwo(atlas.parts.length),data=new Float32Array(width*4),partTexture=new T.DataTexture(data,width,1,T.RGBAFormat,T.FloatType);partTexture.needsUpdate=true;
   const materials:T.Material[]=[],geometries:T.BufferGeometry[]=[],pickers:(T.Mesh|undefined)[]=[];
   const bounds=atlas.parts.map(p=>new T.Box3(new T.Vector3().fromArray(p.bounds[0]),new T.Vector3().fromArray(p.bounds[1])));
-  const engine=timeline&&rig&&segments&&createEngine?createEngine({atlas,scene,bounds,rig,segments,renderer}):null;
+  // Timeline mode: the engine is created once segments.bin arrives (chunks download meanwhile, and decode after it); materials made before then are patched on creation.
+  const timelineOn=!!(timeline&&rig&&segments&&createEngine),units=atlas.chunks.length+(timelineOn?1:0);let loaded=0;const report=()=>onProgress(Math.round(loaded/units*100));
+  let engine=null as ReturnType<typeof CreateEngine>|null;const engineReady=timelineOn?segments!.then(buf=>{if(disposed)return;engine=createEngine!({atlas,scene,bounds,rig:rig!,segments:buf,renderer});mats.forEach((m,system)=>engine!.patchMaterial(m,{partFx:true,soft:['muscular','integumentary','connective'].includes(system)}));loaded++;report();}):null;engineReady?.catch(()=>{/* reported by the chunk loader, which awaits it */});
   // Timeline mode: picking treats a part as visible by the engine's final fx visibility (switches, Isolate and issue effects such as a hidden fractured bone or an unerupted tooth).
   let lastIsolate:string|null=null,seenDate='',dateAt=0,settled=true;const shown=(i:number)=>(engine?engine.partVisible(i):data[i*4+3])>.5;
   const materialFor=(system:string)=>{
@@ -54,12 +56,11 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
     shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nvec2 stateUv = vec2((partIndex + 0.5) / stateWidth, 0.5); vec4 state = texture2D(partState, stateUv); partVisible = state.w;');
     shader.fragmentShader='varying float partVisible;\n'+shader.fragmentShader;
     shader.fragmentShader=shader.fragmentShader.replace('#include <clipping_planes_fragment>','#include <clipping_planes_fragment>\nif (partVisible < 0.5) discard;');
-   };engine?.patchMaterial(m,{partFx:true,soft:['muscular','integumentary','connective'].includes(system)});materials.push(m);return m;
+   };materials.push(m);return m;
   };
   const mats=new Map(SYSTEMS.map(s=>[s.id,materialFor(s.id)]));
-  let loaded=0;
   const loadChunk=async(ci:number)=>{
-   const chunk=atlas.chunks[ci];const response=await fetch(chunk.url,{signal:abort.signal});if(!response.ok)throw new Error('An anatomy file could not be loaded.');const buffer=await response.arrayBuffer();if(buffer.byteLength!==chunk.bytes)throw new Error('An anatomy file was incomplete. Please reload the viewer.');await MeshoptDecoder.ready;if(disposed)return;
+   const chunk=atlas.chunks[ci];const response=await fetch(chunk.url,{signal:abort.signal});if(!response.ok)throw new Error('An anatomy file could not be loaded.');const buffer=await response.arrayBuffer();if(buffer.byteLength!==chunk.bytes)throw new Error('An anatomy file was incomplete. Please reload the viewer.');await MeshoptDecoder.ready;if(engineReady)await engineReady;if(disposed)return;
    const groups=new Map<string,T.BufferGeometry[]>();
    atlas.parts.forEach((p,i)=>{
     if(p.chunk!==ci)return;
@@ -73,7 +74,7 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
     const list=groups.get(p.system)??[];list.push(g);groups.set(p.system,list);
    });
    groups.forEach((gs,system)=>{const geometry=mergeGeometries(gs,false);if(!geometry)throw new Error('Could not assemble anatomy geometry.');geometries.push(geometry);const mesh=new T.Mesh(geometry,mats.get(system as never));mesh.frustumCulled=false;scene.add(mesh);});
-   lastState=null;loaded++;onProgress(Math.round(loaded/atlas.chunks.length*100));dirty=true;
+   lastState=null;loaded++;report();dirty=true;
   };
   (async()=>{try{let cursor=0;await Promise.all(Array.from({length:3},async()=>{while(cursor<atlas.chunks.length){const i=cursor++;await loadChunk(i);}}));if(!disposed){ready=true;dirty=true;engine?.ready(pickers);}}catch(e){if(!disposed)onError(e instanceof Error?e.message:'Could not load the anatomy.');}})();
   // Width of the issue panel's right footprint (--issue-panel-w + --panel-inset on .studio), resolved through a probe so calc()/min()/vw values work. 0 when the properties are unset.
@@ -132,7 +133,7 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
   // Nearest visible part under a screen point (the translucent body surface only counts when nothing solid is showing). setFromCamera uses the camera's view offset, matching the rendered image.
   const pick=(clientX:number,clientY:number):{index:number;point:T.Vector3|null}=>{
    const rect=renderer.domElement.getBoundingClientRect();pointer.set((clientX-rect.left)/rect.width*2-1,-(clientY-rect.top)/rect.height*2+1);raycaster.setFromCamera(pointer,camera);
-   let nearest=Infinity,found=-1,point:T.Vector3|null=null;const hasSolid=atlas.parts.some((p,i)=>p.system!=='integumentary'&&shown(i));
+   engine?.finishSettle();let nearest=Infinity,found=-1,point:T.Vector3|null=null;const hasSolid=atlas.parts.some((p,i)=>p.system!=='integumentary'&&shown(i));
    pickers.forEach((mesh,i)=>{if(!mesh||!shown(i)||(hasSolid&&atlas.parts[i].system==='integumentary'))return;if(!raycaster.ray.intersectBox(bounds[i],hitPoint))return;const hits=raycaster.intersectObject(mesh,false);if(hits[0]&&hits[0].distance<nearest){nearest=hits[0].distance;found=i;point=hits[0].point.clone();}});
    return {index:found,point};
   };
@@ -151,7 +152,6 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
    const direction=camera.position.clone().sub(controls.target).normalize();
    flyTo({target:center,position:center.clone().addScaledVector(direction,distance),ox:w/2-(left+right)/2,oy:h/2-(top+bottom)/2});
   };
-  latestTimeline.current.onApi?.({focusBox:b=>focusBox(b)});
   const touches=new Map<number,{x:number;y:number}>();let lastTap:{t:number;x:number;y:number}|null=null;
   const down=(e:PointerEvent)=>{
    tap.down(e.pointerId,e.clientX,e.clientY,e.pointerType==='touch'?12:5);flight=null;
@@ -183,9 +183,9 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
    }
    if(engine&&tl){
     const now=performance.now();if(tl.date!==seenDate){seenDate=tl.date;dateAt=now;settled=false;}
-    const r=engine.update({date:tl.date,visible:s.visible,isolate:tl.isolate,now});if(r.changed||r.animating)dirty=true;if(r.fly){focusBox(r.fly,1.35);tl.onFly?.();}
-    // Re-warp the picking geometry and bounds once the date has rested for 150 ms.
-    if(ready&&!settled&&now-dateAt>=150){engine.settle();settled=true;}
+    const r=engine.update({date:tl.date,visible:s.visible,isolate:tl.isolate,now});if(r.changed||r.animating)dirty=true;if(r.fly)focusBox(r.fly,1.35);
+    // Re-warp the picking geometry and bounds once the date has rested for 150 ms, about 4 ms per frame (a pick completes the rest first).
+    if(ready&&!settled&&now-dateAt>=150)settled=engine.settleSlice(4);
    }
    const fd=latestDate.current;if(ready&&fd.fracture&&!fxTried){fxTried=true;fx=createFracture({scene,atlas,pickers,data,partTexture});}
    if(fx){const r=fx.update(fd.fracture?fd.date??'':'',s.visible.includes('skeletal'),performance.now());if(r.changed||r.animating)dirty=true;if(r.fly)focusBox(fx.box,1.35);}

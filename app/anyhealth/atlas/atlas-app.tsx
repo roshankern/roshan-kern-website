@@ -25,7 +25,7 @@ type TimelineKit=typeof import('../timeline/runtime');
  *  `mode="timeline"` + `kit` (the /anyhealth/timeline page, via timeline/timeline-app.tsx): the body's growth and every issue animated by the timeline engine, with the Issue tracker in place of the issue panel; reads ?date= too. */
 export default function AtlasApp({fracture=false,mode='default',kit=null}:{fracture?:boolean;mode?:'default'|'timeline';kit?:TimelineKit|null}){
  const timeline=mode==='timeline'&&!!kit;
- const [atlas,setAtlas]=useState<Atlas|null>(null),[state,setState]=useState(initial),[progress,setProgress]=useState(0),[error,setError]=useState(''),[panel,setPanel]=useState<'layers'|null>(null),[about,setAbout]=useState(false),[date,setDate]=useState(''),[selectedIssue,setSelectedIssue]=useState<string|null>(null),[isolate,setIsolate]=useState<string|null>(null),[segments,setSegments]=useState<ArrayBuffer|null>(null);
+ const [atlas,setAtlas]=useState<Atlas|null>(null),[state,setState]=useState(initial),[progress,setProgress]=useState(0),[error,setError]=useState(''),[panel,setPanel]=useState<'layers'|null>(null),[about,setAbout]=useState(false),[date,setDate]=useState(''),[selectedIssue,setSelectedIssue]=useState<string|null>(null),[isolate,setIsolate]=useState<string|null>(null),[segments,setSegments]=useState<Promise<ArrayBuffer>|null>(null);
  // Starts at birth; set after mount so the timeline (which reads today's date) renders client-only.
  useEffect(()=>{
   setDate(parseDateParam(fracture||timeline?new URLSearchParams(location.search).get('date'):null,todayISO()));
@@ -33,7 +33,8 @@ export default function AtlasApp({fracture=false,mode='default',kit=null}:{fract
  const issue=ISSUES.find(i=>i.id===selectedIssue)??null,closeIssue=useCallback(()=>setSelectedIssue(null),[]);
  
  useEffect(()=>{const abort=new AbortController();setProgress(0);setError('');setAtlas(null);setState({...initial,visible:DEFAULT_VISIBLE});fetch('/anyhealth/models/atlas.json',{signal:abort.signal}).then(r=>{if(!r.ok)throw new Error('The anatomy catalogue could not be loaded.');return r.json();}).then(data=>setAtlas(data as Atlas)).catch(e=>{if(e.name!=='AbortError')setError(e.message);});
-  if(timeline){setSegments(null);fetch('/anyhealth/models/segments.bin',{signal:abort.signal}).then(r=>{if(!r.ok)throw new Error('The body growth data could not be loaded.');return r.arrayBuffer();}).then(setSegments).catch(e=>{if(e.name!=='AbortError')setError(e.message);});}
+  // Timeline mode: segments.bin downloads alongside atlas.json and the scene's chunks (the scene awaits it before decoding, and reports its errors).
+  if(timeline)setSegments(fetch('/anyhealth/models/segments.bin',{signal:abort.signal}).then(r=>{if(!r.ok)throw new Error('The body growth data could not be loaded.');return r.arrayBuffer();}));
   return()=>abort.abort();},[timeline]);
  const healing=fracture&&date?fractureAt(date):null;
  const activeSystems=useMemo(()=>SYSTEMS.filter(s=>atlas?.parts.some(p=>p.system===s.id)),[atlas]);
