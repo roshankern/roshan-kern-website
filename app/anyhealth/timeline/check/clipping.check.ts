@@ -296,11 +296,15 @@ export const checks:Check[]=[
 			for(const [nm,st] of m.bones){const f=st.newOut/Math.max(1,st.inRest);if(f>wv||(f===wv&&st.worstMM>0)){wv=f;worst=`${nm}: ${pct(f)}% newly outside, farthest ${st.worstMM.toFixed(1)} mm (${pct(st.outside/st.n)}% outside in all)`;}if(f>(HAND_FOOT.test(nm)?BONE_FRAC_HF:BONE_FRAC))b.push(`${nm} ${pct(f)}% / ${st.worstMM.toFixed(1)} mm`);}
 			return {line:`worst ${worst}`,breaches:b};});
 	}},
-	{name:'joint seams (parent vs child joint point ≤1 mm; bones across each joint within 1 cm at rest close ≤1 mm beyond the rest gap × the segments\' smallest scale)',async run(c){
+	{name:'joint seams (parent vs child joint point ≤1 mm; bones across each joint within 1 cm at rest close ≤1 mm beyond the rest gap × the segments\' smallest scale; hard for hip bone × femur, Task 14d)',async run(c){
 		const rest=await measure(c,null);c.assert(rest.joints.length===14,'14 joints');log(`pairs per joint: ${jointCache!.map(j=>`${j.id} ${j.pairs.length}`).join(', ')}`);
-		await perDate(c,'joints',(m)=>{const b:string[]=[];let we=0,wj='',wd=Infinity,wl='';
+		// Task 14d: hip bone × femur is a hard gate (the thigh map is Jacobian-matched to the axial remap at the hip): never more than CROSS_MM closed beyond the scaled rest gap, on every date. The others still report.
+		const hips:string[]=[];
+		await perDate(c,'joints',(m,_r,date)=>{const b:string[]=[];let we=0,wj='',wd=Infinity,wl='';
 			for(const j of m.joints){if(j.err>we){we=j.err;wj=j.id;}if(j.minD<wd){wd=j.minD;wl=`${j.id} (${j.pair}) ${mm(j.minD)} mm: gap ${mm(j.gap)} (rest ${mm(j.restGap)})`;}if(j.err*MM>JOINT_MM)b.push(`${j.id} joint ${mm(j.err)} mm`);if(j.minD*MM<-CROSS_MM)b.push(`${j.id} ${mm(j.minD)} mm (${j.pair}, gap ${mm(j.gap)})`);}
-			return {line:`joint point max ${mm(we)} mm${wj?` (${wj})`:''} · most closed ${wl}`,breaches:b};});
+			const hip=m.joints.filter(j=>j.id==='lThigh'||j.id==='rThigh');for(const j of hip)if(j.minD*MM<-CROSS_MM)hips.push(`${date} ${j.id} ${mm(j.minD)} mm`);
+			return {line:`joint point max ${mm(we)} mm${wj?` (${wj})`:''} · most closed ${wl} · hip bone × femur L ${mm(hip[0].minD)} / R ${mm(hip[1].minD)} mm`,breaches:b};});
+		c.assert(!hips.length,`hip bone × femur closes more than ${CROSS_MM} mm beyond the scaled rest gap: ${hips.join(', ')}`);
 	}},
 	{name:'vertebrae and disks don\'t interpenetrate (penetration between neighbours ≤1 mm deeper than at rest; scoliosis peak and every test date)',async run(c){
 		const rest=await measure(c,null),sp=peaks().find(p=>p.id.startsWith('scoliosis'));c.assert(!!sp,'scoliosis peak');c.assert(rest.vert.size>40,`vertebral pairs ${rest.vert.size}`);log(`scoliosis peak ${sp!.date}; ${rest.vert.size} pairs; rest penetration > 1 mm: ${[...rest.vert].filter(([,v])=>v>0.001).map(([k,v])=>`${k} ${mm(v)}`).join(', ')||'none'}`);

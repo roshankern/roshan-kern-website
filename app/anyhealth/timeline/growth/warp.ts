@@ -13,19 +13,22 @@
  *
  * Segment i (SEGMENTS order): rest joint J_i, unit axis a_i, global scale S = body.scale, along factor ℓ_i = body.length, bone perpendicular factor γb_i = body.boneGirth, soft factor γs_i = body.softGirth.
  *   Limb segments (Task 14d, Jacobian-matched joints): d = p − J_i, t = d·a_i, r = d − t a_i, and (u_i, v_i = a_i × u_i) an orthonormal basis of the plane ⟂ a_i:
- *   T_i(p) = N_i + F(t) a_i + λu(t)(u·r) u + λv(t)(v·r) v: ONE map (bone girth) for every vertex, so parent and child agree at their joint for soft tissue too (Task 14a).
+ *   T_i(p) = N_i + F(t) a_i + λu(t)(u·r) u + λv(t)(v·r) v + (1 − h(t))(β·r) a_i: ONE map (bone girth) for every vertex, so parent and child agree at their joint for soft tissue too (Task 14a).
  *   Over the taper [t0, t1] (LIMB_TAPER, rest metres from the joint; h = the C1 smoothstep, 0 before t0) every rate blends from the PARENT's Jacobian J_P at the joint to the segment's own:
  *     F′ = F0 + (ℓe − F0)·h with F0 = |J_P a_i| (F is its closed-form integral, F(0) = 0); λu, λv = the eigenvalues (eigenvector u) of J_P symmetrised and restricted to the plane ⟂ a_i, → S·γb_i;
  *     the soft coefficient κ = κ0 + (S(γs_i − γb_i) − κ0)·h, κ0 = the parent's at the joint (the remap's max(0, gs − g), or a limb parent's κ).
+ *     β = J_Pᵀ a_i − (a_i·J_P a_i) a_i, the parent's along-from-perpendicular block (how an offset ⟂ the axis moves along it: the remap's lateral shear g′·x at the shoulders, a bent joint's off-axis rows), fades out with 1 − h.
+ *     (The perpendicular-from-along block, the parent's turn of the axis, is not matched: at the shoulders it sheared the chest wall, birth limb flips 182 → 241; |J_P a| stands in for it in F0, as the brief asks.)
  *     ℓe is solved so F(L_i) = S·ℓ_i·L_i: the segment keeps its length and its child joint's place. So the tissue on both sides of a joint blends two maps with (nearly) the same Jacobian and cannot fold across the blend
- *     (Task 14c review: 96% of the birth limb flips were in the trunk ↔ upper arm / thigh blends). det = F′·λu·λv > 0: F′ blends two positive rates and λu, λv two positive-definite blocks. On t < t0 (the parent side) the map is the joint's linear extension.
+ *     (Task 14c review: 96% of the birth limb flips were in the trunk ↔ upper arm / thigh blends). Without β, det = F′·λu·λv > 0 (F′ blends two positive rates, λu, λv two positive-definite blocks); β adds (1 − h)β and −h′(β·r) to
+ *     the along row, small against F′ (checked: det > 0 sampled along every limb, warp.check). On t < t0 (the parent side) the map is the joint's linear extension.
  *   N_trunk = S·J_trunk (scale about the origin); N_i = T_parent(J_i), so every child stays attached at its joint.
  *   p' = wA·T_segA(p) + (1 − wA)·T_segB(p) + soft · Σ_{i∈{A,B}} w_i · κ_i(t) · min(1, dBone/ρ_i) · r_i(p), then p'.y += ground (κ = S(γs − γb) past the taper; the axial segments use their own field, below).
  *     The soft-tissue girth is a post-warp inflation: r_i = d − (d·a_i) a_i is the point's rest offset from segment i's axis (ρ_i = |r_i|; the bone-girth map keeps its direction), and dBone is its rest distance to the nearest bone
  *     (segments.bin bytes 2-3; 0 for bone). So tissue dBone from the bone ends S·γs·dBone from it instead of S·γb·dBone, and near the axis (ρ < dBone) it is the plain soft-girth scaling. It vanishes at the bones, so parent and child agree at their joint.
  *     The direction is radial, not the vertex normal: a normal offset folds thin sheets (Task 14a report: 17,836 flipped triangles on the hand-built child, 51,202 on the infant). `soft` = the part is muscular / integumentary / connective.
  *   ground = −(lowest warped sole point): the four points under each ankle and each toe tip on the rest floor (y = 0), warped by their foot segment.
- *   Normal: n' = normalize(wA·M_A n + (1 − wA)·M_B n), M_i = the inverse transpose of segment i's map at p (for a limb: a·(n·a − Σ λ′(e·r)(e·n)/λ)/F′ + Σ (e·n)/λ e over e = u, v). */
+ *   Normal: n' = normalize(wA·M_A n + (1 − wA)·M_B n), M_i = the inverse transpose of segment i's map at p (for a limb, cof(J)/det J of its full Jacobian, warpNormal). */
 import {SEGMENTS,type Body,type Rig,type SegmentId,type Vec3} from '../types';
 
 /** segments.bin: per atlas part in order, vertexCount × SEG_STRIDE bytes: byte0 = segA | segB<<4, byte1 = round(weightA·255), bytes 2-3 = round(dBone / D_UNIT) (uint16, little-endian): the rest distance to the nearest bone (0 for bone, capped at 65535 units = 13.1 cm).
@@ -36,10 +39,10 @@ export const segAt=(b:ArrayLike<number>,o:number,v:number):[number,number,number
 
 export interface WarpState {/** per segment, index = SEGMENTS order */ restJoint:Float32Array;axis:Float32Array;newJoint:Float32Array;/** S·ℓ_i */ alongScale:Float32Array;/** S·γ_i (bone) */ boneScale:Float32Array;/** S·γ_i (soft) */ softScale:Float32Array;/** y shift to keep the feet on the floor */ ground:number;
 	/** Axial remap parameters, AXIAL_VEC4 vec4s (the shader's twX): [Y0, S·Y0, f′0, g0], [c0(Y0).xz, c0′0.xz], [c(Y0).xz, (f′0·c0′0).xz], then per knot i = 1..3: [y_i, w_i, Δf′_i, Δg_i], [Δc0′_i.xz, α_i.xz = f′_left·Δc0′ + c0′_left·Δf′], [β_i.xz = Δf′·Δc0′, girth window centre, half-width]; then [S, gs0, 0, 0] and [Δgs_1..3, 0] (gs = the soft girth, blended like g). */ axial:Float64Array;
-	/** Per segment, TAPER_STRIDE values (limbs; 0 for trunk / neck / head): [F0, λu0, λv0, κ0, t0, t1, u.xyz, ℓe] (the Task 14d joint taper, see the header). */ taper:Float64Array}
+	/** Per segment, TAPER_STRIDE values (limbs; 0 for trunk / neck / head): [F0, λu0, λv0, κ0, t0, t1, u.xyz, ℓe, β.xyz] (the Task 14d joint taper, see the header). */ taper:Float64Array}
 
 /** Length of one segment's entry in WarpState.taper. */
-export const TAPER_STRIDE=10;
+export const TAPER_STRIDE=13;
 /** Axial segments (the height remap): SEGMENTS indices below this (trunk, neck, head). */
 export const AXIAL_SEGMENTS=3;
 /** Rest menton height: the Mandible's lowest rest vertex (check: warp · axial knots). The face interval runs from here to the atlanto-occipital joint. */
@@ -60,12 +63,12 @@ export const LIMB_TAPER:Readonly<Record<'shoulder'|'hip'|'elbow'|'knee'|'wrist'|
 export const taperOf=(id:SegmentId):readonly [number,number]=>LIMB_TAPER[/UpperArm$/.test(id)?'shoulder':/Thigh$/.test(id)?'hip':/Forearm$/.test(id)?'elbow':/Shank$/.test(id)?'knee':/Hand$/.test(id)?'wrist':'ankle'];
 const AX9=9/35;
 
-const lr=[0,0,0,0,0,0,0,0];
-/** A limb segment's rates at rest axial distance t from its joint: [F(t), F′, λu, λv, λu′, λv′, κ, κ′] (header). Returns a shared array. */
+const lr=[0,0,0,0,0,0,0,0,0,0];
+/** A limb segment's rates at rest axial distance t from its joint: [F(t), F′, λu, λv, λu′, λv′, κ, κ′, h, h′] (header; h = the taper smoothstep). Returns a shared array. */
 function limbAt(ws:WarpState,i:number,t:number):number[]{
 	const T=ws.taper,o=i*TAPER_STRIDE,F0=T[o],t0=T[o+4],t1=T[o+5],le=T[o+9],gb=ws.boneScale[i],k1=ws.softScale[i]-gb,u=(t-t0)/(t1-t0);let h=0,H=0,hp=0;
 	if(u>=1){h=1;H=t-(t0+t1)/2;}else if(u>0){const u2=u*u,u3=u2*u;h=u2*(3-2*u);H=(t1-t0)*(u3-0.5*u3*u);hp=6*u*(1-u)/(t1-t0);}
-	lr[0]=F0*t+(le-F0)*H;lr[1]=F0+(le-F0)*h;lr[2]=T[o+1]+(gb-T[o+1])*h;lr[3]=T[o+2]+(gb-T[o+2])*h;lr[4]=(gb-T[o+1])*hp;lr[5]=(gb-T[o+2])*hp;lr[6]=T[o+3]+(k1-T[o+3])*h;lr[7]=(k1-T[o+3])*hp;return lr;
+	lr[0]=F0*t+(le-F0)*H;lr[1]=F0+(le-F0)*h;lr[2]=T[o+1]+(gb-T[o+1])*h;lr[3]=T[o+2]+(gb-T[o+2])*h;lr[4]=(gb-T[o+1])*hp;lr[5]=(gb-T[o+2])*hp;lr[6]=T[o+3]+(k1-T[o+3])*h;lr[7]=(k1-T[o+3])*hp;lr[8]=h;lr[9]=hp;return lr;
 }
 /** T_i(p) of a limb segment without the ground shift. Writes out[0..2]; p may alias out. */
 function segPoint(ws:WarpState,i:number,x:number,y:number,z:number,out:number[]|Vec3){
@@ -73,6 +76,8 @@ function segPoint(ws:WarpState,i:number,x:number,y:number,z:number,out:number[]|
 	// G r = λv r + (λu − λv)(u·r) u with r = d − t a exactly, so an identity body maps every point to itself (the stored axis is float32, not exactly unit).
 	const ux=T[o+6],uy=T[o+7],uz=T[o+8],rx=dx-t*ax,ry=dy-t*ay,rz=dz-t*az,lv=L[3],su=(L[2]-lv)*(rx*ux+ry*uy+rz*uz),F=L[0];
 	out[0]=ws.newJoint[k]+F*ax+lv*rx+su*ux;out[1]=ws.newJoint[k+1]+F*ay+lv*ry+su*uy;out[2]=ws.newJoint[k+2]+F*az+lv*rz+su*uz;
+	// The parent's along-from-perpendicular block β (a vector ⟂ a), faded out over the taper: + (1 − h)(β·r) a.
+	const br=(1-L[8])*(T[o+10]*rx+T[o+11]*ry+T[o+12]*rz);out[0]+=br*ax;out[1]+=br*ay;out[2]+=br*az;
 }
 /** A limb segment's local rates at rest point p: [F′, λu, λv, κ, in the taper] (absolute, S included; `in the taper` = rest t < t1, the parent side included), for the seam check's scale bound (Task 14d). */
 export function limbRates(ws:WarpState,i:number,x:number,y:number,z:number):[number,number,number,number,boolean]{const k=i*3,t=(x-ws.restJoint[k])*ws.axis[k]+(y-ws.restJoint[k+1])*ws.axis[k+1]+(z-ws.restJoint[k+2])*ws.axis[k+2],L=limbAt(ws,i,t);return [L[1],L[2],L[3],L[6],t<ws.taper[i*TAPER_STRIDE+5]];}
@@ -129,14 +134,14 @@ export function warpState(rig:Rig,body:Body):WarpState{
 		if(p<AXIAL_SEGMENTS){axialCurves(ws,y,cv);const g=cv[1],fp=cv[6];J[0]=g;J[1]=cv[8]*(fp-g)+cv[7]*(x-cv[2]);J[4]=fp;J[7]=cv[9]*(fp-g)+cv[7]*(z-cv[3]);J[8]=g;k0=Math.max(0,cv[10]-g);}
 		else{const kp=p*3,op=p*TAPER_STRIDE,T=ws.taper,ap=Math.hypot(ws.axis[kp],ws.axis[kp+1],ws.axis[kp+2]),a=[ws.axis[kp]/ap,ws.axis[kp+1]/ap,ws.axis[kp+2]/ap],u=[T[op+6],T[op+7],T[op+8]],v=[a[1]*u[2]-a[2]*u[1],a[2]*u[0]-a[0]*u[2],a[0]*u[1]-a[1]*u[0]];
 			const L=limbAt(ws,p,(x-ws.restJoint[kp])*a[0]+(y-ws.restJoint[kp+1])*a[1]+(z-ws.restJoint[kp+2])*a[2]);for(let r=0;r<3;r++)for(let c=0;c<3;c++)J[r*3+c]=L[1]*a[r]*a[c]+L[2]*u[r]*u[c]+L[3]*v[r]*v[c];k0=L[6];}
-		const al0=Math.hypot(ws.axis[k],ws.axis[k+1],ws.axis[k+2]),a=[ws.axis[k]/al0,ws.axis[k+1]/al0,ws.axis[k+2]/al0],Ja=[0,1,2].map(r=>J[r*3]*a[0]+J[r*3+1]*a[1]+J[r*3+2]*a[2]),F0=Math.hypot(Ja[0],Ja[1],Ja[2]);
+		const al0=Math.hypot(ws.axis[k],ws.axis[k+1],ws.axis[k+2]),a=[ws.axis[k]/al0,ws.axis[k+1]/al0,ws.axis[k+2]/al0],Ja=[0,1,2].map(r=>J[r*3]*a[0]+J[r*3+1]*a[1]+J[r*3+2]*a[2]),aJ=[0,1,2].map(c=>J[c]*a[0]+J[3+c]*a[1]+J[6+c]*a[2]),aJa=Ja[0]*a[0]+Ja[1]*a[1]+Ja[2]*a[2],F0=Math.hypot(Ja[0],Ja[1],Ja[2]),bet=aJ.map((v,c)=>v-aJa*a[c]);
 		// The plane ⟂ a: e1, e2 = a × e1; M = e_jᵀ sym(J) e_k; its eigenvalues λu ≥ λv and eigenvector u.
 		const m=Math.abs(a[0])<0.6?[1,0,0]:[0,0,1],d=m[0]*a[0]+m[1]*a[1]+m[2]*a[2],e1r=[m[0]-d*a[0],m[1]-d*a[1],m[2]-d*a[2]],e1l=Math.hypot(e1r[0],e1r[1],e1r[2]),e1=e1r.map(c=>c/e1l),e2=[a[1]*e1[2]-a[2]*e1[1],a[2]*e1[0]-a[0]*e1[2],a[0]*e1[1]-a[1]*e1[0]];
 		const sym=(e:number[],f:number[])=>{let r=0;for(let i2=0;i2<3;i2++)for(let c=0;c<3;c++)r+=e[i2]*0.5*(J[i2*3+c]+J[c*3+i2])*f[c];return r;},m11=sym(e1,e1),m12=sym(e1,e2),m22=sym(e2,e2);
 		const mid=(m11+m22)/2,rad=Math.hypot((m11-m22)/2,m12),th=0.5*Math.atan2(2*m12,m11-m22),u=[0,1,2].map(c=>Math.cos(th)*e1[c]+Math.sin(th)*e2[c]);
 		const [t0,t1]=taperOf(s.id),len=s.length,le=F0+(ws.alongScale[i]-F0)*len/(len-(t0+t1)/2);
 		if(!(mid-rad>0)||!(le>0))throw new Error(`joint taper of ${s.id}: λ ${mid-rad}, ℓe ${le} not positive`);
-		ws.taper.set([F0,mid+rad,mid-rad,k0,t0,t1,u[0],u[1],u[2],le],i*TAPER_STRIDE);
+		ws.taper.set([F0,mid+rad,mid-rad,k0,t0,t1,u[0],u[1],u[2],le,...bet],i*TAPER_STRIDE);
 	});
 	let lo=Infinity;
 	for(const id of ['lFoot','rFoot'] as const){
@@ -164,11 +169,12 @@ export function warpPoint(ws:WarpState,p:Vec3,segA:number,segB:number,wA:number,
 export function warpNormal(ws:WarpState,p:Vec3,n:Vec3,segA:number,segB:number,wA:number,out:Vec3):Vec3{
 	const x=n[0],y=n[1],z=n[2],m=[0,0,0];let rx=0,ry=0,rz=0;
 	const add=(i:number,w:number)=>{if(i<AXIAL_SEGMENTS){axialNormal(ws,p[0],p[1],p[2],x,y,z,m);rx+=w*m[0];ry+=w*m[1];rz+=w*m[2];return;}
-		const k=i*3,o=i*TAPER_STRIDE,T=ws.taper,ax=ws.axis[k],ay=ws.axis[k+1],az=ws.axis[k+2],ux=T[o+6],uy=T[o+7],uz=T[o+8],vx=ay*uz-az*uy,vy=az*ux-ax*uz,vz=ax*uy-ay*ux,dx=p[0]-ws.restJoint[k],dy=p[1]-ws.restJoint[k+1],dz=p[2]-ws.restJoint[k+2];
-		// J = F′ a aᵀ + λu u uᵀ + λv v vᵀ + (λu′(u·r) u + λv′(v·r) v) aᵀ (r = the rest offset from the axis): J⁻ᵀn = a·(n·a − λu′(u·r)(u·n)/λu − λv′(v·r)(v·n)/λv)/F′ + (u·n)/λu u + (v·n)/λv v.
-		const L=limbAt(ws,i,dx*ax+dy*ay+dz*az),na=x*ax+y*ay+z*az,nu=(x*ux+y*uy+z*uz)/L[2],nv=(x*vx+y*vy+z*vz)/L[3],al=(na-L[4]*(dx*ux+dy*uy+dz*uz)*nu-L[5]*(dx*vx+dy*vy+dz*vz)*nv)/L[1],iv=1/L[3],cu=nu-(x*ux+y*uy+z*uz)*iv;
-		// (u·n)/λu u + (v·n)/λv v = (n − (n·a) a)/λv + ((u·n)/λu − (u·n)/λv) u.
-		rx+=w*(al*ax+(x-na*ax)*iv+cu*ux);ry+=w*(al*ay+(y-na*ay)*iv+cu*uy);rz+=w*(al*az+(z-na*az)*iv+cu*uz);};
+		const k=i*3,o=i*TAPER_STRIDE,T=ws.taper,a=[ws.axis[k],ws.axis[k+1],ws.axis[k+2]],u=[T[o+6],T[o+7],T[o+8]],v=[a[1]*u[2]-a[2]*u[1],a[2]*u[0]-a[0]*u[2],a[0]*u[1]-a[1]*u[0]],d=[p[0]-ws.restJoint[k],p[1]-ws.restJoint[k+1],p[2]-ws.restJoint[k+2]];
+		const t=d[0]*a[0]+d[1]*a[1]+d[2]*a[2],r=[d[0]-t*a[0],d[1]-t*a[1],d[2]-t*a[2]],L=limbAt(ws,i,t),ru=r[0]*u[0]+r[1]*u[1]+r[2]*u[2],rv=r[0]*v[0]+r[1]*v[1]+r[2]*v[2],q=1-L[8],hp=L[9],b=[T[o+10],T[o+11],T[o+12]],br=b[0]*r[0]+b[1]*r[1]+b[2]*r[2];
+		// J = F′ a aᵀ + λv (I − a aᵀ) + (λu − λv) u uᵀ + (λu′(u·r) u + λv′(v·r) v) aᵀ + (1 − h) a βᵀ − h′(β·r) a aᵀ (row R0, column C); the normal is J⁻ᵀ n = cof(J) n / det J.
+		const J=[0,0,0,0,0,0,0,0,0];for(let R0=0;R0<3;R0++)for(let C=0;C<3;C++)J[R0*3+C]=(L[1]-hp*br)*a[R0]*a[C]+L[3]*((R0===C?1:0)-a[R0]*a[C])+(L[2]-L[3])*u[R0]*u[C]+(L[4]*ru*u[R0]+L[5]*rv*v[R0])*a[C]+q*a[R0]*b[C];
+		const c0=J[4]*J[8]-J[5]*J[7],c1=J[5]*J[6]-J[3]*J[8],c2=J[3]*J[7]-J[4]*J[6],c3=J[2]*J[7]-J[1]*J[8],c4=J[0]*J[8]-J[2]*J[6],c5=J[1]*J[6]-J[0]*J[7],c6=J[1]*J[5]-J[2]*J[4],c7=J[2]*J[3]-J[0]*J[5],c8=J[0]*J[4]-J[1]*J[3],id=1/(J[0]*c0+J[1]*c1+J[2]*c2);
+		rx+=w*id*(c0*x+c1*y+c2*z);ry+=w*id*(c3*x+c4*y+c5*z);rz+=w*id*(c6*x+c7*y+c8*z);};
 	add(segA,wA);if(wA<1)add(segB,1-wA);
 	const il=1/Math.sqrt(Math.max(rx*rx+ry*ry+rz*rz,1e-20));out[0]=rx*il;out[1]=ry*il;out[2]=rz*il;return out;
 }

@@ -72,8 +72,11 @@ function testPoints(){
 const BREAKS:[string,string,string][]=[
 	['no along taper: F = ℓe·t','r0 = vec4(T.x * t + (le - T.x) * H,','r0 = vec4(le * t,'],
 	['isotropic G: λu := λv','((r0.z - r0.w) * dot(r, u)) * u;','0.0 * u;'],
-	['taper derivative sign in the normal','- r1.x * dot(d, u) * nu','+ r1.x * dot(d, u) * nu'],
-	['no λv′ term in the normal','- r1.y * dot(d, v) * nv','- 0.0 * nv'],
+	['taper derivative sign in the normal','outerProduct(r1.x * dot(r, u) * u','outerProduct(-r1.x * dot(r, u) * u'],
+	['no λv′ term in the normal','+ r1.y * dot(r, v) * v, ax)','+ 0.0 * v, ax)'],
+	['no β block (position)','(r0.x + (1.0 - r1.w) * dot(twB[i].xyz, r)) * ax','r0.x * ax'],
+	['no β block (normal)','+ (1.0 - r1.w) * outerProduct(ax, b);','+ 0.0 * outerProduct(ax, b);'],
+	['no β fade derivative in the normal','(r0.y - hp * dot(b, r))','(r0.y)'],
 	['untapered soft coefficient κ','T.w + (k1 - T.w) * h','k1'],
 	['parent along rate not matched: F0 := ℓe','vec4 T = twT[i];','vec4 T = vec4(twS[i].x, twT[i].yzw);'],
 ];
@@ -172,7 +175,7 @@ async function main(){
 		let failed=false;
 		// The bytes the atlas uploads (segments.bin): segA | segB<<4, round(weightA·255), dBone / D_UNIT as uint16; the test weights and distances are exact in these units.
 		const bytes=Array.from({length:N},(_,i)=>{const d=Math.round(dist[i]/D_UNIT);return [seg[i*3]|seg[i*3+1]<<4,Math.round(seg[i*3+2]*255),d&255,d>>8];}).flat();
-		const uni:Record<string,number[]>={twJ:flat('twJ'),twA:flat('twA'),twN:flat('twN'),twS:flat('twS'),twT:flat('twT'),twU:flat('twU'),twX:flat('twX'),twGround:[ws.ground]};
+		const uni:Record<string,number[]>={twJ:flat('twJ'),twA:flat('twA'),twN:flat('twN'),twS:flat('twS'),twT:flat('twT'),twU:flat('twU'),twB:flat('twB'),twX:flat('twX'),twGround:[ws.ground]};
 		/** Runs the atlas variant with WARP_PARS as given: [position error, normal error]. */
 		const atlasErr=async(pars:string)=>{const want=reference('atlas'),r=await page.evaluate(gpu,{vs:vsFor('atlas').replace(WARP_PARS,pars),fs:fsFor('atlas'),n:N,pos:[...pos],nrm:[...nrm],seg:bytes,segD:[...dist],segBytes:true,part:[...part],tex:[...tex.data],texW:tex.width,rows:FX_ROWS,u:uni});
 			if('error' in r)throw new Error(r.error);let pe=0,ne=0;r.out.forEach((px,pass)=>{for(let i=0;i<N;i++)for(let k=0;k<3;k++){const e=Math.abs(px[i*4+k]-want[pass][i*3+k]);if(pass%2===0)pe=Math.max(pe,e);else ne=Math.max(ne,e);}});return [pe,ne];};
