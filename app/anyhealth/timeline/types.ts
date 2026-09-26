@@ -119,8 +119,8 @@ export interface IssueScript {
 	illustrative?:boolean;
 	/** Timeline stretch, as day ranges relative to onset, with `k` = how many times the natural width. v1 pacing only (the v2 director ignores it). */
 	acute?:{from:number;to:number;k:number}[];
-	/** v2 director: days since onset (fractional) of the issue's peak visible state, where guided playback holds. Inside the active window, with non-empty fx (or the layer showing) there. Required once Task 2 has filled every catalog. */
-	climax?:number;
+	/** v2 director: days since onset (fractional; negative inside a lead) of the issue's peak visible state, where guided playback holds. Inside the active window, with non-empty fx (or the layer showing) there. Reasons: the `climax-*` rows of docs/anyhealth/timeline-medical-basis/; checked by check/climax.check.ts. */
+	climax:number;
 	/** v2 director: days of lead-in the approach leg covers, so the onset animation plays slowly in focus. Default min(30, climax + lead). */
 	approachDays?:number;
 	/** v2 director: unit direction from the focus target to the camera for this stop. Default: the default view's direction. */
