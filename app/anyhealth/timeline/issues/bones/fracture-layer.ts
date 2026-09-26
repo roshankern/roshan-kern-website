@@ -9,7 +9,7 @@ import * as T from 'three';
 import {SYSTEMS} from '../../../atlas/anatomy';
 import {BREAK_MS,CALLUS_BULGE,CALLUS_HALF_LENGTH,FRACTURE_DATE,FRACTURE_LEVEL,FRACTURE_PART,breakKick,fractureAt} from '../../../fracture/model';
 import type {CustomLayer,LayerContext,LayerFrame} from '../../types';
-import {fadeMaterial,ghostOpacity,SOLID} from '../layer-fade';
+import {fadeMaterial,fadeMesh,ghostOpacity,ghostTwin} from '../layer-fade';
 
 const BONE=SYSTEMS.find(s=>s.id==='skeletal')?.mesh??'#e2d9ba',CARTILAGE='#abcddb',WOVEN='#cbb98d';
 /** Mesh refinement around the break: edge length in the break zone and over the rest of the callus. */
@@ -137,10 +137,10 @@ export function fractureLayer():CustomLayer{
 		// Fragment surfaces: the skeletal material plus a dark, blood-stained band along the crack, faded by `line`.
 		const uLine={value:1},poseHead={value:new T.Matrix4()},poseShaft={value:new T.Matrix4()},poseClot={value:new T.Matrix4()};
 		const crackVertex=(sh:Shader)=>{sh.vertexShader=sh.vertexShader.replace('#include <common>',()=>'#include <common>\nattribute float cutDist; varying float vCut;').replace('#include <begin_vertex>',()=>'#include <begin_vertex>\nvCut = cutDist;');};
-		// Opaque materials (fragments, caps), faded together by the ghost.
-		const solids:T.Material[]=[];
+		// Opaque meshes (fragments, caps) and their own materials: faded by swapping to the materials' ghost twins.
+		const solids:{mesh:T.Mesh;own:T.Material}[]=[],solid=(mesh:T.Mesh)=>{solids.push({mesh,own:mesh.material as T.Material});return mesh;};
 		const boneMat=(pose:{value:T.Matrix4},key:string)=>{
-			const m=ctx.material({color:BONE,segment:SEGMENT});disposables.push(m);solids.push(m);
+			const m=ctx.material({color:BONE,segment:SEGMENT});disposables.push(m);
 			withPose(m,pose,`bone-${key}`,sh=>{
 				sh.uniforms.uLine=uLine;crackVertex(sh);
 				sh.fragmentShader='uniform float uLine; varying float vCut;\n'+sh.fragmentShader.replace('#include <color_fragment>',()=>'#include <color_fragment>\nfloat crack = uLine * (1.0 - smoothstep(0.0005, 0.005, vCut));\ncrack *= crack * (3.0 - 2.0 * crack);\ndiffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.045, 0.014, 0.01), crack * 0.90);');
@@ -152,7 +152,7 @@ export function fractureLayer():CustomLayer{
 			const vert=(r:number)=>{let i=map.get(r);if(i===undefined){i=pos.length/3;map.set(r,i);pos.push(rp[r*3],rp[r*3+1],rp[r*3+2]);nrm.push(rn[r*3],rn[r*3+1],rn[r*3+2]);cut.push(cutDist(r));}return i;};
 			for(let t=0;t<triCount;t++)if(side[t]===s)index.push(vert(tr[t*3]),vert(tr[t*3+1]),vert(tr[t*3+2]));
 			const g=geo(new T.BufferGeometry());g.setAttribute('position',new T.Float32BufferAttribute(pos,3));g.setAttribute('normal',new T.Float32BufferAttribute(nrm,3));g.setAttribute('cutDist',new T.Float32BufferAttribute(cut,1));g.setIndex(index);g.computeBoundingSphere();
-			return add(new T.Mesh(g,boneMat(pose,key)));
+			return solid(add(new T.Mesh(g,boneMat(pose,key))));
 		};
 		fragment(0,poseHead,'head');fragment(1,poseShaft,'shaft');
 
@@ -181,8 +181,8 @@ export function fractureLayer():CustomLayer{
 			// Wind each triangle to face out of its fragment: +u from the head, -u from the shaft.
 			for(let i=0;i<p.length;i+=9){v0.fromArray(p,i);v1.fromArray(p,i+3);v2.fromArray(p,i+6);if(v1.sub(v0).cross(v2.sub(v0)).dot(u)*dir<0)for(let k=0;k<3;k++){const x=p[i+3+k];p[i+3+k]=p[i+6+k];p[i+6+k]=x;}}
 			const g=geo(new T.BufferGeometry());g.setAttribute('position',new T.Float32BufferAttribute(p,3));g.setAttribute('color',new T.Float32BufferAttribute(capCol,3));g.computeVertexNormals();g.computeBoundingSphere();
-			const m=ctx.material({color:'#ffffff',segment:SEGMENT});m.vertexColors=true;m.metalness=0;m.roughness=.86;disposables.push(m);solids.push(m);withPose(m,pose,`cap-${key}`);
-			add(new T.Mesh(g,m));
+			const m=ctx.material({color:'#ffffff',segment:SEGMENT});m.vertexColors=true;m.metalness=0;m.roughness=.86;disposables.push(m);withPose(m,pose,`cap-${key}`);
+			solid(add(new T.Mesh(g,m)));
 		};
 		cap(1,poseHead,'head');cap(-1,poseShaft,'shaft');
 
@@ -235,6 +235,9 @@ export function fractureLayer():CustomLayer{
 		const clots=[clot(.021,.03,'#b3262e',7,.42),clot(.0175,.022,'#7e151d',11,.5)];
 
 		// The whole left upper arm, for the camera.
+		// Ghost twins now that every shader hook is chained (Engine.prewarm compiles them).
+		solids.forEach(s=>disposables.push(ghostTwin(s.own)));
+
 		layerBox=new T.Box3(new T.Vector3().fromArray(atlas.parts[part].bounds[0]),new T.Vector3().fromArray(atlas.parts[part].bounds[1])).expandByScalar(.012);
 
 		// Fragment poses. The head tilts about the shoulder and the shaft about the elbow, so both joints stay seated;
@@ -285,7 +288,7 @@ export function fractureLayer():CustomLayer{
 					hematoma=state.hematoma;clots.forEach(k=>{k.mesh.visible=hematoma>.005;});
 				}
 				if(restyle||fade!==lastFade){
-					lastFade=fade;changed=true;solids.forEach(m=>fadeMaterial(m,SOLID,frame.ghost));fadeMaterial(callusMat,callusOwn,frame.ghost);
+					lastFade=fade;changed=true;solids.forEach(s=>fadeMesh(s.mesh,s.own,frame.ghost));fadeMaterial(callusMat,callusOwn,frame.ghost);
 					clots.forEach(k=>{k.uOpacity.value=k.opacity*hematoma*fade;});
 				}
 			}else lastKey='';

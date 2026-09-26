@@ -5,7 +5,7 @@ import {SYSTEMS} from '../../../atlas/anatomy';
 import {toDays} from '../../../health/dates';
 import {BIRTH_DATE} from '../../../health/types';
 import {ERUPT_TRAVEL,ERUPT_SCALE0,progress} from './eruption';
-import {fadeMaterial,ghostOpacity,SOLID} from '../layer-fade';
+import {fadeMesh,ghostOpacity,ghostTwin} from '../layer-fade';
 
 /** Third-molar eruption window, years. */
 export const WISDOM_ERUPT:[number,number]=[17,21]; // basis: eyes-teeth#erupt-third-molar
@@ -49,16 +49,17 @@ export function wisdomLayer(onset:string):CustomLayer{
 				const mesh=new T.Mesh(geo,m);mesh.name=`Third molar #${w.tooth}`;mesh.visible=false;mesh.frustumCulled=false;ctx.scene.add(mesh);
 				teeth.push({mesh,rest,centre,up:w.arch==='upper'?1:-1,cap:w.impacted?IMPACTED_PROGRESS:1});
 			}
+			ghostTwin(m);// for Engine.prewarm
 			return true;
 		},
 		update(day:number,frame:LayerFrame){
 			// Visible from gingival emergence (the start of the window) until the extraction (day 0).
 			const age=(toDays(onset)+day-toDays(BIRTH_DATE))/365.25,show=day<0&&age>=WISDOM_ERUPT[0]&&frame.systemVisible('skeletal'),fade=ghostOpacity(frame.ghost);
 			const ps=teeth.map(t=>Math.min(t.cap,progress(age,WISDOM_ERUPT))),key=`${show}|${fade}|${ps.map(p=>p.toFixed(4)).join(',')}`;if(key===last)return {changed:false,animating:false};last=key;
-			teeth.forEach((t,i)=>{t.mesh.visible=show;if(show)place(t,ps[i]);});if(mat)fadeMaterial(mat,SOLID,frame.ghost);
+			teeth.forEach((t,i)=>{t.mesh.visible=show;if(show)place(t,ps[i]);});if(mat){const own=mat;teeth.forEach(t=>fadeMesh(t.mesh,own,frame.ghost));}
 			return {changed:true,animating:false};
 		},
 		box(){const b=new T.Box3();teeth.forEach(t=>b.union(new T.Box3().setFromArray(t.rest)));return b.isEmpty()?null:b;},
-		dispose(){teeth.forEach(t=>{ctxRef?.scene.remove(t.mesh);t.mesh.geometry.dispose();});teeth.length=0;last='';mat=null;}, // the material is the engine's (ctx.material) and disposed there
+		dispose(){teeth.forEach(t=>{ctxRef?.scene.remove(t.mesh);t.mesh.geometry.dispose();});teeth.length=0;last='';if(mat)ghostTwin(mat).dispose();mat=null;}, // the material is the engine's (ctx.material) and disposed there
 	};
 }

@@ -106,7 +106,7 @@ export function marksLayer(spec:MarksSpec,id=''):MarksLayer{
 			if(!mesh||!colors)return {changed:false,animating:false};
 			// Called every frame: the state is a pure function of the day, so skip it unless the day or visibility moved.
 			const on=f.systemVisible('integumentary')&&(!spec.onlyIsolated||f.isolated)&&!(spec.yieldsTo&&f.focused(spec.yieldsTo)),input=on?`${day}|${ghostOpacity(f.ghost)}`:'off';if(input===lastIn)return {changed:false,animating:false};lastIn=input;
-			const faded=on&&fadeMaterial(mesh.material as T.Material,{opacity:1,transparent:true,depthWrite:true},f.ghost);
+			const faded=on&&fadeMaterial(mesh.material as T.Material,{opacity:1,depthWrite:true},f.ghost);
 			const states=on?spec.state(day):[];
 			const key=on?states.map(s=>`${s.alpha.toFixed(3)}:${s.color??''}`).join('|'):'off';
 			if(key===lastKey)return {changed:faded,animating:false};lastKey=key;

@@ -3,12 +3,13 @@
  * Shader injection (patchMaterial), on top of scene.tsx's own onBeforeCompile (which it chains):
  * - Vertex, after `#include <common>`: when partFx, `varying float tfxVisible; varying float tfxFocus; varying vec4 tfxTint; uniform sampler2D tfxState; uniform float tfxWidth; vec4 tfxRow(float row)` (this vertex's part texel, rows as in fx/part-fx.ts), then FX_PARS; when WARP_APPLY is non-empty, `#define TW_SEG_BYTES` (partFx materials: the atlas `seg` is the 4 unnormalized segments.bin bytes per vertex), TW_SEG_ATTRS (the `seg` / `segD` attributes, none under the material defines TW_FIXED_SEG), then WARP_PARS.
  * - Vertex, main: `#include <begin_vertex>` is hoisted to just after `#include <beginnormal_vertex>`, so `transformed` (= position, rest space) and `objectNormal` are both live before defaultnormal_vertex reads the normal. Right after it, in one `{ }` block: when partFx, `tfxVisible = tfxRow(0.).x; tfxFocus = tfxRow(4.).w; tfxTint = tfxRow(1.);` then FX_APPLY; when WARP_APPLY is non-empty, TW_SEG (warp-glsl.ts: `vec3 twSeg` = segA, segB, weightA 0..1, from TW_FIXED_SEG, the byte `seg`, or a float `seg`) then WARP_APPLY.
- * - Fragment, when partFx: after `#include <common>`, `varying float tfxVisible; varying float tfxFocus; varying vec4 tfxTint; uniform float tfxGhost; uniform float tfxPass;`; FX_DISCARD (fx/part-fx-glsl.ts: hidden parts, and in pass 0 the non-focus parts while ghosting, in pass 1 the focus parts) after `#include <clipping_planes_fragment>`;
- *   `diffuseColor.rgb = mix(diffuseColor.rgb, tfxTint.rgb, tfxTint.a);` after `#include <color_fragment>`; FX_GHOST (the ghost pass alpha: GHOST_ALPHA × fresnel rim) before `#include <opaque_fragment>`, so partFx materials must be lit (`normal`, `vViewPosition`).
- * - Uniforms: warpUniforms() and `tfxGhost` / `tfxPass` (shared by every material), `twSoft` per material, and `tfxState` / `tfxWidth` when partFx.
+ * - Fragment, when partFx: after `#include <common>`, `varying float tfxVisible; varying float tfxFocus; varying vec4 tfxTint; uniform float tfxGhost;`; FX_DISCARD (fx/part-fx-glsl.ts: hidden parts, and in pass 0 the non-focus parts while ghosting, in pass 1 (TFX_GHOST_PASS) the focus parts) after `#include <clipping_planes_fragment>`;
+ *   `diffuseColor.rgb = mix(diffuseColor.rgb, tfxTint.rgb, tfxTint.a);` after `#include <color_fragment>`; FX_GHOST (pass 1 alpha: mix(1, GHOST_ALPHA, g) × mix(1, fresnel rim term, g)) before `#include <opaque_fragment>`, so partFx materials must be lit (`normal`, `vViewPosition`).
+ * - Uniforms: warpUniforms() and `tfxGhost` (shared by every material and ghost twin), `twSoft` per material, and `tfxState` / `tfxWidth` when partFx.
  * Visibility in timeline mode goes through here only: scene.tsx keeps partState at 1 and the engine writes fx row 0 `visible` = visibilityFor(...) × the merged PartFx visibility.
- * Ghosting (focus): fx row 4 .w = 1 on the focused script's parts (and its focusAlso scripts'), rewritten only when the focus id, switches or date change; the crossfade is the one uniform tfxGhost. scene.tsx renders as usual (pass 0: focus parts and everything
- * outside the atlas), then, while ghost > 0, renderGhostPass draws the non-focus atlas parts translucent over it (pass 1: tfxPass 1, every partFx material transparent without depth writes, nothing else drawn, no clear). */
+ * Ghosting (focus): fx row 4 .w = 1 on the focused script's parts (and its focusAlso scripts'), rewritten only when the focus id, switches or date change; the crossfade is the one uniform tfxGhost. scene.tsx renders as usual (pass 0: the materials
+ * themselves; focus parts and everything outside the atlas), then, while ghost > 0.001, renderGhostPass draws the non-focus atlas parts over it (pass 1: each partFx material's permanent ghost twins, clones compiled with `#define TFX_GHOST_PASS`,
+ * transparent: a depth-only pre-pass, then colour at LessEqual; nothing else drawn, no clear). Twins never change, so no frame switches or compiles a program once prewarm() has run. */
 import * as T from 'three';
 import type {Atlas,SystemId} from '../atlas/anatomy';
 import {SEGMENTS,type CustomLayer,type FxContext,type IssueScript,type LayerContext,type PartFx,type Rig,type Vec3} from './types';
@@ -21,6 +22,7 @@ import {WARP_PARS,WARP_APPLY,TW_SEG,TW_SEG_ATTRS,warpUniforms,writeWarpUniforms}
 import {FX_ROWS,createFxTexture,mergeFx,writeFx,applyFxPoint,identityFx,type ResolvedFx} from './fx/part-fx';
 import {FX_PARS,FX_APPLY,FX_DISCARD,FX_GHOST} from './fx/part-fx-glsl';
 import {BIRTH_DATE} from '../health/types';
+import {twinOf} from './issues/layer-fade';
 import {toDays,fromDays} from '../health/dates';
 
 export interface EngineFrame {date:string;visible:SystemId[];isolate:string|null;now:number;
@@ -38,20 +40,22 @@ export interface Engine {
 	update(f:EngineFrame):{changed:boolean;animating:boolean;fly:T.Box3|null};
 	/** Re-warp picker geometry and the shared per-part bounds (in place), completing any sliced settle in progress. Skips parts whose resolved fx and warp segments are unchanged since their last settle; returns how many parts the pass re-warped. A no-op (0) before ready(). */
 	settle():number;
-	/** One time slice of the settle (scene.tsx calls it each frame once the date has rested): re-warps from a cursor for about `budgetMs` (at least one vertex chunk), resuming where the last slice stopped; a date change mid-way carries on from the cursor with the skip rules against each part's own last settle. True when nothing is left. */
+	/** One time slice of the settle (scene.tsx calls it each frame once the date has rested): re-warps from a cursor for about `budgetMs` (at least one vertex chunk), resuming where the last slice stopped; a date change mid-way carries on from the cursor with the skip rules against each part's own last settle. Then, within the same budget, the focusBox prefetch queued by ready() (every script's climax box). True when nothing is left (settle and prefetch; while false, keep calling it). */
 	settleSlice(budgetMs:number):boolean;
 	/** Complete a sliced settle in progress synchronously (scene.tsx calls it before every pick); returns how many parts the pass re-warped, 0 when none is in progress. */
 	finishSettle():number;
 	/** Warped union box of an issue's parts and layer (and those of its focusAlso scripts), for Isolate; null before ready() (an Isolate made then flies once ready). */
 	isolateBox(id:string):T.Box3|null;
-	/** v2: warped union box of a script's parts and layer (and those of its focusAlso scripts) at fractional day `day` (since BIRTH_DATE): the part vertices through that day's merged fx and body warp (settle's math, on rest positions, touching no engine state) and the layer box warped with that day's body; null before ready() or for an unknown id. At the applied date it equals isolateBox after a settle. */
+	/** v2: warped union box of a script's parts and layer (and those of its focusAlso scripts) on whole day floor(`day`) since BIRTH_DATE (the date fromDays(BIRTH + floor(day)), as the director's Sample.date): the part vertices through that day's merged fx and body warp (settle's math, on rest positions, touching no engine state) plus the layer boxes warped with that day's body. Memoised by (id, floor(day)); ready() queues every script's climax day for idle prefetch (settleSlice). Null before ready() or for an unknown id. On the applied whole day it equals isolateBox after a settle. */
 	focusBox(id:string,day:number):T.Box3|null;
 	/** v2: the ghost pass (non-focus atlas parts as translucent rim-lit silhouettes), drawn over the current render target without clearing it; scene.tsx calls it right after its normal render whenever the current ghost > 0 (a no-op at ghost ≤ 0.001). Only partFx meshes draw; every renderer, scene, object and material state it touches is restored. */
 	renderGhostPass(renderer:T.WebGLRenderer,scene:T.Scene,camera:T.Camera):void;
+	/** v2: compile every program ghosting can need (the ghost twins of every partFx and opaque layer material, and the scene's own), with compileAsync where available, so no ghost frame compiles; scene.tsx calls it once after ready(). */
+	prewarm(renderer:T.WebGLRenderer,scene:T.Scene,camera:T.Camera):Promise<void>;
 	/** Default pivot of atlas part `i`: its rest bounds centre, from the decoded vertices once ready() has them (atlas.json bounds are corrupt for a few parts, e.g. Right cornea), else from atlas bounds. */
 	restCenter(i:number):Vec3;
 	/** Performance fallback state: tier 0 normal, 1 pixel ratio 1, 2 also throttled date applies; lowRes = the engine set pixel ratio 1 (the scene keeps 1 on resize); applies = date recomputes so far. */
-	stats():{tier:0|1|2;lowRes:boolean;applies:number};
+	stats():{tier:0|1|2;lowRes:boolean;applies:number;/** focusBox memo: boxes cached, prefetch jobs left, and lookups served from / missing the cache. */boxes:{cached:number;pending:number;hits:number;misses:number}};
 	/** Final fx row-0 visibility of atlas part `i` (switches × focus × merged PartFx visible), as the shader sees it, and 0 for a non-focus part while ghost ≥ 0.5: picking treats < 0.5 as hidden. */
 	partVisible(i:number):number;
 	dispose():void;
@@ -82,7 +86,8 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 	const {atlas,scene,bounds,rig}=o,n=atlas.parts.length;
 	const warpU=warpUniforms(),fx=createFxTexture(n),warpOn=!!WARP_APPLY.trim(),BIRTH=toDays(BIRTH_DATE);
 	// Ghosting: the uniforms every partFx material shares, and those materials (the ghost pass draws only them).
-	const ghostU={tfxGhost:{value:0},tfxPass:{value:0}},fxMaterials=new Set<T.Material>();
+	// Ghosting: the shared uniform, and each partFx material's permanent ghost twins (pass 1: colour, and depth-only unless the material itself writes no depth).
+	const ghostU={tfxGhost:{value:0}},ghostTwins=new Map<T.Material,{color:T.Material;depth:T.Material|null}>();
 	const restCenters=bounds.map(b=>b.getCenter(new T.Vector3()).toArray() as Vec3),soft=atlas.parts.map(p=>SOFT_SYSTEMS.includes(p.system));
 	const byName=new Map<string,number[]>();atlas.parts.forEach((p,i)=>{const l=byName.get(p.name)??[];l.push(i);byName.set(p.name,l);});
 	const indicesOf=(name:string)=>byName.get(name)??[],restCenter=(i:number)=>restCenters[i];
@@ -124,12 +129,17 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 				warpOn?`${TW_SEG}\n${WARP_APPLY}`:'',
 			].join('\n');
 			shader.vertexShader=shader.vertexShader.replace('#include <common>',()=>`#include <common>\n${pars}`).replace('#include <begin_vertex>',()=>'').replace('#include <beginnormal_vertex>',()=>`#include <beginnormal_vertex>\n#include <begin_vertex>\n{\n${apply}\n}`);
-			if(partFx)shader.fragmentShader=shader.fragmentShader.replace('#include <common>',()=>'#include <common>\nvarying float tfxVisible; varying float tfxFocus; varying vec4 tfxTint; uniform float tfxGhost; uniform float tfxPass;')
+			if(partFx)shader.fragmentShader=shader.fragmentShader.replace('#include <common>',()=>'#include <common>\nvarying float tfxVisible; varying float tfxFocus; varying vec4 tfxTint; uniform float tfxGhost;')
 				.replace('#include <clipping_planes_fragment>',()=>`#include <clipping_planes_fragment>\n${FX_DISCARD}`)
 				.replace('#include <color_fragment>',()=>'#include <color_fragment>\ndiffuseColor.rgb = mix(diffuseColor.rgb, tfxTint.rgb, tfxTint.a);')
 				.replace('#include <opaque_fragment>',()=>`${FX_GHOST}\n#include <opaque_fragment>`);
 		};
-		m.customProgramCacheKey=()=>`${prevKey()}|timeline:${partFx?1:0}${warpOn?1:0}`;m.needsUpdate=true;if(partFx)fxMaterials.add(m);
+		m.customProgramCacheKey=()=>`${prevKey()}|timeline:${partFx?1:0}${warpOn?1:0}`;m.needsUpdate=true;
+		if(partFx){
+			// Ghost twins: clones with TFX_GHOST_PASS, sharing the hooks (so the same uniform objects); one program serves both (colour / depth state only).
+			const twin=(depth:boolean)=>{const t=m.clone();t.defines={...m.defines,TFX_GHOST_PASS:''};t.onBeforeCompile=m.onBeforeCompile;t.customProgramCacheKey=m.customProgramCacheKey;t.transparent=true;t.depthWrite=depth;t.colorWrite=!depth;return t;};
+			ghostTwins.get(m)?.color.dispose();ghostTwins.set(m,{color:twin(false),depth:m.depthWrite?twin(true):null});
+		}
 	};
 
 	/** Atlas parts: the part's segments.bin bytes as they are, 4 unnormalized bytes per vertex (the shader decodes them with TW_SEG_BYTES); a part missing from segments.bin rides the trunk. */
@@ -197,7 +207,12 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 		pass=null;unsettled=false;return true;
 	};
 	const settle=()=>{if(!isReady)return 0;begin();const P=pass!;work(Infinity);return P.count;};
-	const settleSlice=(budgetMs:number)=>{if(!isReady)return true;begin();return work(performance.now()+budgetMs);};
+	/** The settle when one is due, then (within the same budget) the focusBox prefetch. */
+	const settleSlice=(budgetMs:number)=>{
+		if(!isReady)return true;const deadline=performance.now()+budgetMs;
+		if(pass||unsettled||remerge||(seen&&seen!==applied)){begin();if(!work(deadline))return false;if(performance.now()>=deadline)return !prefetchQueue.length&&!boxJob;}
+		return prefetch(deadline);
+	};
 
 	const keyOf=(date:string,day:number|undefined)=>day===undefined?date:`${date}@${day}`;
 	/** Every script's fx (at its fx day), growth and eruption, merged per part. */
@@ -217,6 +232,7 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 		writeFx(fx,out,flag);
 	};
 
+	// Per frame while a ghost crossfades, every layer restyles (fracture: its fade on 4 opaque meshes, the callus and clots; wisdom: 4 meshes; marks: an opacity), cheap state writes, no geometry or program work.
 	// Performance fallback: software GL renders at pixel ratio 1 from the start. During play (a frame whose date differs from the last frame's), an exponential
 	// average of the frame time below 30 fps for 2 s drops to pixel ratio 1 (tier 1); 2 s more below 30 fps throttles date applies to one per 100 ms (tier 2), and a pending date always applies on pause or settle.
 	const SLOW_MS=1000/30,SLOW_FOR=2000,THROTTLE_MS=100,EMA=0.1;
@@ -257,59 +273,96 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 		return box.isEmpty()?null:box;
 	};
 
-	const focusBox=(id:string,day:number)=>{
-		const list=focusedScripts(id);if(!list.length||!isReady)return null;
-		const date=fromDays(BIRTH+day),body=bodyAt(date),w=warpState(rig,body),fxs=fxFor(date,day,{body,date}),box=new T.Box3(),p=new T.Vector3(),o:Vec3=[0,0,0];
-		for(const name of focusedParts(id)!)for(const i of indicesOf(name)){
-			const r=rest[i],g=pickers[i]?.geometry;if(!r||!g){box.union(warpBox(bounds[i],w));continue;}// no picker: bounds[i] is never settled, still the rest box
-			const nrm=g.getAttribute('normal').array as Int8Array,sg=g.getAttribute('seg')?.array as Uint8Array|undefined,f=fxs.get(i)??identityFx(restCenters[i]);
-			for(let v=0;v<r.length/3;v++){warpVertex(i,r,nrm,sg,f,w,v,o);box.expandByPoint(p.set(o[0],o[1],o[2]));}
+	// focusBox: memoised by (id, whole day), computed as a resumable job (vertex chunks) so ready()'s prefetch of every script's climax box runs time-sliced in settleSlice.
+	interface BoxJob {key:string;list:IssueScript[];parts:number[];k:number;v:number;w:WarpState;fxs:Map<number,ResolvedFx>;box:T.Box3}
+	const BOX_CACHE=256,boxCache=new Map<string,T.Box3|null>(),boxStats={hits:0,misses:0};let prefetchQueue:{id:string;day:number}[]=[],boxJob:BoxJob|null=null;
+	const boxKey=(id:string,day:number)=>`${id}|${Math.floor(day)}`;
+	const newJob=(id:string,day:number):BoxJob=>{
+		const d=Math.floor(day),date=fromDays(BIRTH+d),body=bodyAt(date);
+		return {key:boxKey(id,day),list:focusedScripts(id),parts:[...focusedParts(id)??[]].flatMap(indicesOf),k:0,v:0,w:warpState(rig,body),fxs:fxFor(date,d,{body,date}),box:new T.Box3()};
+	};
+	/** Advance a box job until `deadline` (at least one vertex chunk); true (and cached) when complete. */
+	const stepJob=(j:BoxJob,deadline:number)=>{
+		const p=new T.Vector3(),o:Vec3=[0,0,0];let worked=false;
+		while(j.k<j.parts.length){
+			if(worked&&performance.now()>=deadline)return false;worked=true;
+			const i=j.parts[j.k],r=rest[i],g=pickers[i]?.geometry;
+			if(!r||!g){j.box.union(warpBox(bounds[i],j.w));j.k++;continue;}// no picker: bounds[i] is never settled, still the rest box
+			const nrm=g.getAttribute('normal').array as Int8Array,sg=g.getAttribute('seg')?.array as Uint8Array|undefined,f=j.fxs.get(i)??identityFx(restCenters[i]),nv=r.length/3,end=Math.min(nv,j.v+CHUNK);
+			for(let v=j.v;v<end;v++){warpVertex(i,r,nrm,sg,f,j.w,v,o);j.box.expandByPoint(p.set(o[0],o[1],o[2]));}
+			if(end<nv)j.v=end;else{j.k++;j.v=0;}
 		}
-		layerBoxes(list).forEach(lb=>box.union(warpBox(lb,w)));
-		return box.isEmpty()?null:box;
+		layerBoxes(j.list).forEach(lb=>j.box.union(warpBox(lb,j.w)));
+		if(boxCache.size>=BOX_CACHE)boxCache.delete(boxCache.keys().next().value!);boxCache.set(j.key,j.box.isEmpty()?null:j.box);return true;
+	};
+	const focusBox=(id:string,day:number)=>{
+		if(!isReady||!focusedScripts(id).length)return null;const key=boxKey(id,day);
+		if(boxCache.has(key)){boxStats.hits++;return boxCache.get(key)?.clone()??null;}
+		boxStats.misses++;const j=boxJob?.key===key?boxJob:newJob(id,day);if(j===boxJob)boxJob=null;stepJob(j,Infinity);
+		return boxCache.get(key)?.clone()??null;
+	};
+	/** Idle work after the settle: the prefetch queue, one job at a time, until `deadline` (at least one chunk); true when the queue is empty. */
+	const prefetch=(deadline:number)=>{
+		for(;;){
+			if(!boxJob){const q=prefetchQueue.shift();if(!q)return true;if(boxCache.has(boxKey(q.id,q.day)))continue;boxJob=newJob(q.id,q.day);}
+			if(!stepJob(boxJob,deadline))return false;boxJob=null;if(performance.now()>=deadline)return !prefetchQueue.length;
+		}
 	};
 
 	const renderGhostPass=(renderer:T.WebGLRenderer,scene:T.Scene,camera:T.Camera)=>{
 		if(ghostU.tfxGhost.value<=.001)return;
-		// Only partFx meshes draw: everything else (ground, platform, layers) is hidden for the pass. Their materials (shared across a system's meshes) go transparent without depth writes.
-		const hidden:T.Object3D[]=[],own=new Map<T.Material,[boolean,boolean]>();
+		// Only partFx meshes draw, each with its material's permanent ghost twins (no material is modified: no program switch); everything else (ground, platform, layers) is hidden for the pass.
+		const hidden:T.Object3D[]=[],swapped:{o:T.Mesh;m:T.Material;tw:{color:T.Material;depth:T.Material|null}}[]=[];
 		scene.traverseVisible(o=>{
-			const m=(o as T.Mesh).material as T.Material|T.Material[]|undefined;if(!m)return;const list=Array.isArray(m)?m:[m];
-			if(list.length&&list.every(x=>fxMaterials.has(x)))list.forEach(x=>{if(!own.has(x))own.set(x,[x.transparent,x.depthWrite]);});else{o.visible=false;hidden.push(o);}
+			const m=(o as T.Mesh).material as T.Material|T.Material[]|undefined;if(!m)return;const tw=Array.isArray(m)?undefined:ghostTwins.get(m);
+			if(tw)swapped.push({o:o as T.Mesh,m:m as T.Material,tw});else{o.visible=false;hidden.push(o);}
 		});
 		const background=scene.background,autoClear=renderer.autoClear,shadows=renderer.shadowMap.autoUpdate,autoReset=renderer.info.autoReset;
 		try{
-			if(own.size){
-				own.forEach((_,m)=>{if(!m.transparent){m.transparent=true;m.needsUpdate=true;}m.depthWrite=false;});
+			if(swapped.length){
 				// No clear: a null background and autoClear off keep the colour and depth of the normal render (focus parts occlude the ghosts behind them).
-				scene.background=null;renderer.autoClear=false;renderer.shadowMap.autoUpdate=false;renderer.info.autoReset=false;ghostU.tfxPass.value=1;
-				renderer.render(scene,camera);
+				scene.background=null;renderer.autoClear=false;renderer.shadowMap.autoUpdate=false;renderer.info.autoReset=false;
+				// Depth pre-pass (colour off) of the non-focus parts whose own material writes depth (not the translucent skin), then the colour pass at LessEqual: only the frontmost ghost surface blends in, a silhouette, not an unsorted fog.
+				swapped.forEach(x=>{if(x.tw.depth)x.o.material=x.tw.depth;else x.o.visible=false;});renderer.render(scene,camera);
+				swapped.forEach(x=>{x.o.material=x.tw.color;x.o.visible=true;});renderer.render(scene,camera);
 			}
 		}finally{
-			ghostU.tfxPass.value=0;scene.background=background;renderer.autoClear=autoClear;renderer.shadowMap.autoUpdate=shadows;renderer.info.autoReset=autoReset;
-			own.forEach(([transparent,depthWrite],m)=>{if(m.transparent!==transparent){m.transparent=transparent;m.needsUpdate=true;}m.depthWrite=depthWrite;});
-			hidden.forEach(o=>{o.visible=true;});
+			scene.background=background;renderer.autoClear=autoClear;renderer.shadowMap.autoUpdate=shadows;renderer.info.autoReset=autoReset;
+			swapped.forEach(x=>{x.o.material=x.m;x.o.visible=true;});hidden.forEach(o=>{o.visible=true;});
 		}
 	};
 
+	/** Compile every program the scene can need: the materials as they are (hidden layers included: compile walks the whole scene), then with every mesh on its ghost colour twin, then its depth twin (the layer twins from issues/layer-fade.ts included). */
+	const prewarm=(renderer:T.WebGLRenderer,scene:T.Scene,camera:T.Camera)=>{
+		const compile=()=>typeof renderer.compileAsync==='function'?renderer.compileAsync(scene,camera):(renderer.compile(scene,camera),Promise.resolve());
+		const meshes:[T.Mesh,T.Material][]=[];scene.traverse(o=>{const m=(o as T.Mesh).material;if(m&&!Array.isArray(m))meshes.push([o as T.Mesh,m as T.Material]);});
+		const jobs:Promise<unknown>[]=[compile()];
+		try{
+			for(const pick of [(m:T.Material)=>ghostTwins.get(m)?.color??twinOf(m),(m:T.Material)=>ghostTwins.get(m)?.depth]){meshes.forEach(([o,m])=>{o.material=pick(m)??m;});jobs.push(compile());}
+		}finally{meshes.forEach(([o,m])=>{o.material=m;});}
+		return Promise.all(jobs).then(()=>{});
+	};
+
 	return {
-		patchMaterial,segAttribute,isolateBox,focusBox,renderGhostPass,
+		patchMaterial,segAttribute,isolateBox,focusBox,renderGhostPass,prewarm,
 		// Picking: a non-focus part is ghosted (not pickable) from ghost 0.5; only the focus flags are 1 while something is focused.
-		partVisible:i=>ghostU.tfxGhost.value>=.5&&fx.data[(4*fx.width+i)*4+3]<.5?0:fx.data[i*4],restCenter,stats:()=>({tier:perf.tier,lowRes:perf.lowRes,applies:perf.applies}),
+		partVisible:i=>ghostU.tfxGhost.value>=.5&&fx.data[(4*fx.width+i)*4+3]<.5?0:fx.data[i*4],restCenter,stats:()=>({tier:perf.tier,lowRes:perf.lowRes,applies:perf.applies,boxes:{cached:boxCache.size,pending:prefetchQueue.length+(boxJob?1:0),...boxStats}}),
 		ready(p){
 			isReady=true;pickers=p;rest=p.map(m=>(m?.geometry.getAttribute('position').array as Float32Array|undefined)?.slice());
 			// Default pivots from the decoded vertices (atlas.json bounds carry stray vertices for a few parts).
 			segMask=new Uint16Array(n);for(let i=0;i<n;i++){let m=0;for(let k=segOffset[i];k<segOffset[i+1]&&k+1<segBytes.length;k+=SEG_STRIDE){m|=1<<(segBytes[k]&15);if(segBytes[k+1]<255)m|=1<<(segBytes[k]>>4);}segMask[i]=m||1;}
 			rest.forEach((r,i)=>{if(!r||!r.length)return;const lo=[Infinity,Infinity,Infinity],hi=[-Infinity,-Infinity,-Infinity];for(let k=0;k<r.length;k+=3)for(let j=0;j<3;j++){const v=r[k+j];if(v<lo[j])lo[j]=v;if(v>hi[j])hi[j]=v;}restCenters[i]=[(lo[0]+hi[0])/2,(lo[1]+hi[1])/2,(lo[2]+hi[2])/2];});
 			for(const s of SCRIPTS){if(!s.layer)continue;let ok=false;try{const layer=s.layer();ok=layer.init(layerCtx);if(ok)layers.push({script:s,layer});else layer.dispose();}catch(e){console.warn(`AnyHealth timeline: layer ${s.id} failed`,e);}if(!ok)noLayer.add(s.id);}
-			forceChange=true;remerge=true;
+			forceChange=true;remerge=true;boxCache.clear();boxJob=null;
+			// Prefetch every script's climax focus box (the guided stops) in idle time after the settle (settleSlice).
+			prefetchQueue=SCRIPTS.map(s=>({id:s.id,day:toDays(s.onset)-BIRTH+(s.climax??0)}));
 			// Software GL (SwiftShader, llvmpipe): pixel ratio 1 from the start.
 			if(o.renderer)try{const gl=o.renderer.getContext(),ext=gl.getExtension('WEBGL_debug_renderer_info') as {UNMASKED_RENDERER_WEBGL:number}|null,name=String(gl.getParameter(ext?ext.UNMASKED_RENDERER_WEBGL:0x1f01/* RENDERER */));if(/SwiftShader|llvmpipe/i.test(name))lowResNow();}catch{/* no GPU info: keep the ratio */}
 		},
 		update,
 		settle,settleSlice,finishSettle:()=>pass?settle():0,
 		dispose(){
-			layers.forEach(l=>l.layer.dispose());layers.length=0;layerMaterials.forEach(m=>m.dispose());restGeoms.forEach(g=>g.dispose());restGeoms.clear();fx.texture.dispose();fxMaterials.clear();ghostU.tfxGhost.value=0;pickers=[];rest=[];pass=null;isReady=false;
+			layers.forEach(l=>l.layer.dispose());layers.length=0;layerMaterials.forEach(m=>m.dispose());restGeoms.forEach(g=>g.dispose());restGeoms.clear();fx.texture.dispose();ghostTwins.forEach(t=>{t.color.dispose();t.depth?.dispose();});ghostTwins.clear();layerMaterials.forEach(m=>twinOf(m)?.dispose());boxCache.clear();prefetchQueue=[];boxJob=null;ghostU.tfxGhost.value=0;pickers=[];rest=[];pass=null;isReady=false;
 		},
 	};
 }
