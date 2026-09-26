@@ -7,3 +7,4 @@ import rigJson from './growth/rig.json';
 /** The body rig (growth/rig.json). */
 export const RIG=rigJson as Rig;
 export {useDirector} from './director/use-director';
+export {buildSchedule} from './director/schedule';
