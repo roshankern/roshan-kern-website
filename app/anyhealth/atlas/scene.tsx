@@ -161,15 +161,15 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
    flyTo({target:center,position:center.clone().addScaledVector(direction,distance),ox:w/2-(left+right)/2,oy:h/2-(top+bottom)/2});
   };
   // Timeline camera (spec 2026-09-26 §4; timeline mode only, once the pose math has loaded with the engine chunk, so /anyhealth never bundles it). One pure pose per frame, no springs:
-  // scripted = the posed path from defaultPoseFor(day) (growth framing) to the stop's focus pose by cue.zoom; a timed rejoin blends from the actual camera after manual input or a guided/free switch;
+  // scripted = the posed path from defaultPoseFor(day) (growth framing) to the stop's focus pose by cue.zoom (0 in free mode: the default pose); a timed rejoin blends from the actual camera after manual input or a guided/free switch;
   // a flight (manual Isolate, Show all, double-click) runs the posed path over ISOLATE_FLY_MS. Manual input (a drag past the tap slop, pinch, wheel, double-click on a part) hands the camera to the user.
-  let P:typeof import('../timeline/camera/pose')|null=null,viewOf:(id:string)=>Vec3|null=()=>null;
+  const STILL_MS=150;let P:typeof import('../timeline/camera/pose')|null=null,viewOf:(id:string)=>Vec3|null=()=>null;
   if(timelineOn)Promise.all([import('../timeline/camera/pose'),import('../timeline/issues')]).then(([m,issues])=>{if(disposed)return;P=m;viewOf=id=>issues.scriptFor(id)?.view??null;lastPose=null;dirty=true;}).catch(()=>{/* keep the v1 camera */});
   const restBody={min:bodyBox.min.toArray() as Vec3,max:bodyBox.max.toArray() as Vec3},boxOf=(b:T.Box3)=>({min:b.min.toArray() as Vec3,max:b.max.toArray() as Vec3});
-  let todayDay=0,adult:TPose|null=null,scripted:TPose|null=null,userMoved=false,armed=false,wasGuided=false,rejoin:{t0:number;from:TPose}|null=null,tflight:{t0:number;ms:number;from:TPose;to:()=>TPose;end?:()=>void}|null=null;
+  let todayDay=0,cueSig='',stillSince=0,adult:TPose|null=null,scripted:TPose|null=null,userMoved=false,armed=false,wasGuided=false,rejoin:{t0:number;from:TPose}|null=null,tflight:{t0:number;ms:number;from:TPose;to:()=>TPose;end?:()=>void}|null=null;
   // The stop being approached / held / released: its focus box frozen at the first frame with that stop (at that frame's day), its pose refitted on resize.
   let stop:{id:string|null;day:number;box:T.Box3|null;pose:TPose|null}={id:null,day:0,box:null,pose:null};
-  // Manual Isolate (not guided): ghost fades from → to over ISOLATE_FADE_MS; the camera flies once the engine has the box.
+  // Manual Isolate: ghost fades from → to over ISOLATE_FADE_MS; the camera flies once the engine has the box.
   let iso:{id:string|null;from:number;to:number;t0:number}={id:null,from:0,to:0,t0:0},isoSeen:string|null=null,isoFly=false,isoBox:T.Box3|null=null,isoPose:TPose|null=null,lastFocus:{id:string;ghost:number}|null=null;
   let press:{id:number;x:number;y:number;th:number}|null=null,pending:{x:number;y:number;fallback:boolean}|null=null;
   const nowPose=():TPose=>{const c=currentPose();return {target:c.target.toArray() as Vec3,position:c.position.toArray() as Vec3,ox:c.ox,oy:c.oy};};
@@ -191,14 +191,15 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
    if(id&&!stop.box){const b=engine?.focusBox(id,stop.day)??null;stop.box=b&&!b.isEmpty()?b:null;}
    if(stop.box&&!stop.pose)stop.pose=M.focusPose(boxOf(stop.box),cue!.stop!.view,camera.fov,openArea(true),controls.minDistance*2);
    const def=M.defaultPoseFor(adult,day,todayDay);scripted=stop.pose&&cue!.zoom>0?M.lerpPose(def,stop.pose,cue!.zoom):def;
-   // Guided ↔ free with the camera still scripted: blend from where it is (the two scripts can differ, e.g. a director that reports zoom 0 when paused).
+   // Guided ↔ free (a scrub or reset) with the camera still scripted: blend from where it is (free mode has zoom 0, so a scrub from a held stop would otherwise jump).
    if(guided!==wasGuided){wasGuided=guided;if(!userMoved&&!tflight)rejoin={t0:now,from:nowPose()};}
-   // After manual input, guided posing resumes (Play / Continue) only once the director has stopped (paused or holding) and then moves again: rejoin from the actual camera.
-   if(userMoved&&(!guided||cue!.phase==='hold'))armed=true;
-   if(guided&&userMoved&&armed&&cue!.phase!=='hold'){userMoved=armed=false;tflight=null;rejoin={t0:now,from:nowPose()};}
-   // Guided: no manual Isolate; a scripted flight still running (Isolate / Show all / double-click empty) hands over to the script through a rejoin.
-   if(guided){isoSeen=tl.isolate;iso={id:null,from:0,to:0,t0:0};isoFly=false;if(tflight&&!userMoved){tflight=null;rejoin={t0:now,from:nowPose()};}}
-   else if(tl.isolate!==isoSeen){
+   // After manual input, guided posing resumes (Play / Continue / a stop tick) when the sample moves again after the director has been still (paused from play, or holding: guided stays true, the sample frozen) for STILL_MS,
+   // or after free mode (scrub): rejoin from the actual camera. The stillness wait keeps the frame or two before the director's pause lands from counting as a resume.
+   const sig=cue?`${cue.day}|${cue.zoom}|${cue.ghost}|${cue.phase}|${id}`:'',moved=sig!==cueSig;if(moved){cueSig=sig;stillSince=now;}
+   if(userMoved&&(!guided||now-stillSince>=STILL_MS))armed=true;
+   if(guided&&userMoved&&armed&&moved){userMoved=armed=false;tflight=null;rejoin={t0:now,from:nowPose()};}
+   // Manual Isolate (the tracker button; the director is paused or free): a ghost fade and a posed flight in, the camera then the user's; Show all flies back to the script.
+   if(tl.isolate!==isoSeen){
     isoSeen=tl.isolate;iso={id:tl.isolate??lastFocus?.id??null,from:lastFocus?.ghost??0,to:tl.isolate?1:0,t0:now};isoFly=!!tl.isolate;
     if(!tl.isolate){userMoved=false;rejoin=null;tflight={t0:now,ms:ISOLATE_FLY_MS,from:nowPose(),to:()=>scripted!};}
    }
@@ -206,6 +207,8 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
    if(tflight)flyStep(now);
    else if(!userMoved){let p=scripted;if(rejoin){const k=(now-rejoin.t0)/REJOIN_MS;if(k>=1)rejoin=null;else p=M.lerpPose(rejoin.from,p,M.smootherstep(0,1,k));}setPose(p);}
    controls.enableDamping=userMoved&&!tflight;
+   // Show all while a stop is focused (at a hold, say) hands straight back to the cue's focus instead of fading everything solid first.
+   if(iso.id&&iso.to===0&&id&&cue!.ghost>0)iso.id=null;
    if(iso.id){const ghost=iso.from+(iso.to-iso.from)*M.smootherstep(0,ISOLATE_FADE_MS,now-iso.t0);if(ghost>0||iso.to>0)return {id:iso.id,ghost};iso.id=null;}
    return id&&cue!.ghost>0?{id,ghost:cue!.ghost}:null;
   };
