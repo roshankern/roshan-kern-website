@@ -6,3 +6,4 @@ import type {Rig} from './types';
 import rigJson from './growth/rig.json';
 /** The body rig (growth/rig.json). */
 export const RIG=rigJson as Rig;
+export {useDirector} from './director/use-director';

@@ -42,6 +42,8 @@ export interface Engine {
 	isolateBox(id:string):T.Box3|null;
 	/** v2: warped union box of a script's parts and layer at fractional day `day` (since BIRTH_DATE), from rest bounds with that day's body (no settle needed); null before ready(). */
 	focusBox(id:string,day:number):T.Box3|null;
+	/** v2: the ghost pass (non-focus parts, translucent rim-lit silhouettes); scene.tsx calls it right after its normal render whenever the current ghost > 0. */
+	renderGhostPass(renderer:T.WebGLRenderer,scene:T.Scene,camera:T.Camera):void;
 	/** Default pivot of atlas part `i`: its rest bounds centre, from the decoded vertices once ready() has them (atlas.json bounds are corrupt for a few parts, e.g. Right cornea), else from atlas bounds. */
 	restCenter(i:number):Vec3;
 	/** Performance fallback state: tier 0 normal, 1 pixel ratio 1, 2 also throttled date applies; lowRes = the engine set pixel ratio 1 (the scene keeps 1 on resize); applies = date recomputes so far. */
@@ -233,6 +235,8 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 		patchMaterial,segAttribute,isolateBox,
 		// Task 0 stub: the current-date isolate box; Task 3 implements the day-specific warp.
 		focusBox:(id:string,_day:number)=>isolateBox(id),
+		// Task 0 stub: Task 3 implements the ghost pass.
+		renderGhostPass:()=>{},
 		partVisible:i=>fx.data[i*4],restCenter,stats:()=>({tier:perf.tier,lowRes:perf.lowRes,applies:perf.applies}),
 		ready(p){
 			isReady=true;pickers=p;rest=p.map(m=>(m?.geometry.getAttribute('position').array as Float32Array|undefined)?.slice());
