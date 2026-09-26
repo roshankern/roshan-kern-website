@@ -5,7 +5,7 @@ import {growthFx,GLOBE_CENTRE} from '../growth/organs';
 import {toDays,fromDays} from '../../health/dates';
 import growth from '../../health/growth.json';
 import rigJson from '../growth/rig.json';
-import {warpState,warpPoint} from '../growth/warp';
+import {warpState,warpPoint,segAt,SEG_STRIDE} from '../growth/warp';
 import {SOFT_SYSTEMS} from '../engine';
 import type {Vec3} from '../types';
 
@@ -26,10 +26,10 @@ export const checks:Check[]=[
 	{name:'bodyAt reproduces every measurement within 0.5%',run(c){for(const g of growth as {date:string;heightCm?:number;weightKg?:number}[]){const b=bodyAt(g.date);if(g.heightCm)c.near(b.statureM*100,g.heightCm,g.heightCm*0.005,`height ${g.date}`);if(g.weightKg)c.near(b.weightKg,g.weightKg,g.weightKg*0.005,`weight ${g.date}`);}}},
 	{name:'warped stature (highest warped vertex, floor = the warp ground) matches every measured height within 0.02%',async run(c){
 		// Task 14: stricter than the 0.1% asked for; renormalise solves on the real warp (warpState / warpPoint), so only a change of which vertex is highest can leave an error.
-		const g=await c.geometry(),fs=await import('node:fs'),bin=fs.readFileSync('public/anyhealth/models/segments.bin'),top:{p:Vec3;a:number;b:number;w:number;soft:boolean}[]=[];let off=0;
-		g.parts.forEach((part,i)=>{const n=part.position.length/3,soft=SOFT_SYSTEMS.includes(g.atlas.parts[i].system);for(let v=0;v<n;v++)if(part.position[v*3+1]>1.70)top.push({p:[part.position[v*3],part.position[v*3+1],part.position[v*3+2]],a:bin[off+v*2]&15,b:bin[off+v*2]>>4,w:bin[off+v*2+1]/255,soft});off+=n*2;});
+		const g=await c.geometry(),fs=await import('node:fs'),bin=fs.readFileSync('public/anyhealth/models/segments.bin'),top:{p:Vec3;a:number;b:number;w:number;d:number;soft:boolean}[]=[];let off=0;
+		g.parts.forEach((part,i)=>{const n=part.position.length/3,soft=SOFT_SYSTEMS.includes(g.atlas.parts[i].system);for(let v=0;v<n;v++)if(part.position[v*3+1]>1.70)top.push({p:[part.position[v*3],part.position[v*3+1],part.position[v*3+2]],a:bin[off+v*SEG_STRIDE]&15,b:bin[off+v*SEG_STRIDE]>>4,w:bin[off+v*SEG_STRIDE+1]/255,d:segAt(bin,off,v)[3],soft});off+=n*SEG_STRIDE;});
 		let worst=0,at='';const q:Vec3=[0,0,0];
-		for(const m of growth as {date:string;heightCm?:number}[]){if(!m.heightCm)continue;const b=bodyAt(m.date),ws=warpState(R,b);let hi=-Infinity;for(const t of top){warpPoint(ws,t.p,t.a,t.b,t.w,t.soft,q);hi=Math.max(hi,q[1]);}
+		for(const m of growth as {date:string;heightCm?:number}[]){if(!m.heightCm)continue;const b=bodyAt(m.date),ws=warpState(R,b);let hi=-Infinity;for(const t of top){warpPoint(ws,t.p,t.a,t.b,t.w,t.soft,q,t.d);hi=Math.max(hi,q[1]);}
 			const e=Math.abs(hi/(m.heightCm/100)-1);if(e>worst){worst=e;at=m.date;}}
 		c.assert(worst<=0.0002,`worst warped stature error ${(worst*100).toFixed(4)}% at ${at}`);
 	}},
