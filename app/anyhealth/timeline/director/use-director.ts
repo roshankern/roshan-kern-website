@@ -34,7 +34,8 @@ export function useDirector(today:string):DirectorApi{
 		const loop=()=>{publish();if(clock.playing)raf=requestAnimationFrame(loop);};
 		raf=requestAnimationFrame(loop);return ()=>cancelAnimationFrame(raf);
 	},[view.playing,clock,publish]);
-	const play=useCallback(()=>{scrubbed.current=false;clock.play(performance.now());publish();},[clock,publish]);
+	// Play at the end wraps to birth: that is a seek (seq), so the camera rejoins instead of cutting from adult to newborn framing.
+	const play=useCallback(()=>{scrubbed.current=false;if(clock.storyMs>=schedule.totalMs)seq.current++;clock.play(performance.now());publish();},[clock,publish,schedule]);
 	const pause=useCallback(()=>{clock.pause(performance.now());publish();},[clock,publish]);
 	const cont=useCallback(()=>{if(clock.holding!==null)scrubbed.current=false;clock.continue(performance.now());publish();},[clock,publish]);
 	const seekDay=useCallback((day:number)=>{scrubbed.current=true;seq.current++;clock.seekDay(day);publish();},[clock,publish]);

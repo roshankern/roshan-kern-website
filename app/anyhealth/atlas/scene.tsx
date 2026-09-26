@@ -166,7 +166,7 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
   // a flight (manual Isolate, Show all, double-click) runs the posed path over ISOLATE_FLY_MS. Manual input (a drag past the tap slop, pinch, wheel, double-click on a part) hands the camera to the user.
   // The rendered focus (id + ghost for the engine) never steps: a seek, a guided/free switch or any jump in the wanted focus hands over from the last rendered one over the rejoin window (pose.ts blendFocus).
   // prefers-reduced-motion (read at mount and on change): flights and rejoins last REDUCED_MOTION_MS; the director's schedule already cuts its zoom.
-  const STILL_MS=150,FOCUS_JUMP=.25;let P:typeof import('../timeline/camera/pose')|null=null,viewOf:(id:string)=>Vec3|null=()=>null,boxDay:(id:string,cueDay:number)=>number=(_,d)=>d;
+  const STILL_MS=150,FOCUS_JUMP=.12;let P:typeof import('../timeline/camera/pose')|null=null,viewOf:(id:string)=>Vec3|null=()=>null,boxDay:(id:string,cueDay:number)=>number=(_,d)=>d;
   const motion=timelineOn&&typeof matchMedia==='function'?matchMedia('(prefers-reduced-motion: reduce)'):null;let reduced=!!motion?.matches;const onMotion=()=>{reduced=!!motion?.matches;};motion?.addEventListener?.('change',onMotion);
   const flyMs=()=>reduced?P!.REDUCED_MOTION_MS:P!.ISOLATE_FLY_MS,rejoinMs=()=>reduced?P!.REDUCED_MOTION_MS:P!.REJOIN_MS;
   if(timelineOn)Promise.all([import('../timeline/camera/pose'),import('../timeline/issues')]).then(([m,issues])=>{if(disposed)return;P=m;viewOf=id=>issues.scriptFor(id)?.view??null;const end=m.dayOfDate(todayISO());boxDay=(id,d)=>m.stopBoxDay(id,d,issues.scriptFor,end);lastPose=null;dirty=true;
@@ -196,7 +196,8 @@ export default function AnatomyScene({atlas,state,onProgress,onError,issues,sele
   const flyStep=(now:number)=>{const f=tflight!,k=(now-f.t0)/f.ms,to=f.to();if(k>=1){tflight=null;setPose(to);f.end?.();}else setPose(P!.lerpPose(f.from,to,P!.smootherstep(0,1,k)));};
   /** The focus to render this frame: `want`, unless a handover is running (started by `restart` or by a jump in `want`), then the blend from the focus rendered when it began. */
   const focusOut=(want:TFocus|null,now:number,restart:boolean):TFocus|null=>{
-   const M=P!;if(restart||M.focusGap(lastWant,want)>FOCUS_JUMP)fblend={t0:now,from:lastFocus};lastWant=want;
+   // Restart the handover on a seek, on any change of the wanted id while something is still ghosted (so a blend never switches branches mid-way), or on a same-id jump bigger than a frame's worth of ramp when no blend is running.
+   const M=P!,idChanged=(lastWant?.id??null)!==(want?.id??null);if(restart||idChanged&&(lastFocus?.ghost??0)>0||!fblend&&M.focusGap(lastWant,want)>FOCUS_JUMP)fblend={t0:now,from:lastFocus};lastWant=want;
    if(fblend){const k=(now-fblend.t0)/rejoinMs();if(k<1)return M.blendFocus(fblend.from,want,k);fblend=null;}
    return want;
   };
