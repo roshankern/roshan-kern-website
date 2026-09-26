@@ -19,7 +19,12 @@ import {FX_ROWS,createFxTexture,mergeFx,writeFx,applyFxPoint,identityFx,type Res
 import {FX_PARS,FX_APPLY} from './fx/part-fx-glsl';
 import {BIRTH_DATE} from '../health/types';
 
-export interface EngineFrame {date:string;visible:SystemId[];isolate:string|null;now:number}
+export interface EngineFrame {date:string;visible:SystemId[];isolate:string|null;now:number;
+	/** v2: fractional days since BIRTH_DATE; when present it wins over `date` for issue fx days (smooth sub-day animation). Growth still follows `date`. */
+	day?:number;
+	/** v2: guided or manual focus: the script shown solid and how far everything else fades toward GHOST_ALPHA. Rendering uses this instead of `isolate` once Task 3 lands; null/absent = nothing focused. */
+	focus?:{id:string;ghost:number}|null;
+}
 export interface Engine {
 	patchMaterial(m:T.Material,opts:{partFx:boolean;soft:boolean}):void;
 	/** Per-vertex attributes to add to each part geometry before merging (segment weights). */
@@ -35,6 +40,8 @@ export interface Engine {
 	finishSettle():number;
 	/** Warped union box of an issue's parts and layer, for Isolate; null before ready() (an Isolate made then flies once ready). */
 	isolateBox(id:string):T.Box3|null;
+	/** v2: warped union box of a script's parts and layer at fractional day `day` (since BIRTH_DATE), from rest bounds with that day's body (no settle needed); null before ready(). */
+	focusBox(id:string,day:number):T.Box3|null;
 	/** Default pivot of atlas part `i`: its rest bounds centre, from the decoded vertices once ready() has them (atlas.json bounds are corrupt for a few parts, e.g. Right cornea), else from atlas bounds. */
 	restCenter(i:number):Vec3;
 	/** Performance fallback state: tier 0 normal, 1 pixel ratio 1, 2 also throttled date applies; lowRes = the engine set pixel ratio 1 (the scene keeps 1 on resize); applies = date recomputes so far. */
@@ -224,6 +231,8 @@ export function createEngine(o:{atlas:Atlas;scene:T.Scene;bounds:T.Box3[];rig:Ri
 
 	return {
 		patchMaterial,segAttribute,isolateBox,
+		// Task 0 stub: the current-date isolate box; Task 3 implements the day-specific warp.
+		focusBox:(id:string,_day:number)=>isolateBox(id),
 		partVisible:i=>fx.data[i*4],restCenter,stats:()=>({tier:perf.tier,lowRes:perf.lowRes,applies:perf.applies}),
 		ready(p){
 			isReady=true;pickers=p;rest=p.map(m=>(m?.geometry.getAttribute('position').array as Float32Array|undefined)?.slice());

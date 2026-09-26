@@ -80,8 +80,10 @@ export interface CustomLayer {
 export interface LayerFrame {
 	/** Visibility of each system (the switches), or for isolate, whether this script is isolated. */
 	systemVisible:(s:SystemId)=>boolean;
-	/** True when some script is isolated and it isn't this one: hide everything. */
+	/** True when some script is isolated and it isn't this one: hide everything. @deprecated v2: replaced by `ghost` (Task 3 removes it). */
 	hiddenByIsolate:boolean;
+	/** v2: 0..1, how far this layer fades toward GHOST_ALPHA (director/types.ts) because another script is focused; 0 when this script is focused or nothing is. Layers scale their opacity by mix(1, GHOST_ALPHA, ghost) instead of hiding. Optional until Task 3 makes the engine always set it. */
+	ghost?:number;
 	/** True when this script is the one isolated. */
 	isolated:boolean;
 	now:number;
@@ -115,8 +117,14 @@ export interface IssueScript {
 	chronic?:boolean;
 	/** Stylized rather than literal anatomy: shown with an "Illustrative" tag. */
 	illustrative?:boolean;
-	/** Timeline stretch, as day ranges relative to onset, with `k` = how many times the natural width. */
+	/** Timeline stretch, as day ranges relative to onset, with `k` = how many times the natural width. v1 pacing only (the v2 director ignores it). */
 	acute?:{from:number;to:number;k:number}[];
+	/** v2 director: days since onset (fractional) of the issue's peak visible state, where guided playback holds. Inside the active window, with non-empty fx (or the layer showing) there. Required once Task 2 has filled every catalog. */
+	climax?:number;
+	/** v2 director: days of lead-in the approach leg covers, so the onset animation plays slowly in focus. Default min(30, climax + lead). */
+	approachDays?:number;
+	/** v2 director: unit direction from the focus target to the camera for this stop. Default: the default view's direction. */
+	view?:Vec3;
 	/** Effects at `day` days since onset (fractional; may be negative or past resolve: return [] when there is nothing to show). Must be a pure function of (day, ctx). */
 	fxAt(day:number,ctx:FxContext):PartFx[];
 	/** Optional custom geometry. It may also return PartFx from fxAt to hide parts it replaces. */
