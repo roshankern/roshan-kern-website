@@ -3,7 +3,8 @@ import type { Metadata } from "next";
 import { CaptureFrame, CompareSlider } from "./compare-slider";
 import { LatticeHero } from "./lattice";
 import { PortraitLattice } from "./portrait-lattice";
-import { ContactDetails } from "./contact-details";
+// Only the hidden contact section below uses this.
+// import { ContactDetails } from "./contact-details";
 
 /**
  * Share card. Without this the page falls back to the root layout's metadata,
@@ -121,6 +122,9 @@ const SECTIONS: ReadonlyArray<{
 			</div>
 		),
 	},
+	// Preorders and contact are hidden for now but kept for later. To bring them
+	// back, uncomment both entries and the ContactDetails import at the top.
+	/*
 	{
 		id: "invite-only-preorders",
 		heading: "Invite-only preorders",
@@ -150,6 +154,7 @@ const SECTIONS: ReadonlyArray<{
 			/>
 		),
 	},
+	*/
 ];
 
 /** The closing note, set under the portrait it belongs to. */
