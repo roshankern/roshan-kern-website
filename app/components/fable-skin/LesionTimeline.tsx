@@ -59,19 +59,19 @@ export default function LesionTimeline({
           border-radius: 999px;
           background: linear-gradient(
             to right,
-            rgba(255,255,255,0.75) var(--lt-progress),
-            rgba(255,255,255,0.18) var(--lt-progress)
+            rgba(0,0,0,0.75) var(--lt-progress),
+            rgba(0,0,0,0.18) var(--lt-progress)
           );
         }
         .lt-range::-moz-range-track {
           height: 3px;
           border-radius: 999px;
-          background: rgba(255,255,255,0.18);
+          background: rgba(0,0,0,0.18);
         }
         .lt-range::-moz-range-progress {
           height: 3px;
           border-radius: 999px;
-          background: rgba(255,255,255,0.75);
+          background: rgba(0,0,0,0.75);
         }
         .lt-range::-webkit-slider-thumb {
           -webkit-appearance: none;
@@ -80,21 +80,21 @@ export default function LesionTimeline({
           height: 18px;
           margin-top: -7.5px;
           border-radius: 999px;
-          background: rgba(255,255,255,0.92);
-          border: 1px solid rgba(255,255,255,0.9);
-          box-shadow: 0 0 14px rgba(255,255,255,0.45);
+          background: rgba(0,0,0,0.92);
+          border: 1px solid rgba(0,0,0,0.9);
+          box-shadow: 0 1px 4px rgba(0,0,0,0.25);
           transition: box-shadow 200ms ease;
         }
         .lt-range::-moz-range-thumb {
           width: 18px;
           height: 18px;
           border-radius: 999px;
-          background: rgba(255,255,255,0.92);
-          border: 1px solid rgba(255,255,255,0.9);
-          box-shadow: 0 0 14px rgba(255,255,255,0.45);
+          background: rgba(0,0,0,0.92);
+          border: 1px solid rgba(0,0,0,0.9);
+          box-shadow: 0 1px 4px rgba(0,0,0,0.25);
         }
         .lt-range:focus-visible::-webkit-slider-thumb {
-          box-shadow: 0 0 0 4px rgba(255,255,255,0.25);
+          box-shadow: 0 0 0 4px rgba(0,0,0,0.25);
         }
       `}</style>
 
@@ -104,7 +104,7 @@ export default function LesionTimeline({
           type="button"
           onClick={onPlayToggle}
           aria-label={playing ? "Pause the lesion timeline" : "Play the lesion timeline"}
-          className="shrink-0 w-9 h-9 rounded-full border border-white/20 bg-white/5 hover:bg-white/20 hover:border-white/40 text-white/80 hover:text-white transition-all duration-200 flex items-center justify-center"
+          className="shrink-0 w-9 h-9 rounded-full border border-black/10 bg-black/[0.02] hover:bg-black/[0.06] hover:border-black/25 text-black/80 hover:text-black transition-all duration-200 flex items-center justify-center"
         >
           {playing ? (
             <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
@@ -118,7 +118,7 @@ export default function LesionTimeline({
           )}
         </button>
 
-        <span className="text-2xl font-semibold text-white tabular-nums">
+        <span className="text-2xl font-semibold text-black tabular-nums">
           Day {dayLabel}
         </span>
       </div>
@@ -147,7 +147,7 @@ export default function LesionTimeline({
             type="button"
             onClick={() => onChange(d)}
             className={`absolute -translate-x-1/2 text-[11px] tabular-nums leading-none transition-colors duration-200 ${
-              d === dayLabel ? "text-white" : "text-white/35 hover:text-white/70"
+              d === dayLabel ? "text-black" : "text-black/35 hover:text-black/70"
             }`}
             style={{ left: `calc(9px + ${fracOf(d) * 100}% - ${18 * fracOf(d)}px)` }}
           >

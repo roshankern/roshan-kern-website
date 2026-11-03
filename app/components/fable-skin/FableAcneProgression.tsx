@@ -53,7 +53,7 @@ const ICON = {
 };
 
 const VIEW_BUTTON =
-  "w-9 h-9 rounded-full border border-white/20 bg-white/5 hover:bg-white/20 hover:border-white/40 text-white/80 hover:text-white transition-all duration-200 flex items-center justify-center";
+  "w-9 h-9 rounded-full border border-black/10 bg-black/[0.02] hover:bg-black/[0.06] hover:border-black/25 text-black/80 hover:text-black transition-all duration-200 flex items-center justify-center";
 
 export default function FableAcneProgression() {
   const [day, setDay] = useState(START_DAY);
@@ -187,7 +187,7 @@ export default function FableAcneProgression() {
     <div className="w-full max-w-3xl mx-auto mb-5">
       <div
         ref={cardRef}
-        className="rounded-2xl border border-white/20 bg-white/10 backdrop-blur-md overflow-hidden"
+        className="rounded-2xl border border-black/10 bg-black/[0.04] backdrop-blur-md overflow-hidden"
       >
         <div className="relative aspect-[4/3] bg-black">
           <SkinScene

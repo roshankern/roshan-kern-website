@@ -116,8 +116,8 @@ function axisValue(scores: ScoreMap, group: GroupKey): number {
 const axisTriple = (scores: ScoreMap) =>
   GROUPS.map((g) => axisValue(scores, g.key)) as [number, number, number];
 
-/** Evenly spaced soft pastel hues — one system, and always paired with a text label. */
-export const techColor = (index: number) => `hsl(${(index * 36) % 360}, 60%, 72%)`;
+/** Evenly spaced hues, deep enough to read on white — one system, and always paired with a text label. */
+export const techColor = (index: number) => `hsl(${(index * 36) % 360}, 60%, 58%)`;
 
 export type ScoreMap = Record<string, { value: number; note: string }>;
 

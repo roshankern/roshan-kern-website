@@ -129,7 +129,7 @@ export default function MindStateMatrix({ year }: { year: number }) {
                 x={mid}
                 y={20}
                 textAnchor="middle"
-                fill="rgba(255,255,255,0.55)"
+                fill="rgba(0,0,0,0.55)"
                 fontSize={11}
                 letterSpacing={1.4}
               >
@@ -140,7 +140,7 @@ export default function MindStateMatrix({ year }: { year: number }) {
                 x2={x2}
                 y1={30}
                 y2={30}
-                stroke="rgba(255,255,255,0.25)"
+                stroke="rgba(0,0,0,0.25)"
                 strokeWidth={1.5}
               />
             </g>
@@ -154,8 +154,8 @@ export default function MindStateMatrix({ year }: { year: number }) {
                 textAnchor="start"
                 fill={
                   litDim === dim.key
-                    ? "rgba(255,255,255,0.95)"
-                    : "rgba(255,255,255,0.55)"
+                    ? "rgba(0,0,0,0.95)"
+                    : "rgba(0,0,0,0.55)"
                 }
                 fontSize={12}
                 style={{ pointerEvents: "none" }}
@@ -192,8 +192,8 @@ export default function MindStateMatrix({ year }: { year: number }) {
                 textAnchor="end"
                 fill={
                   litTech === tech.id
-                    ? "rgba(255,255,255,0.95)"
-                    : "rgba(255,255,255,0.6)"
+                    ? "rgba(0,0,0,0.95)"
+                    : "rgba(0,0,0,0.6)"
                 }
                 fontSize={12}
                 style={{ pointerEvents: "none" }}
@@ -232,7 +232,7 @@ export default function MindStateMatrix({ year }: { year: number }) {
                     fillOpacity={
                       inLit ? 0.95 : anyLit ? 0.42 : CELL_ALPHA
                     }
-                    stroke={isActive ? "rgba(255,255,255,0.85)" : "none"}
+                    stroke={isActive ? "rgba(0,0,0,0.85)" : "none"}
                     strokeWidth={1.5}
                     style={{
                       transition:
@@ -301,16 +301,16 @@ export default function MindStateMatrix({ year }: { year: number }) {
       {/* Legend — centred, with the ramp's meaning captioned beneath it */}
       <div className="flex flex-col items-center mt-5">
         <div className="flex items-center gap-3">
-          <span className="text-xs text-white/40 tabular-nums">1</span>
+          <span className="text-xs text-black/40 tabular-nums">1</span>
           <div
             className="h-2 w-[220px] rounded-full"
             style={{
               background: `linear-gradient(90deg, ${rampColor(1, CELL_ALPHA)}, ${rampColor(5.5, CELL_ALPHA)}, ${rampColor(10, CELL_ALPHA)})`,
             }}
           />
-          <span className="text-xs text-white/40 tabular-nums">10</span>
+          <span className="text-xs text-black/40 tabular-nums">10</span>
         </div>
-        <span className="text-xs text-white/40 mt-2">
+        <span className="text-xs text-black/40 mt-2">
           red is weak, blue is strong
         </span>
       </div>
@@ -319,37 +319,37 @@ export default function MindStateMatrix({ year }: { year: number }) {
           Every row is a fixed number of 24px lines (one, one, two) and the block
           is a fixed 104px tall, so hovering never changes the figure's height.
           Overlong text clips rather than reflowing. */}
-      <div className="mt-5 border-t border-white/15 pt-5">
+      <div className="mt-5 border-t border-black/10 pt-5">
         {activeTech && activeDim && activeValue !== null ? (
           <div className="flex flex-col gap-1 h-[104px] text-sm leading-6">
             <div className="flex items-baseline gap-x-3 h-6">
-              <span className="text-white font-semibold whitespace-nowrap">
+              <span className="text-black font-semibold whitespace-nowrap">
                 {activeDim.label}
               </span>
-              <span className="text-white/40">·</span>
-              <span className="text-white/90 truncate">
+              <span className="text-black/40">·</span>
+              <span className="text-black/90 truncate">
                 {activeDim.definition}
               </span>
             </div>
 
             <div className="flex items-baseline gap-x-3 h-6">
-              <span className="text-white font-semibold whitespace-nowrap">
+              <span className="text-black font-semibold whitespace-nowrap">
                 {activeTech.name}
               </span>
-              <span className="text-white/40">·</span>
-              <span className="text-white/90 tabular-nums whitespace-nowrap">
+              <span className="text-black/40">·</span>
+              <span className="text-black/90 tabular-nums whitespace-nowrap">
                 {activeValue}/10
               </span>
             </div>
 
             <div className="flex items-baseline gap-x-3 h-12">
-              <span className="text-white font-semibold whitespace-nowrap">
+              <span className="text-black font-semibold whitespace-nowrap">
                 Reasoning
               </span>
-              <span className="text-white/40">·</span>
+              <span className="text-black/40">·</span>
               {/* In 2026 the source document's own rationale is the better
                   answer; only past it does the forecast driver apply. */}
-              <span className="text-white/90 line-clamp-2">
+              <span className="text-black/90 line-clamp-2">
                 {year === BASE_YEAR
                   ? activeTech.scores[activeDim.key].note
                   : driverFor(activeTech.id, activeDim.key)}
@@ -358,7 +358,7 @@ export default function MindStateMatrix({ year }: { year: number }) {
           </div>
         ) : (
           <div className="h-[104px] text-sm leading-6">
-            <p className="text-white/40 line-clamp-2">
+            <p className="text-black/40 line-clamp-2">
               Tap or hover a cell for what drives that score over the decade.
               Hover a row or column label to isolate one technology or one
               dimension.

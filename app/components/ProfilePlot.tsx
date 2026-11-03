@@ -67,8 +67,8 @@ export default function ProfilePlot() {
 
   return (
     <div className="w-full max-w-5xl mb-5">
-      <div className="rounded-2xl border border-white/20 bg-white/10 backdrop-blur-md p-6 sm:p-8">
-        <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-1 text-sm text-white/60 mb-2">
+      <div className="rounded-2xl border border-black/10 bg-black/[0.04] backdrop-blur-md p-6 sm:p-8">
+        <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-1 text-sm text-black/60 mb-2">
           {AXIS_KEY.map(({ d, label }) => (
             <span key={label} className="inline-flex items-center gap-1.5">
               <Arrow d={d} />
@@ -77,7 +77,7 @@ export default function ProfilePlot() {
           ))}
         </div>
 
-        <div className="mb-6 flex items-center justify-center gap-6 text-sm text-white/60">
+        <div className="mb-6 flex items-center justify-center gap-6 text-sm text-black/60">
           <span className="inline-flex items-center gap-2">
             <span className="h-3 w-6 rounded-sm bg-black" />
             {BASE_YEAR}
@@ -101,7 +101,7 @@ export default function ProfilePlot() {
                     spokes to the centre: extra interior lines read as a cube
                     corner rather than a flat chart. */}
                 <polygon points={path([10, 10, 10])} fill="none"
-                  stroke="rgba(255,255,255,0.28)" strokeWidth={0.8} />
+                  stroke="rgba(0,0,0,0.28)" strokeWidth={0.8} />
 
                 {/* 2036 first, so the opaque present sits on top of the
                     projected envelope. Every family average grows, so the outer
@@ -110,7 +110,7 @@ export default function ProfilePlot() {
                 <polygon points={path(then)} fill={color} fillOpacity={0.2} />
                 <polygon points={path(now)} fill={color} />
               </svg>
-              <p className="mt-1 text-center text-xs text-white/70 leading-tight">
+              <p className="mt-1 text-center text-xs text-black/70 leading-tight">
                 {tech.shortName}
               </p>
             </div>

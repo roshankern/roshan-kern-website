@@ -35,7 +35,7 @@ export default function MindStateFigure({
   return (
     <div className="w-full max-w-5xl mb-5">
       {/* One pane: the matrix and the timeline that drives it are one figure. */}
-      <div className="rounded-2xl border border-white/20 bg-white/10 backdrop-blur-md p-6 sm:p-8">
+      <div className="rounded-2xl border border-black/10 bg-black/[0.04] backdrop-blur-md p-6 sm:p-8">
         <MindStateMatrix year={year} />
         <TimelineSlider
           year={year}

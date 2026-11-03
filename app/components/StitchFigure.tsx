@@ -9,10 +9,10 @@ import { Head } from "./ApproachesFigure";
  */
 
 const SVG = "w-full h-auto";
-const LINE = { stroke: "white", strokeOpacity: 0.3, strokeWidth: 1, fill: "none" };
+const LINE = { stroke: "black", strokeOpacity: 0.3, strokeWidth: 1, fill: "none" };
 const DASH = { ...LINE, strokeDasharray: "4 4", strokeOpacity: 0.22 };
-const MAP = { fill: "white", fillOpacity: 0.06, stroke: "white", strokeOpacity: 0.3, strokeWidth: 1.2 };
-const CAPTION = { textAnchor: "middle" as const, fill: "white", fillOpacity: 0.35, fontSize: 11, letterSpacing: 1.5 };
+const MAP = { fill: "black", fillOpacity: 0.06, stroke: "black", strokeOpacity: 0.3, strokeWidth: 1.2 };
+const CAPTION = { textAnchor: "middle" as const, fill: "black", fillOpacity: 0.35, fontSize: 11, letterSpacing: 1.5 };
 
 /** The unwrapped face map, drawn at whatever size a panel needs. */
 function CanonMap({ x, y, w, h, cells }: { x: number; y: number; w: number; h: number; cells: number[] }) {
@@ -28,9 +28,9 @@ function CanonMap({ x, y, w, h, cells }: { x: number; y: number; w: number; h: n
           y={y + Math.floor(i / 4) * ch}
           width={cw}
           height={ch}
-          fill="white"
+          fill="black"
           fillOpacity="0.16"
-          stroke="white"
+          stroke="black"
           strokeOpacity="0.4"
           strokeWidth="1"
         />
@@ -62,7 +62,7 @@ function Sweep() {
       {/* A few tiles, drawn overlapping, because the overlap is the point. */}
       {[[160, 96], [196, 96], [232, 96], [178, 132], [214, 132]].map(([tx, ty], i) => (
         <rect key={i} x={tx} y={ty} width="44" height="36" rx="2"
-          fill="white" fillOpacity="0.07" stroke="white" strokeOpacity="0.35" strokeWidth="1" />
+          fill="black" fillOpacity="0.07" stroke="black" strokeOpacity="0.35" strokeWidth="1" />
       ))}
       <text x="200" y="278" {...CAPTION}>SWEEP</text>
     </svg>
@@ -103,13 +103,13 @@ const FOLLICLES: [number, number][] = [
 function Tile({ cx, cy, label, plugged }: { cx: number; cy: number; label: string; plugged: number[] }) {
   return (
     <g>
-      <circle cx={cx} cy={cy} r="45" fill="white" fillOpacity="0.07" stroke="white" strokeOpacity="0.35" strokeWidth="1.2" />
+      <circle cx={cx} cy={cy} r="45" fill="black" fillOpacity="0.07" stroke="black" strokeOpacity="0.35" strokeWidth="1.2" />
       {FOLLICLES.map(([dx, dy], i) => {
         const on = plugged.includes(i);
         return (
           <circle key={i} cx={cx + dx} cy={cy + dy} r={on ? 5 : 3.2}
-            fill="white" fillOpacity={on ? 0.4 : 0.12}
-            stroke="white" strokeOpacity={on ? 0.55 : 0.3} strokeWidth="0.8" />
+            fill="black" fillOpacity={on ? 0.4 : 0.12}
+            stroke="black" strokeOpacity={on ? 0.55 : 0.3} strokeWidth="0.8" />
         );
       })}
       <text x={cx} y={cy + 66} {...CAPTION} fontSize="10">{label}</text>
@@ -160,11 +160,11 @@ export default function StitchFigure() {
     <div className="w-full max-w-5xl mb-5">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {STEPS.map((s) => (
-          <div key={s.n} className="flex flex-col rounded-2xl border border-white/20 bg-white/[0.07] backdrop-blur-md p-5">
-            <div className="rounded-xl border border-white/10 bg-black/20 p-2 mb-4">{s.viz}</div>
-            <div className="text-[11px] tracking-widest text-white/40 mb-1">STEP {s.n}</div>
-            <h4 className="text-white font-semibold leading-snug mb-2">{s.title}</h4>
-            <p className="text-sm text-white/60 leading-relaxed">{s.body}</p>
+          <div key={s.n} className="flex flex-col rounded-2xl border border-black/10 bg-black/[0.07] backdrop-blur-md p-5">
+            <div className="rounded-xl border border-black/5 bg-black/[0.03] p-2 mb-4">{s.viz}</div>
+            <div className="text-[11px] tracking-widest text-black/40 mb-1">STEP {s.n}</div>
+            <h4 className="text-black font-semibold leading-snug mb-2">{s.title}</h4>
+            <p className="text-sm text-black/60 leading-relaxed">{s.body}</p>
           </div>
         ))}
       </div>

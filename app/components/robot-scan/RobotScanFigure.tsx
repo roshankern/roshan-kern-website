@@ -238,7 +238,7 @@ export default function RobotScanFigure() {
       <div className="pointer-events-none absolute bottom-5 right-5 text-center text-[10px] tabular-nums text-white/70" title="Physical distance at the centre of the orbit"><div>{scale.mm} mm</div><div style={{ width: scale.px, height: 6 }} className="mt-1 border-x border-b border-white/60" /></div>
       <div className={`pointer-events-none absolute bottom-14 left-0 right-0 text-center text-[11px] text-white/45 transition-opacity duration-700 ${hint ? "opacity-100" : "opacity-0"}`}>Drag to orbit · pinch or + / − to zoom</div>
     </div>
-    <figcaption className="!mt-3 flex flex-wrap justify-between gap-2 text-xs text-white/40"><span>Robot, optics, and subject at physical scale.</span><span>Scale measured at the orbit centre.</span></figcaption>
-    <p className="mt-2 text-[11px] text-white/35">Head scan: <a href="https://www.triplegangers.com/" className="underline">Infinite, by Lee Perry-Smith</a> · <a href="https://creativecommons.org/licenses/by/3.0/" className="underline">CC BY 3.0</a> · via <a href="https://github.com/mrdoob/three.js/tree/dev/examples/models/gltf/LeePerrySmith" className="underline">Three.js</a>.</p>
+    <figcaption className="!mt-3 flex flex-wrap justify-between gap-2 text-xs text-black/40"><span>Robot, optics, and subject at physical scale.</span><span>Scale measured at the orbit centre.</span></figcaption>
+    <p className="mt-2 text-[11px] text-black/35">Head scan: <a href="https://www.triplegangers.com/" className="underline">Infinite, by Lee Perry-Smith</a> · <a href="https://creativecommons.org/licenses/by/3.0/" className="underline">CC BY 3.0</a> · via <a href="https://github.com/mrdoob/three.js/tree/dev/examples/models/gltf/LeePerrySmith" className="underline">Three.js</a>.</p>
   </figure>;
 }

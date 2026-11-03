@@ -1,15 +1,14 @@
-/**
- * Shared shell for the index and every post. The backdrop is rendered by the
- * children, since each chooses its own scrim.
- */
+import { figtree } from "../fonts";
+
+/** Shared shell for the index and every post: the home page's black on white, in Figtree. */
 export default function WritingLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[#0b1416]">
-      <main className="relative z-10 flex flex-col items-center px-6 py-16">
+    <div className={`${figtree.className} min-h-screen bg-white text-black`}>
+      <main className="flex flex-col items-center px-6 py-16 sm:py-24">
         {children}
       </main>
     </div>
