@@ -35,6 +35,23 @@ export const SECTIONS: Section[] = [
     title: "Projects",
     items: [
       {
+        title: "Prior-Weighted Partner Average (PWPA)",
+        date: "2026",
+        summary: "Predicts the transcriptional response to an unmeasured gene knockdown from the knockdowns measured in the same cell context.",
+        details: [
+          "Weighs gene-gene priors from many different datasets (gene networks, protein embeddings, CRISPR screens).",
+          "Beats [PIE](https://doi.org/10.64898/2026.10.02.756297) (SOTA) on PIE's benchmark (AUPRC 0.325 vs 0.304), with less compute ($0.03 vs $6.43), and is much more interpretable.",
+          "Engineered with an autonomous, LLM-driven lab loop of ~580 experiment runs.",
+        ],
+        links: [{ label: "GitHub", href: "https://github.com/roshankern/prior_weighted_partner_average" }],
+        image: {
+          src: "/projects/pwpa.png",
+          alt: "PWPA overview: priors selected by recursive feature elimination, gates fitted on a weighted partner average, and PWPA against the models in PIE's paper on six metrics",
+          width: 2431,
+          height: 3151,
+        },
+      },
+      {
         title: "Brieflow",
         date: "2025",
         summary: "Open-source, extensible pipeline for processing optical pooled screen data.",
@@ -45,6 +62,7 @@ export const SECTIONS: Section[] = [
         links: [
           { label: "GitHub", href: "https://github.com/cheeseman-lab/brieflow" },
           { label: "Anthropic", href: "https://anthropic.com/news/accelerating-scientific-research" },
+          { label: "Paper", href: "https://doi.org/10.1038/s41467-026-73643-7" },
         ],
         image: {
           src: "/projects/brieflow.png",
@@ -57,7 +75,10 @@ export const SECTIONS: Section[] = [
         title: "Pycytominer",
         date: "2025",
         summary: "Open-source functions for processing high-dimensional readouts from cell experiments.",
-        links: [{ label: "GitHub", href: "https://github.com/cytomining/pycytominer" }],
+        links: [
+          { label: "GitHub", href: "https://github.com/cytomining/pycytominer" },
+          { label: "Paper", href: "https://doi.org/10.1038/s41592-025-02611-8" },
+        ],
         image: {
           src: "/projects/pycytominer.png",
           alt: "Pycytominer overview: image analysis to image-based profiles, then aggregation, normalization, feature selection and batch correction",

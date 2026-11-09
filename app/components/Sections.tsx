@@ -28,6 +28,21 @@ function Chevron({ className = "" }: { className?: string }) {
   );
 }
 
+/** A detail line, with each markdown-style [text](url) in it as a link. */
+function withLinks(text: string) {
+  // split with a capturing regex: text, label, url, text, label, url, ..., text
+  const parts = text.split(/\[([^\]]+)\]\(([^)]+)\)/);
+  return parts.map((p, k) =>
+    k % 3 === 1 ? (
+      <a key={k} href={parts[k + 1]} target="_blank" rel="noopener noreferrer" className="text-black underline decoration-black/25 underline-offset-4 hover:decoration-black">
+        {p}
+      </a>
+    ) : k % 3 === 2 ? null : (
+      p
+    ),
+  );
+}
+
 /** One item: `row` is always shown; the chevron in it opens the details below. */
 function Entry({ item, row }: { item: Item; row: ReactNode }) {
   if (!canExpand(item)) return <div>{row}</div>;
@@ -35,7 +50,7 @@ function Entry({ item, row }: { item: Item; row: ReactNode }) {
     <details className="group">
       <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">{row}</summary>
       <div className="mt-2 space-y-1.5 text-sm leading-relaxed text-black/55">
-        {item.details?.map((d) => <p key={d}>{d}</p>)}
+        {item.details?.map((d) => <p key={d}>{withLinks(d)}</p>)}
         {item.links && (
           <p className="flex gap-4">
             {item.links.map((l) => (
